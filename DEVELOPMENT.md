@@ -2,15 +2,15 @@
 
 ## Status Overview
 
-**Last Updated**: 2026-03-25
+**Last Updated**: 2026-04-22
 **Current Phase**: Phase 1 — Foundation
-**Next Task**: Phase 1 tasks
+**Next Task**: 1.2 — Test harness (already complete, combined with 1.1)
 
 ### Phase Summary
 
 | Phase | Name | Status | Tests | Notes |
 |---|---|---|---|---|
-| 1 | Foundation | NOT STARTED | — | Build system, test harness, compat, static tables |
+| 1 | Foundation | IN PROGRESS | — | Build system, test harness, compat, static tables |
 | 2 | Frame Parser | NOT STARTED | — | Receive state machine, all 10 frame types, hive_frame_bare.c |
 | 3 | HPACK | NOT STARTED | — | Encoder, decoder, Huffman, standalone API |
 | 4 | Session Core | NOT STARTED | — | Minimal send queue, session struct, stream table, SETTINGS, preface |
@@ -24,7 +24,7 @@
 
 | ID | Milestone | Status |
 |---|---|---|
-| M1 | Build system works on Linux and OpenBSD | NOT STARTED |
+| M1 | Build system works on Linux and OpenBSD | DONE |
 | M2 | All unit tests pass on Linux | NOT STARTED |
 | M3 | All unit tests pass on OpenBSD | NOT STARTED |
 | M4 | Valgrind clean on Linux | NOT STARTED |
@@ -101,27 +101,25 @@ compiles clean with zero warnings.
 
 ### Tasks
 
-**1.1 — Repository skeleton**
+**1.1 — Repository skeleton** ✓ DONE
 - Create directory structure per REPOSITORY_STRUCTURE.md §1:
   `src/`, `include/`, `tests/`, `tools/`
 - Create `include/hive.h` with skeleton (include guards, system includes,
   empty typedefs as forward declarations — no function bodies yet)
 - Create `src/hive_internal.h` (internal shared types, forward declarations)
 - Create top-level `Makefile` with stubs for all targets and working
-  platform detection (`$(shell uname)`)
+  platform detection (`!=` shell assignment, BSD/GNU portable)
 - Create `.clang-format` (KNF-based, per TECH_STACK.md §7.6)
 - Create `.clang-tidy` (per TECH_STACK.md §7.4)
 - Verify `make dev` and `make release` compile a trivial `src/hive.c`
   with zero warnings on Linux and OpenBSD
 
-**1.2 — Test harness**
+**1.2 — Test harness** ✓ DONE (combined with 1.1)
 - Create `tests/test_harness.h` with the `RUN()` macro per TECH_STACK.md §6.1
 - Create `tests/run_tests.c` as the test binary entry point
 - Create `tests/run_tests.sh` — runs the binary, fails on non-zero exit
-- `make test` must run the empty test suite and print `0/0 tests passed`
-  with exit code 0
-- Confirm `make valgrind` runs the test binary under Valgrind and exits
-  clean on Linux
+- `make test` runs empty suite, prints `0/0 tests passed`, exits 0
+- `make valgrind` runs test binary under Valgrind, exits clean on Linux
 
 **1.3 — Platform compat layer**
 - Create `src/compat_str.c` and `src/compat_str.h`:

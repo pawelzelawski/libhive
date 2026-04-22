@@ -1,0 +1,82 @@
+# ------------------------------------------------------------------ #
+# Build artifacts                                                     #
+# ------------------------------------------------------------------ #
+
+# All intermediate and output build artifacts live under build/.
+build/
+
+# Top-level library copy (produced by make dev / make release).
+libhive.a
+
+# Conformance test server (built by make h2spec-server).
+tests/h2spec_server
+
+
+# ------------------------------------------------------------------ #
+# Compiler / analyser output                                         #
+# ------------------------------------------------------------------ #
+
+# clang-tidy
+*.yaml.fixes
+
+# cppcheck
+cppcheck-result.xml
+
+# Valgrind output (if redirected to a file)
+valgrind-*.log
+vgcore.*
+
+# ASan / UBSan symbolizer cache
+*.asan
+*.ubsan
+
+# ------------------------------------------------------------------ #
+# Editor and IDE                                                      #
+# ------------------------------------------------------------------ #
+
+# JetBrains (CLion / IntelliJ)
+.idea/
+cmake-build-*/
+*.iml
+
+# VS Code
+.vscode/
+
+# Vim / Neovim
+*.swp
+*.swo
+*~
+.*.swp
+
+# Emacs
+\#*\#
+.\#*
+*.elc
+
+# ctags / etags
+tags
+TAGS
+
+# ------------------------------------------------------------------ #
+# OS-specific                                                        #
+# ------------------------------------------------------------------ #
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux desktop
+.directory
+
+# ------------------------------------------------------------------ #
+# Temporary and debug files                                          #
+# ------------------------------------------------------------------ #
+
+*.tmp
+*.bak
+*.orig
+*.rej
+core
+core.*
+

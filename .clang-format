@@ -1,0 +1,27 @@
+BasedOnStyle: LLVM
+IndentWidth: 8
+UseTab: ForIndentation
+BreakBeforeBraces: Linux
+ColumnLimit: 80
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignOperands: true
+AlignTrailingComments: true
+BinPackArguments: false
+BinPackParameters: false
+ContinuationIndentWidth: 4
+IncludeBlocks: Preserve
+IndentCaseLabels: false
+PointerAlignment: Right
+SortIncludes: false
+SpaceAfterCStyleCast: false
+SpaceBeforeParens: ControlStatements
+SpaceInEmptyParentheses: false
+SpacesInCStyleCastParentheses: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+
