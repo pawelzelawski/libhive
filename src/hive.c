@@ -46,11 +46,11 @@ null_alloc_realloc(void *ptr, size_t size, void *ctx)
 }
 
 static const hive_mem_t null_allocator = {
-	null_alloc_malloc,
-	null_alloc_free,
-	null_alloc_calloc,
-	null_alloc_realloc,
-	NULL,
+    null_alloc_malloc,
+    null_alloc_free,
+    null_alloc_calloc,
+    null_alloc_realloc,
+    NULL,
 };
 
 /*
@@ -72,9 +72,9 @@ hive_options_free(hive_options_t *opt)
 
 hive_session_t *
 hive_session_server_new(const hive_mem_t *mem,
-    const hive_options_t *opt,
-    const hive_callbacks_t *callbacks,
-    void *user_data)
+                        const hive_options_t *opt,
+                        const hive_callbacks_t *callbacks,
+                        void *user_data)
 {
 	(void)mem;
 	(void)opt;
@@ -86,9 +86,9 @@ hive_session_server_new(const hive_mem_t *mem,
 
 hive_session_t *
 hive_session_client_new(const hive_mem_t *mem,
-    const hive_options_t *opt,
-    const hive_callbacks_t *callbacks,
-    void *user_data)
+                        const hive_options_t *opt,
+                        const hive_callbacks_t *callbacks,
+                        void *user_data)
 {
 	(void)mem;
 	(void)opt;
@@ -99,11 +99,11 @@ hive_session_client_new(const hive_mem_t *mem,
 
 hive_session_t *
 hive_session_server_upgrade(const hive_mem_t *mem,
-    const hive_options_t *opt,
-    const hive_callbacks_t *callbacks,
-    void *user_data,
-    const char *http2_settings_b64,
-    uint32_t upgraded_stream_id)
+                            const hive_options_t *opt,
+                            const hive_callbacks_t *callbacks,
+                            void *user_data,
+                            const char *http2_settings_b64,
+                            uint32_t upgraded_stream_id)
 {
 	(void)mem;
 	(void)opt;
@@ -152,9 +152,10 @@ hive_session_want_write(hive_session_t *session)
 
 int
 hive_submit_response(hive_session_t *session,
-    uint32_t stream_id,
-    const hive_nv_t *nva, size_t nvlen,
-    hive_data_source_t *data_source)
+                     uint32_t stream_id,
+                     const hive_nv_t *nva,
+                     size_t nvlen,
+                     hive_data_source_t *data_source)
 {
 	(void)session;
 	(void)stream_id;
@@ -166,8 +167,9 @@ hive_submit_response(hive_session_t *session,
 
 int
 hive_submit_trailers(hive_session_t *session,
-    uint32_t stream_id,
-    const hive_nv_t *nva, size_t nvlen)
+                     uint32_t stream_id,
+                     const hive_nv_t *nva,
+                     size_t nvlen)
 {
 	(void)session;
 	(void)stream_id;
@@ -178,8 +180,9 @@ hive_submit_trailers(hive_session_t *session,
 
 int
 hive_submit_interim_response(hive_session_t *session,
-    uint32_t stream_id,
-    const hive_nv_t *nva, size_t nvlen)
+                             uint32_t stream_id,
+                             const hive_nv_t *nva,
+                             size_t nvlen)
 {
 	(void)session;
 	(void)stream_id;
@@ -190,9 +193,10 @@ hive_submit_interim_response(hive_session_t *session,
 
 int
 hive_submit_push_promise(hive_session_t *session,
-    uint32_t stream_id,
-    const hive_nv_t *nva, size_t nvlen,
-    uint32_t *promised_stream_id_out)
+                         uint32_t stream_id,
+                         const hive_nv_t *nva,
+                         size_t nvlen,
+                         uint32_t *promised_stream_id_out)
 {
 	(void)session;
 	(void)stream_id;
@@ -204,9 +208,10 @@ hive_submit_push_promise(hive_session_t *session,
 
 int
 hive_submit_request(hive_session_t *session,
-    const hive_nv_t *nva, size_t nvlen,
-    hive_data_source_t *data_source,
-    uint32_t *stream_id_out)
+                    const hive_nv_t *nva,
+                    size_t nvlen,
+                    hive_data_source_t *data_source,
+                    uint32_t *stream_id_out)
 {
 	(void)session;
 	(void)nva;
@@ -218,7 +223,8 @@ hive_submit_request(hive_session_t *session,
 
 int
 hive_submit_rst_stream(hive_session_t *session,
-    uint32_t stream_id, uint32_t error_code)
+                       uint32_t stream_id,
+                       uint32_t error_code)
 {
 	(void)session;
 	(void)stream_id;
@@ -235,8 +241,9 @@ hive_submit_goaway_prepare(hive_session_t *session)
 
 int
 hive_submit_goaway_final(hive_session_t *session,
-    uint32_t error_code,
-    const uint8_t *debug_data, size_t debug_len)
+                         uint32_t error_code,
+                         const uint8_t *debug_data,
+                         size_t debug_len)
 {
 	(void)session;
 	(void)error_code;
@@ -263,8 +270,9 @@ hive_submit_ping_ack(hive_session_t *session, const uint8_t opaque[8])
 
 int
 hive_session_feed_upgrade_headers(hive_session_t *session,
-    uint32_t stream_id,
-    const hive_nv_t *nva, size_t nvlen)
+                                  uint32_t stream_id,
+                                  const hive_nv_t *nva,
+                                  size_t nvlen)
 {
 	(void)session;
 	(void)stream_id;
@@ -321,7 +329,8 @@ hive_stream_get_state(hive_session_t *session, uint32_t stream_id)
 
 int
 hive_stream_set_user_data(hive_session_t *session,
-    uint32_t stream_id, void *user_data)
+                          uint32_t stream_id,
+                          void *user_data)
 {
 	(void)session;
 	(void)stream_id;
@@ -441,8 +450,11 @@ hive_hpack_encoder_free(hive_hpack_encoder_t *enc)
 
 int
 hive_hpack_encode(hive_hpack_encoder_t *enc,
-    const hive_nv_t *nva, size_t nvlen,
-    uint8_t *out, size_t out_cap, size_t *out_len)
+                  const hive_nv_t *nva,
+                  size_t nvlen,
+                  uint8_t *out,
+                  size_t out_cap,
+                  size_t *out_len)
 {
 	(void)enc;
 	(void)nva;
@@ -469,9 +481,12 @@ hive_hpack_decoder_free(hive_hpack_decoder_t *dec)
 
 int
 hive_hpack_decode(hive_hpack_decoder_t *dec,
-    const uint8_t *data, size_t len,
-    int (*on_header)(hive_buf_t *name, hive_buf_t *value, void *ud),
-    void *user_data)
+                  const uint8_t *data,
+                  size_t len,
+                  int (*on_header)(hive_buf_t *name,
+                                   hive_buf_t *value,
+                                   void *ud),
+                  void *user_data)
 {
 	(void)dec;
 	(void)data;
@@ -480,4 +495,3 @@ hive_hpack_decode(hive_hpack_decoder_t *dec,
 	(void)user_data;
 	return HIVE_ERR_SESSION_CLOSED;
 }
-

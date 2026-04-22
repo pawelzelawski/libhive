@@ -4,13 +4,14 @@
 
 **Last Updated**: 2026-04-22
 **Current Phase**: Phase 1 — Foundation
-**Next Task**: 1.4 — HPACK static table and Huffman tables
+**Next Task**: 1.5 — `_Static_assert` placeholders (already in place; real
+assertions activate in Phase 2 as structs land)
 
 ### Phase Summary
 
 | Phase | Name | Status | Tests | Notes |
 |---|---|---|---|---|
-| 1 | Foundation | IN PROGRESS | — | Build system, test harness, compat, static tables |
+| 1 | Foundation | IN PROGRESS | 16/16 (Phase 1 slice) | Tasks 1.1–1.4 done on Linux + OpenBSD; 1.5 is placeholders only |
 | 2 | Frame Parser | NOT STARTED | — | Receive state machine, all 10 frame types, hive_frame_bare.c |
 | 3 | HPACK | NOT STARTED | — | Encoder, decoder, Huffman, standalone API |
 | 4 | Session Core | NOT STARTED | — | Minimal send queue, session struct, stream table, SETTINGS, preface |
@@ -168,13 +169,14 @@ Files: `tests/test_compat.c`, `tests/test_hpack.c` (static/Huffman only)
 
 ### Phase 1 Completion Criteria
 
-- [ ] `make dev` succeeds with zero warnings on Linux
-- [ ] `make dev` succeeds with zero warnings on OpenBSD
-- [ ] `make test` runs and all Phase 1 tests pass on both platforms
-- [ ] `make valgrind` clean on Linux
-- [ ] ASan/UBSan clean on both platforms
-- [ ] `make lint` produces zero warnings
-- [ ] Quality milestone M1 confirmed
+- [x] `make dev` succeeds with zero warnings on Linux
+- [x] `make dev` succeeds with zero warnings on OpenBSD
+- [x] `make test` runs and all Phase 1 tests pass on both platforms (16/16)
+- [x] `make valgrind` clean on Linux
+- [x] ASan/UBSan clean on both platforms (Linux verified via `make dev` +
+      `make test`; OpenBSD ASan unavailable per Makefile policy)
+- [x] `make lint` produces zero warnings
+- [x] Quality milestone M1 confirmed
 
 ---
 

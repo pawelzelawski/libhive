@@ -1575,9 +1575,26 @@ static const hive_nv_t hpack_static_table[61] = {
 ### 4.4 Huffman Decode
 
 HPACK uses a canonical Huffman code (RFC 7541 Appendix B) where code lengths
-range from 5 to 30 bits. The decode table is a 256-entry array of 4 bytes per
-entry (1 KB total), covering all 8-bit input patterns. Because codes may be
-longer than 8 bits, decoding requires an iterative bit-accumulator loop.
+range from 5 to 30 bits. The decode strategy is two-tier:
+
+1. **Fast path** — a 256-entry table of 4 bytes per entry (1 KB total) covers
+   every 8-bit input pattern. Symbols whose Huffman code is ≤ 8 bits decode in
+   one lookup. Indices `0xfe` and `0xff` (i.e. patterns starting with the
+   prefix `1111 1110` or `1111 1111`) carry `complete = 0`; every code longer
+   than 8 bits begins with one of these two prefixes, so a fast-path miss
+   uniquely identifies a code requiring the slow path.
+2. **Slow path** — `huff_decode_long()` linear-scans the 257-entry encode
+   table looking for the unique code of length L (10 ≤ L ≤ 30) whose top L
+   bits match the accumulator. Because canonical Huffman codes are prefix-free
+   the first match at any L is *the* match; longer codes cannot share an
+   L-bit prefix with a shorter code. Returns the number of bits consumed
+   (or 0 to signal "need more input", or –1 on EOS).
+
+A flat 256-entry table on its own is insufficient: indexing always reads the
+top 8 bits of the accumulator, so once the prefix is `0xfe` or `0xff` the
+fast-path lookup keeps returning `complete = 0` regardless of how many more
+bytes are accumulated. The slow path is the mechanism that resolves the
+remaining 22 bit-lengths (10 through 30) without a multi-level table.
 
 ```c
 typedef struct {
@@ -1594,12 +1611,15 @@ static const huff_entry_t huff_table[256];  /* initialised at compile time */
 `hpack_scratch_value` as appropriate — see §4.6):
 
 ```c
-/* Huffman decode of src[0..src_len] into scratch[0..max_len] */
+/* Huffman decode of src[0..src_len] into scratch[0..max_len].
+ * Outer loop is a byte-fed accumulator; inner loop drains one symbol per
+ * iteration via the fast-path table or, on a fast-path miss, via the
+ * slow path huff_decode_long(). */
 static int
 huff_decode(const uint8_t *src, size_t src_len,
     uint8_t *scratch, size_t max_len, size_t *out_len)
 {
-    uint32_t acc   = 0;   /* bit accumulator */
+    uint64_t acc   = 0;   /* bit accumulator (≥ 30 bits required) */
     int      nbits = 0;   /* bits currently in accumulator */
     size_t   out   = 0;
 
@@ -1608,24 +1628,31 @@ huff_decode(const uint8_t *src, size_t src_len,
         nbits += 8;
 
         while (nbits >= 8) {
-            /* Index table with the top 8 bits of accumulator */
+            /* Fast path: top 8 bits index the 256-entry table */
             uint8_t idx = (uint8_t)(acc >> (nbits - 8));
             const huff_entry_t *e = &huff_table[idx];
 
-            if (!e->complete) {
-                /* No complete symbol in top 8 bits;
-                 * need more input — break inner loop */
-                break;
+            if (e->complete) {
+                if (e->eos)
+                    return HIVE_ERR_COMPRESSION;  /* EOS mid-string */
+                if (out >= max_len)
+                    return HIVE_ERR_COMPRESSION;  /* decoded string too long */
+                scratch[out++] = e->sym;
+                nbits -= e->bits_consumed;
+            } else {
+                /* Slow path: prefix is 0xfe/0xff — code is > 8 bits */
+                uint8_t sym;
+                int bits = huff_decode_long(acc, nbits, &sym);
+                if (bits < 0)
+                    return HIVE_ERR_COMPRESSION;  /* EOS in slow path */
+                if (bits == 0)
+                    break;                        /* need more input */
+                if (out >= max_len)
+                    return HIVE_ERR_COMPRESSION;
+                scratch[out++] = sym;
+                nbits -= bits;
             }
-            if (e->eos)
-                return HIVE_ERR_COMPRESSION;  /* EOS mid-string */
-            if (out >= max_len)
-                return HIVE_ERR_COMPRESSION;  /* decoded string too long — COMPRESSION_ERROR */
-
-            scratch[out++] = e->sym;
-            nbits -= e->bits_consumed;
-            /* clear consumed bits from accumulator */
-            acc &= (1u << nbits) - 1;
+            acc &= ((uint64_t)1 << nbits) - 1;    /* clear consumed bits */
         }
     }
 
@@ -1635,7 +1662,7 @@ huff_decode(const uint8_t *src, size_t src_len,
     if (nbits > 7)
         return HIVE_ERR_COMPRESSION;  /* too many leftover bits */
     if (nbits > 0) {
-        uint32_t expected = (1u << nbits) - 1;
+        uint64_t expected = ((uint64_t)1 << nbits) - 1;
         if (acc != expected)
             return HIVE_ERR_COMPRESSION;  /* invalid padding */
     }
@@ -1643,17 +1670,28 @@ huff_decode(const uint8_t *src, size_t src_len,
     *out_len = out;
     return HIVE_OK;
 }
+
+/* Slow-path linear scan over the 257-entry encode table.
+ * Invoked only when the fast-path entry has complete == 0 — i.e. the
+ * accumulator's top 8 bits are 0xfe or 0xff and the next symbol is one
+ * of the 116 codes longer than 8 bits (including EOS).
+ * Returns L > 0 on match (bits consumed), 0 if more input is needed
+ * to disambiguate at any L, or -1 if EOS is decoded mid-string. */
+static int
+huff_decode_long(uint64_t acc, int nbits, uint8_t *out_sym);
 ```
 
 The `huff_table` entry for a given 8-bit pattern reflects the longest complete
 code that starts with those 8 bits. Every entry except `0xfe` and `0xff` has
-`complete == 1`. Those two patterns have `complete=0`; the decode loop's
-`break` on `!e->complete` accumulates more input before attempting another
-lookup. For codes shorter than 8 bits, `bits_consumed < 8` and the remaining
-bits remain in the accumulator for the next iteration. For codes longer than
-8 bits, the loop iterates multiple times, consuming 8 bits per iteration until
-the code is complete. L1 cache resident after the first HEADERS frame. 20–50×
-faster than tree traversal.
+`complete == 1`. Those two patterns have `complete = 0` and route to the slow
+path. For codes shorter than 8 bits, `bits_consumed < 8` and the remaining
+bits remain in the accumulator for the next iteration. The accumulator is
+`uint64_t` because the longest Huffman code (EOS, 30 bits) plus up to 7
+trailing-padding bits plus a partial accumulated byte easily exceeds 32 bits
+in transient state. Fast path is L1 cache resident after the first HEADERS
+frame. The slow path is exercised only when input contains symbols whose
+Huffman code is longer than 8 bits — uncommon in typical HTTP/2 header
+traffic — so its O(257 × 21) worst-case scan is not on the hot path.
 
 ### 4.5 Decode Block Processing
 

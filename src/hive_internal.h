@@ -20,14 +20,13 @@
 /* ------------------------------------------------------------------ */
 
 #if defined(HIVE_DEBUG) && defined(__SANITIZE_ADDRESS__)
-#  include <sanitizer/asan_interface.h>
-#  define HIVE_ASAN_POISON(ptr, size) \
-	__asan_poison_memory_region((ptr), (size))
-#  define HIVE_ASAN_UNPOISON(ptr, size) \
+#include <sanitizer/asan_interface.h>
+#define HIVE_ASAN_POISON(ptr, size) __asan_poison_memory_region((ptr), (size))
+#define HIVE_ASAN_UNPOISON(ptr, size)                                          \
 	__asan_unpoison_memory_region((ptr), (size))
 #else
-#  define HIVE_ASAN_POISON(ptr, size)   ((void)0)
-#  define HIVE_ASAN_UNPOISON(ptr, size) ((void)0)
+#define HIVE_ASAN_POISON(ptr, size) ((void)0)
+#define HIVE_ASAN_UNPOISON(ptr, size) ((void)0)
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -38,10 +37,10 @@
 /* ------------------------------------------------------------------ */
 
 _Static_assert(1 == 1, "placeholder — hive_stream_t size check (Phase 2+)");
-_Static_assert(1 == 1, "placeholder — stream_hash_entry_t size check (Phase 2+)");
+_Static_assert(1 == 1,
+               "placeholder — stream_hash_entry_t size check (Phase 2+)");
 _Static_assert(1 == 1, "placeholder — hpack_entry_t size check (Phase 3+)");
 _Static_assert(1 == 1, "placeholder — hive_settings_t size check (Phase 4+)");
-_Static_assert(1 == 1, "placeholder — huff_entry_t size check (Phase 1.4+)");
+/* huff_entry_t size check is active in src/hive_hpack.h next to the type. */
 
 #endif /* HIVE_INTERNAL_H */
-

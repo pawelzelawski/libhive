@@ -15,13 +15,12 @@
  * strlcpy — copy at most dstsize-1 bytes from src to dst, always
  * NUL-terminating. Returns strlen(src) (the full source length).
  */
-size_t	strlcpy(char *dst, const char *src, size_t dstsize);
+size_t strlcpy(char *dst, const char *src, size_t dstsize);
 
 /*
  * strlcat — append src to dst up to dstsize-1 total bytes, always
  * NUL-terminating. Returns strlen(dst_initial) + strlen(src).
  */
-size_t	strlcat(char *dst, const char *src, size_t dstsize);
+size_t strlcat(char *dst, const char *src, size_t dstsize);
 
 #endif /* COMPAT_STR_H */
-

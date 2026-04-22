@@ -24,13 +24,13 @@
 size_t
 strlcpy(char *dst, const char *src, size_t dstsize)
 {
-	const char	*s = src;
-	size_t		 n = dstsize;
-	char		 c;
+	const char *s = src;
+	size_t n = dstsize;
+	char c;
 
 	if (n != 0) {
 		while (--n != 0) {
-			c      = *s++;
+			c = *s++;
 			*dst++ = c;
 			if (c == '\0')
 				break;
@@ -59,16 +59,16 @@ strlcpy(char *dst, const char *src, size_t dstsize)
 size_t
 strlcat(char *dst, const char *src, size_t dstsize)
 {
-	char		*d    = dst;
-	const char	*s    = src;
-	size_t		 n    = dstsize;
-	size_t		 dlen;
+	char *d = dst;
+	const char *s = src;
+	size_t n = dstsize;
+	size_t dlen;
 
 	/* Find the end of dst within the buffer boundary. */
 	while (n-- != 0 && *d != '\0')
 		d++;
 	dlen = (size_t)(d - dst);
-	n    = dstsize - dlen;
+	n = dstsize - dlen;
 
 	if (n == 0)
 		return dlen + strlen(s);
@@ -84,4 +84,3 @@ strlcat(char *dst, const char *src, size_t dstsize)
 
 	return dlen + (size_t)(s - src);
 }
-

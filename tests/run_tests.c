@@ -25,8 +25,10 @@ int test_static_table_index61(void);
 int test_huffman_decode_empty(void);
 int test_huffman_decode_www(void);
 int test_huffman_encode_decode_roundtrip(void);
+int test_huffman_roundtrip_long_codes(void);
 int test_huffman_eos_rejected(void);
 int test_huffman_invalid_padding(void);
+int test_huffman_decode_truncated_long_code(void);
 
 int
 main(void)
@@ -46,8 +48,10 @@ main(void)
 	RUN(huffman_decode_empty);
 	RUN(huffman_decode_www);
 	RUN(huffman_encode_decode_roundtrip);
+	RUN(huffman_roundtrip_long_codes);
 	RUN(huffman_eos_rejected);
 	RUN(huffman_invalid_padding);
+	RUN(huffman_decode_truncated_long_code);
 
 	printf("%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_passed == tests_run) ? 0 : 1;

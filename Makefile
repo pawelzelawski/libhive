@@ -1,4 +1,4 @@
-# Makefile â libhive build system
+# Makefile — libhive build system
 #
 # Targets:
 #   make / make dev   - debug build with ASan/UBSan (Linux only)
@@ -17,7 +17,7 @@
 # Compatible with GNU make (Linux) and BSD make (OpenBSD).
 # Uses != for shell assignment - supported by GNU make >= 3.82 and BSD make.
 # Explicit per-file compile rules - no pattern rules (BSD make portable).
-# See TECH_STACK.md Â§5 for full build system documentation.
+# See TECH_STACK.md §5 for full build system documentation.
 # --- Platform detection -----------------------------------------------------
 OS != uname -s
 # --- Compiler ---------------------------------------------------------------
@@ -27,10 +27,10 @@ AR = ar
 CFLAGS_OS != if [ "$(OS)" = "Linux" ]; then echo "-DLINUX"; \
              elif [ "$(OS)" = "OpenBSD" ]; then echo "-DOPENBSD"; \
              else echo ""; fi
-# strlcpy/strlcat compat â Linux only; OpenBSD libc provides them.
+# strlcpy/strlcat compat — Linux only; OpenBSD libc provides them.
 COMPAT_SRC != if [ "$(OS)" = "Linux" ]; then echo "src/compat_str.c"; \
               else echo ""; fi
-# ASan/UBSan â Linux only; OpenBSD clang does not support -fsanitize=address.
+# ASan/UBSan — Linux only; OpenBSD clang does not support -fsanitize=address.
 SANITIZERS != if [ "$(OS)" = "Linux" ]; then \
                   echo "-fsanitize=address,undefined"; \
               else echo ""; fi
@@ -44,8 +44,8 @@ CWARN = -Wall -Wextra -Wpedantic \
         -Wstrict-prototypes \
         -Wmissing-prototypes \
         -Wold-style-definition
-# Feature test macros â defined here, not in source files.
-# See TECH_STACK.md Â§1.
+# Feature test macros — defined here, not in source files.
+# See TECH_STACK.md §1.
 CFLAGS_FT = -D_POSIX_C_SOURCE=200809L \
             -D_XOPEN_SOURCE=700
 CFLAGS_DEV  = $(CSTD) $(CWARN) $(CFLAGS_FT) $(CFLAGS_OS) \
@@ -86,7 +86,7 @@ LIB_VG   = $(BUILD_VG_DIR)/libhive.a
 LIB_TSAN = $(BUILD_TSAN_DIR)/libhive.a
 TEST_BIN    = $(BUILD_TEST_DIR)/run_tests
 TEST_BIN_VG = $(BUILD_TEST_DIR)/run_tests_vg
-# Top-level copy â embedders and TECH_STACK.md reference libhive.a here.
+# Top-level copy — embedders and TECH_STACK.md reference libhive.a here.
 LIBHIVE_A = libhive.a
 # --- Test source ------------------------------------------------------------
 TEST_SRC = tests/run_tests.c \
@@ -108,7 +108,7 @@ release: $(LIB_REL)
 	cp $(LIB_REL) $(LIBHIVE_A)
 # --- Test (ASan/UBSan) ------------------------------------------------------
 test: $(TEST_BIN)
-	$(TEST_BIN)
+	sh tests/run_tests.sh
 test-asan: test
 # --- TSan (Linux only) ------------------------------------------------------
 test-tsan: $(LIB_TSAN)
@@ -143,6 +143,8 @@ lint:
 	         --suppress=missingIncludeSystem \
 	         --suppress=unusedFunction \
 	         --suppress=variableScope \
+	         --suppress=normalCheckLevelMaxBranches \
+	         --suppress=checkersReport \
 	         src/
 # --- Format -----------------------------------------------------------------
 format:
@@ -157,7 +159,7 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -f $(LIBHIVE_A) tests/h2spec_server
 # ---------------------------------------------------------------------------
-# Library build rules â explicit per-file compile, no pattern rules.
+# Library build rules — explicit per-file compile, no pattern rules.
 # BSD make does not support GNU-style pattern rules portably.
 # ---------------------------------------------------------------------------
 # --- Development library ----------------------------------------------------

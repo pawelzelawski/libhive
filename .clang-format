@@ -3,6 +3,9 @@ IndentWidth: 8
 UseTab: ForIndentation
 BreakBeforeBraces: Linux
 ColumnLimit: 80
+# KNF requires the return type on its own line for every function
+# definition (declarations are unaffected). See CODING_STANDARDS.md §1.1.
+AlwaysBreakAfterReturnType: AllDefinitions
 AllowShortFunctionsOnASingleLine: None
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
