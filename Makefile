@@ -89,7 +89,8 @@ TEST_BIN_VG = $(BUILD_TEST_DIR)/run_tests_vg
 # Top-level copy â embedders and TECH_STACK.md reference libhive.a here.
 LIBHIVE_A = libhive.a
 # --- Test source ------------------------------------------------------------
-TEST_SRC = tests/run_tests.c
+TEST_SRC = tests/run_tests.c \
+           tests/test_compat.c
 # --- Install paths ----------------------------------------------------------
 PREFIX     ?= /usr/local
 LIBDIR     ?= $(PREFIX)/lib

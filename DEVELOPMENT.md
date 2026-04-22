@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-22
 **Current Phase**: Phase 1 — Foundation
-**Next Task**: 1.2 — Test harness (already complete, combined with 1.1)
+**Next Task**: 1.4 — HPACK static table and Huffman tables
 
 ### Phase Summary
 
@@ -121,7 +121,7 @@ compiles clean with zero warnings.
 - `make test` runs empty suite, prints `0/0 tests passed`, exits 0
 - `make valgrind` runs test binary under Valgrind, exits clean on Linux
 
-**1.3 — Platform compat layer**
+**1.3 — Platform compat layer** ✓ DONE
 - Create `src/compat_str.c` and `src/compat_str.h`:
   portable `strlcpy(dst, src, dstsize)` and `strlcat(dst, src, dstsize)`
   implementations
