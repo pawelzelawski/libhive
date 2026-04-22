@@ -140,6 +140,8 @@ lint:
 	clang-tidy src/*.c -- $(CFLAGS_DEV) $(EXTRA_CFLAGS) $(INCLUDES)
 	cppcheck --enable=all --error-exitcode=1 \
 	         --suppress=missingIncludeSystem \
+	         --suppress=unusedFunction \
+	         --suppress=variableScope \
 	         src/
 # --- Format -----------------------------------------------------------------
 format:

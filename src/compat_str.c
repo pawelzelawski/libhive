@@ -26,10 +26,13 @@ strlcpy(char *dst, const char *src, size_t dstsize)
 {
 	const char	*s = src;
 	size_t		 n = dstsize;
+	char		 c;
 
 	if (n != 0) {
 		while (--n != 0) {
-			if ((*dst++ = *s++) == '\0')
+			c      = *s++;
+			*dst++ = c;
+			if (c == '\0')
 				break;
 		}
 	}
