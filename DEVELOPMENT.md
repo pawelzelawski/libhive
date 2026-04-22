@@ -135,7 +135,7 @@ compiles clean with zero warnings.
   - `test_strlcat_basic`: appends up to remaining space
   - `test_strlcat_full_dst`: dst already full → no write, returns combined length
 
-**1.4 — HPACK static table and Huffman tables**
+**1.4 — HPACK static table and Huffman tables** ✓ DONE
 - In `src/hive_hpack.c`: implement the compile-time static table array
   (RFC 7541 Appendix A, 61 entries) per ARCHITECTURE.md §4.3
 - Implement the Huffman decode table (256-entry `huff_entry_t` array,
