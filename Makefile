@@ -144,6 +144,7 @@ lint:
 	         --suppress=unusedFunction \
 	         --suppress=variableScope \
 	         --suppress=normalCheckLevelMaxBranches \
+	         --suppress=unmatchedSuppression \
 	         --suppress=checkersReport \
 	         src/
 # --- Format -----------------------------------------------------------------
