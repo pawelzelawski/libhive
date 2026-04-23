@@ -393,6 +393,19 @@ int hive_hpack_encode(hive_hpack_encoder_t *enc,
 
 int hive_hpack_decoder_new(hive_hpack_decoder_t **dec, size_t max_table_size);
 void hive_hpack_decoder_free(hive_hpack_decoder_t *dec);
+/*
+ * Limitations of the standalone API vs the session decode path:
+ *
+ * (a) Size-update position rule (RFC 7541 §6.3): the session path enforces
+ *     that dynamic table size updates only appear before the first header
+ *     field in a block. This API has no block-boundary concept — the caller
+ *     is responsible for enforcing this rule across calls.
+ *
+ * (b) HPACK bomb limits: the session path enforces opt_max_header_list_size
+ *     and opt_max_header_count. This API has no options struct and does not
+ *     enforce those limits. Callers embedding this in a security-sensitive
+ *     context must impose their own size limits before or after calling.
+ */
 int hive_hpack_decode(hive_hpack_decoder_t *dec,
                       const uint8_t *in,
                       size_t in_len,

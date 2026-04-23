@@ -727,34 +727,57 @@ huff_decode(const uint8_t *src,
 	size_t i;
 	int nbits;
 	size_t out;
+
 	if (scratch == NULL || out_len == NULL)
 		return HIVE_ERR_INVALID_ARG;
-	/* Kept for future fast-path restoration; referenced to avoid warnings.
-	 */
-	(void)huff_decode_table[0].complete;
-	(void)huff_decode_long;
+
 	acc = 0;
 	nbits = 0;
 	out = 0;
 	for (i = 0; i < src_len; i++) {
 		acc = (acc << 8) | (uint64_t)src[i];
 		nbits += 8;
-		while (nbits >= 5) {
-			int match;
-			int bits_used;
-			uint8_t sym;
 
-			bits_used = 0;
-			match =
-			    huff_decode_symbol(acc, nbits, &sym, &bits_used);
-			if (match < 0)
-				return HIVE_ERR_COMPRESSION;
-			if (match == 0)
-				break;
-			if (out >= max_len)
-				return HIVE_ERR_COMPRESSION;
-			scratch[out++] = sym;
-			nbits -= bits_used;
+		/*
+		 * Two-tier dispatch per ARCHITECTURE.md §4.4.
+		 *
+		 * Fast path: index huff_decode_table[] with the top 8 bits
+		 * of the accumulator. complete==1 (254 of 256 patterns)
+		 * resolves a symbol in a single indexed load.
+		 *
+		 * Slow path: complete==0 (the 0xfe and 0xff prefix slots)
+		 * means the buffered byte is a prefix of a 10..30 bit code;
+		 * fall through to huff_decode_long(), which performs a
+		 * length-by-length linear scan over the encode table.
+		 */
+		while (nbits >= 8) {
+			uint8_t idx;
+			const huff_entry_t *e;
+
+			idx = (uint8_t)((acc >> (nbits - 8)) & 0xffu);
+			e = &huff_decode_table[idx];
+			if (e->complete) {
+				if (e->eos)
+					return HIVE_ERR_COMPRESSION;
+				if (out >= max_len)
+					return HIVE_ERR_COMPRESSION;
+				scratch[out++] = e->sym;
+				nbits -= e->bits_consumed;
+			} else {
+				int bits_used;
+				uint8_t sym;
+
+				bits_used =
+				    huff_decode_long(acc, nbits, &sym);
+				if (bits_used < 0)
+					return HIVE_ERR_COMPRESSION;
+				if (bits_used == 0)
+					break; /* need more input bits */
+				if (out >= max_len)
+					return HIVE_ERR_COMPRESSION;
+				scratch[out++] = sym;
+				nbits -= bits_used;
+			}
 
 			if (nbits == 0)
 				acc = 0;
@@ -762,8 +785,38 @@ huff_decode(const uint8_t *src,
 				acc &= ((uint64_t)1 << nbits) - 1;
 		}
 	}
+
 	/*
-	 * Padding validation per RFC 7541 5.2:
+	 * End-of-input drain: a valid stream may terminate with a 5..7 bit
+	 * code whose trailing pad fills the final byte to a byte boundary.
+	 * The fast path requires nbits >= 8, so any such residual code is
+	 * not visible to it. Decode any remaining short codes via the
+	 * length-by-length scan; the subsequent padding check rejects
+	 * leftovers that are not a valid all-ones EOS prefix.
+	 */
+	while (nbits >= 5) {
+		int match;
+		int bits_used;
+		uint8_t sym;
+
+		bits_used = 0;
+		match = huff_decode_symbol(acc, nbits, &sym, &bits_used);
+		if (match < 0)
+			return HIVE_ERR_COMPRESSION;
+		if (match == 0)
+			break;
+		if (out >= max_len)
+			return HIVE_ERR_COMPRESSION;
+		scratch[out++] = sym;
+		nbits -= bits_used;
+		if (nbits == 0)
+			acc = 0;
+		else
+			acc &= ((uint64_t)1 << nbits) - 1;
+	}
+
+	/*
+	 * Padding validation per RFC 7541 §5.2:
 	 * leftover bits must be 0..7 and all-ones (high-order EOS bits).
 	 */
 	if (nbits > 7)
@@ -1620,6 +1673,10 @@ hpack_decode_block(hive_session_t *s,
 	int cb_ret;
 
 	(void)error_stream_id;
+	/* TODO(phase:4): route stream error to error_stream_id per ARCH §4.5.
+	 * For HEADERS blocks: error_stream_id == reassembly_stream_id.
+	 * For PUSH_PROMISE blocks: error_stream_id == reassembly_promised_stream_id.
+	 * The carrying stream is unaffected by PUSH_PROMISE decode errors. */
 
 	if (s == NULL || (len > 0 && data == NULL))
 		return HIVE_ERR_INVALID_ARG;
@@ -1775,7 +1832,30 @@ hpack_decode_block(hive_session_t *s,
 
 		decoded_size += name_buf->len + value_buf->len + 32u;
 		decoded_count++;
-		/* SECURITY: enforce HPACK bomb limits incrementally per entry.
+		/*
+		 * SECURITY: HPACK bomb protection — decoded header list size
+		 * limit.
+		 *
+		 * Why: a peer can send a pathologically large header block
+		 * that triggers unbounded memory allocation or CPU work
+		 * before any error is returned. Enforcing an incremental
+		 * size limit bounds per-block cost regardless of how the
+		 * block is structured.
+		 *
+		 * Attack model: peer sends thousands of literal headers or a
+		 * single header with multi-KB name/value to exhaust allocator
+		 * budget or force O(n) decode work before the connection is
+		 * reset.
+		 *
+		 * RFC reference: RFC 9113 §4.3.1
+		 * (SETTINGS_MAX_HEADER_LIST_SIZE); RFC 7541 §4.1 (header
+		 * list size definition: name_len + value_len + 32 per
+		 * entry).
+		 *
+		 * Error class: stream error (RST_STREAM PROTOCOL_ERROR) —
+		 * not a connection error. Decoding continues for remaining
+		 * entries to maintain dynamic table consistency with the
+		 * peer encoder (RFC 7541 §2.3.2).
 		 */
 		if (decoded_size > s->opt_max_header_list_size)
 			stream_error_pending = 1;
@@ -1815,6 +1895,12 @@ hpack_decode_block(hive_session_t *s,
 	}
 
 	if (stream_error_pending)
+		/*
+		 * Returns HIVE_ERR_PROTOCOL for both suppress path (clean
+		 * decode, caller owns RST) and normal stream error path.
+		 * Caller distinguishes via reassembly_stream_error_code != 0
+		 * check at call site. See ARCHITECTURE.md §4.5.
+		 */
 		return HIVE_ERR_PROTOCOL;
 
 	if (!suppress_callbacks && s->callbacks.on_headers_complete != NULL) {
