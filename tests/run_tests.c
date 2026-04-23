@@ -39,6 +39,21 @@ int test_recv_data_on_stream_zero(void);
 int test_recv_settings_nonzero_stream(void);
 int test_recv_ping_wrong_length(void);
 int test_recv_rst_stream_wrong_length(void);
+int test_recv_settings_bad_length_nonzero_ack(void);
+int test_recv_unknown_frame_mid_stream(void);
+int test_recv_split_ping_payload(void);
+int test_recv_split_window_update_payload(void);
+int test_recv_split_rst_stream_payload(void);
+int test_recv_split_priority_payload(void);
+int test_recv_split_goaway_payload(void);
+int test_recv_split_push_promise_payload(void);
+int test_recv_split_continuation_payload(void);
+int test_recv_settings_bad_length_non_ack(void);
+int test_recv_window_update_wrong_length(void);
+int test_recv_priority_wrong_length(void);
+int test_recv_goaway_too_short(void);
+int test_recv_push_promise_wrong_length_unpadded(void);
+int test_recv_push_promise_wrong_length_padded(void);
 
 /* --- test_hpack.c --------------------------------------------------------- */
 int test_static_table_size(void);
@@ -71,13 +86,28 @@ main(void)
 	RUN(recv_split_frame_header);
 	RUN(recv_split_data_payload);
 	RUN(recv_split_settings_param);
+	RUN(recv_split_ping_payload);
+	RUN(recv_split_window_update_payload);
+	RUN(recv_split_rst_stream_payload);
+	RUN(recv_split_priority_payload);
+	RUN(recv_split_goaway_payload);
+	RUN(recv_split_push_promise_payload);
+	RUN(recv_split_continuation_payload);
 	RUN(recv_headers_plus_continuation);
 	RUN(recv_continuation_lockout);
 	RUN(recv_frame_too_large);
 	RUN(recv_data_on_stream_zero);
 	RUN(recv_settings_nonzero_stream);
+	RUN(recv_settings_bad_length_nonzero_ack);
+	RUN(recv_settings_bad_length_non_ack);
 	RUN(recv_ping_wrong_length);
 	RUN(recv_rst_stream_wrong_length);
+	RUN(recv_window_update_wrong_length);
+	RUN(recv_priority_wrong_length);
+	RUN(recv_goaway_too_short);
+	RUN(recv_push_promise_wrong_length_unpadded);
+	RUN(recv_push_promise_wrong_length_padded);
+	RUN(recv_unknown_frame_mid_stream);
 
 	/* Phase 1.3 — platform compat layer */
 	RUN(strlcpy_basic);

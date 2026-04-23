@@ -522,16 +522,16 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				consumed++;
 				s->payload_remaining--;
 			}
-			while (s->ctrl_staging_count < 4 &&
-			       s->payload_remaining > 0 && consumed < len) {
-				s->ctrl_staging[s->ctrl_staging_count++] =
-				    data[consumed++];
-				s->payload_remaining--;
-			}
-			if (s->ctrl_staging_count < 4) {
-				break;
-			}
 			if (s->pad_validated == 0) {
+				while (s->ctrl_staging_count < 4 &&
+				       s->payload_remaining > 0 && consumed < len) {
+					s->ctrl_staging[s->ctrl_staging_count++] =
+					    data[consumed++];
+					s->payload_remaining--;
+				}
+				if (s->ctrl_staging_count < 4) {
+					break;
+				}
 				s->reassembly_promised_stream_id =
 				    u32be(s->ctrl_staging) & 0x7fffffffU;
 				s->ctrl_staging_count = 0;
@@ -540,6 +540,7 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				}
 				s->pad_validated = 1;
 			}
+			avail = len - consumed;
 			n = s->payload_remaining - s->pad_remaining;
 			if (n > avail) {
 				n = avail;

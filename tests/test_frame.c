@@ -31,6 +31,21 @@ int test_recv_data_on_stream_zero(void);
 int test_recv_settings_nonzero_stream(void);
 int test_recv_ping_wrong_length(void);
 int test_recv_rst_stream_wrong_length(void);
+int test_recv_settings_bad_length_nonzero_ack(void);
+int test_recv_unknown_frame_mid_stream(void);
+int test_recv_split_ping_payload(void);
+int test_recv_split_window_update_payload(void);
+int test_recv_split_rst_stream_payload(void);
+int test_recv_split_priority_payload(void);
+int test_recv_split_goaway_payload(void);
+int test_recv_split_push_promise_payload(void);
+int test_recv_split_continuation_payload(void);
+int test_recv_settings_bad_length_non_ack(void);
+int test_recv_window_update_wrong_length(void);
+int test_recv_priority_wrong_length(void);
+int test_recv_goaway_too_short(void);
+int test_recv_push_promise_wrong_length_unpadded(void);
+int test_recv_push_promise_wrong_length_padded(void);
 
 typedef struct {
 	const uint8_t *base;
@@ -76,6 +91,19 @@ build_frame(uint8_t *dst, uint32_t length, uint8_t type, uint8_t flags,
 		memcpy(dst + 9, payload, length);
 	}
 	return 9u + length;
+}
+
+static int
+feed_one_by_one(hive_session_t *s, const uint8_t *buf, size_t len)
+{
+	size_t i;
+
+	for (i = 0; i < len; i++) {
+		if (hive_session_recv(s, buf + i, 1) != 1) {
+			return 0;
+		}
+	}
+	return 1;
 }
 
 /*
@@ -468,6 +496,252 @@ test_recv_rst_stream_wrong_length(void)
 
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	frame_hdr_write_at(frame, 5, HIVE_FRAME_RST_STREAM, 0, 1);
+	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
+	return 1;
+}
+
+int
+test_recv_settings_bad_length_nonzero_ack(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t frame[15];
+	uint8_t payload[6] = {0, 1, 0, 0, 0, 1};
+	size_t n;
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	n = build_frame(frame, 6, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0, payload);
+	ASSERT(hive_session_recv(&s, frame, n) == -1);
+	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
+	return 1;
+}
+
+int
+test_recv_unknown_frame_mid_stream(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t frame1[11];
+	uint8_t frame2[17];
+	uint8_t p1[2] = {0xaa, 0xbb};
+	uint8_t p2[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+	size_t n1;
+	size_t n2;
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	n1 = build_frame(frame1, 2, 0xff, 0, 0, p1);
+	ASSERT(hive_session_recv(&s, frame1, n1) == (ssize_t)n1);
+	n2 = build_frame(frame2, 8, HIVE_FRAME_PING, 0, 0, p2);
+	ASSERT(hive_session_recv(&s, frame2, n2) == (ssize_t)n2);
+	ASSERT(s.recv_state == RECV_FRAME_HEADER);
+	ASSERT(s.last_err == 0);
+	return 1;
+}
+
+int
+test_recv_split_ping_payload(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t frame[17];
+	uint8_t payload[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+	size_t n;
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	n = build_frame(frame, 8, HIVE_FRAME_PING, 0, 0, payload);
+	ASSERT(feed_one_by_one(&s, frame, n) == 1);
+	ASSERT(s.recv_state == RECV_FRAME_HEADER);
+	return 1;
+}
+
+int
+test_recv_split_window_update_payload(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t frame[13];
+	uint8_t payload[4] = {0, 0, 0, 1};
+	size_t n;
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	n = build_frame(frame, 4, HIVE_FRAME_WINDOW_UPDATE, 0, 1, payload);
+	ASSERT(feed_one_by_one(&s, frame, n) == 1);
+	ASSERT(s.recv_state == RECV_FRAME_HEADER);
+	return 1;
+}
+
+int
+test_recv_split_rst_stream_payload(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t frame[13];
+	uint8_t payload[4] = {0, 0, 0, 0};
+	size_t n;
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	n = build_frame(frame, 4, HIVE_FRAME_RST_STREAM, 0, 1, payload);
+	ASSERT(feed_one_by_one(&s, frame, n) == 1);
+	ASSERT(s.recv_state == RECV_FRAME_HEADER);
+	return 1;
+}
+
+int
+test_recv_split_priority_payload(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t frame[14];
+	uint8_t payload[5] = {0, 0, 0, 1, 42};
+	size_t n;
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	n = build_frame(frame, 5, HIVE_FRAME_PRIORITY, 0, 1, payload);
+	ASSERT(feed_one_by_one(&s, frame, n) == 1);
+	ASSERT(s.recv_state == RECV_FRAME_HEADER);
+	return 1;
+}
+
+int
+test_recv_split_goaway_payload(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t frame[17];
+	uint8_t payload[8] = {0, 0, 0, 1, 0, 0, 0, 0};
+	size_t n;
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	n = build_frame(frame, 8, HIVE_FRAME_GOAWAY, 0, 0, payload);
+	ASSERT(feed_one_by_one(&s, frame, n) == 1);
+	ASSERT(s.recv_state == RECV_FRAME_HEADER);
+	return 1;
+}
+
+int
+test_recv_split_push_promise_payload(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t frame[14];
+	uint8_t payload[5] = {0, 0, 0, 2, 0xaa};
+	size_t n;
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	n = build_frame(frame, 5, HIVE_FRAME_PUSH_PROMISE, HIVE_FLAG_END_HEADERS, 1,
+	    payload);
+	ASSERT(feed_one_by_one(&s, frame, n) == 1);
+	ASSERT(s.reassembly_promised_stream_id == 2);
+	ASSERT(s.recv_state == RECV_FRAME_HEADER);
+	return 1;
+}
+
+int
+test_recv_split_continuation_payload(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t h[10];
+	uint8_t c[12];
+	uint8_t hp[1] = {0xaa};
+	uint8_t cp[3] = {0xbb, 0xcc, 0xdd};
+	size_t nh;
+	size_t nc;
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	nh = build_frame(h, 1, HIVE_FRAME_HEADERS, 0, 1, hp);
+	ASSERT(feed_one_by_one(&s, h, nh) == 1);
+	ASSERT(s.reassembly_active == 1);
+	nc = build_frame(c, 3, HIVE_FRAME_CONTINUATION, HIVE_FLAG_END_HEADERS, 1,
+	    cp);
+	ASSERT(feed_one_by_one(&s, c, nc) == 1);
+	ASSERT(s.reassembly_active == 0);
+	ASSERT(s.reassembly_len == 4);
+	return 1;
+}
+
+int
+test_recv_settings_bad_length_non_ack(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t frame[14];
+	uint8_t payload[5] = {0, 1, 0, 0, 0};
+	size_t n;
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	n = build_frame(frame, 5, HIVE_FRAME_SETTINGS, 0, 0, payload);
+	ASSERT(hive_session_recv(&s, frame, n) == -1);
+	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
+	return 1;
+}
+
+int
+test_recv_window_update_wrong_length(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t frame[9];
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	frame_hdr_write_at(frame, 5, HIVE_FRAME_WINDOW_UPDATE, 0, 1);
+	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
+	return 1;
+}
+
+int
+test_recv_priority_wrong_length(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t frame[9];
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	frame_hdr_write_at(frame, 4, HIVE_FRAME_PRIORITY, 0, 1);
+	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
+	return 1;
+}
+
+int
+test_recv_goaway_too_short(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t frame[9];
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	frame_hdr_write_at(frame, 7, HIVE_FRAME_GOAWAY, 0, 0);
+	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
+	return 1;
+}
+
+int
+test_recv_push_promise_wrong_length_unpadded(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t frame[9];
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	frame_hdr_write_at(frame, 3, HIVE_FRAME_PUSH_PROMISE, 0, 1);
+	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
+	return 1;
+}
+
+int
+test_recv_push_promise_wrong_length_padded(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	uint8_t frame[9];
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	frame_hdr_write_at(frame, 4, HIVE_FRAME_PUSH_PROMISE, HIVE_FLAG_PADDED, 1);
 	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
 	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
 	return 1;

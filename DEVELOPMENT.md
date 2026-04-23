@@ -3,15 +3,15 @@
 ## Status Overview
 
 **Last Updated**: 2026-04-23
-**Current Phase**: Phase 2 — Frame Parser
-**Next Task**: Phase 2 completion gap closure — exhaustive frame-type tests
+**Current Phase**: Phase 3 — HPACK
+**Next Task**: 3.1 — hpack_table_t: dynamic table (`src/hive_hpack.c`)
 
 ### Phase Summary
 
 | Phase | Name | Status | Tests | Notes |
 |---|---|---|---|---|
 | 1 | Foundation | DONE | 16/16 (Phase 1 slice) | Tasks 1.1–1.5 done on Linux + OpenBSD |
-| 2 | Frame Parser | IN PROGRESS | 37/37 (Phase 2 slice) | Tasks 2.1–2.5 done on Linux + OpenBSD; completion criteria gap closure pending |
+| 2 | Frame Parser | DONE | 52/52 (Phase 2 slice) | Tasks 2.1–2.5 done on Linux + OpenBSD; completion criteria confirmed |
 | 3 | HPACK | NOT STARTED | — | Encoder, decoder, Huffman, standalone API |
 | 4 | Session Core | NOT STARTED | — | Minimal send queue, session struct, stream table, SETTINGS, preface |
 | 5 | Flow Control and DATA | NOT STARTED | — | Windows, recv-side enforcement, WINDOW_UPDATE, DATA delivery |
@@ -33,7 +33,7 @@
 | M7 | clang-tidy clean | NOT STARTED |
 | M8 | No direct malloc/free calls in src/ except the NULL-allocator shim | NOT STARTED |
 | M9 | Full HPACK test suite passes (encode-decode round-trip) | NOT STARTED |
-| M10 | Frame state machine handles split delivery (1 byte at a time) | NOT STARTED |
+| M10 | Frame state machine handles split delivery (1 byte at a time) | DONE |
 | M11 | h2spec full suite passes — zero failures | NOT STARTED |
 | M12 | Wraith integration: HTTP/2 GET over TLS with arena allocator | NOT STARTED |
 
@@ -343,15 +343,15 @@ File: `tests/test_frame.c`
 
 ### Phase 2 Completion Criteria
 
-- [ ] All Phase 2 tests pass on Linux and OpenBSD
-- [ ] Split delivery test (1-byte feed) passes for all frame types
-- [ ] CONTINUATION lockout test passes with connection error (GOAWAY), not RST_STREAM
-- [ ] Frame length validation uses `local_settings.max_frame_size` (not remote)
-- [ ] Fixed-length frame validation passes for all frame types
-- [ ] `hive_frame_bare.c` builds standalone (no session dependency)
-- [ ] Valgrind clean on test binary
-- [ ] ASan/UBSan clean on both platforms
-- [ ] Quality milestone M10 confirmed
+- [x] All Phase 2 tests pass on Linux and OpenBSD
+- [x] Split delivery test (1-byte feed) passes for all frame types
+- [x] CONTINUATION lockout test passes with connection error (GOAWAY), not RST_STREAM
+- [x] Frame length validation uses `local_settings.max_frame_size` (not remote)
+- [x] Fixed-length frame validation passes for all frame types
+- [x] `hive_frame_bare.c` builds standalone (no session dependency)
+- [x] Valgrind clean on test binary
+- [x] ASan/UBSan clean on both platforms
+- [x] Quality milestone M10 confirmed
 
 ---
 
