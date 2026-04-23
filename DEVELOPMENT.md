@@ -2,17 +2,16 @@
 
 ## Status Overview
 
-**Last Updated**: 2026-04-22
-**Current Phase**: Phase 1 — Foundation
-**Next Task**: 1.5 — `_Static_assert` placeholders (already in place; real
-assertions activate in Phase 2 as structs land)
+**Last Updated**: 2026-04-23
+**Current Phase**: Phase 2 — Frame Parser
+**Next Task**: 2.2 — Frame header serialisation (`hive_frame_bare.c`, `hive_send.c`)
 
 ### Phase Summary
 
 | Phase | Name | Status | Tests | Notes |
 |---|---|---|---|---|
-| 1 | Foundation | IN PROGRESS | 16/16 (Phase 1 slice) | Tasks 1.1–1.4 done on Linux + OpenBSD; 1.5 is placeholders only |
-| 2 | Frame Parser | NOT STARTED | — | Receive state machine, all 10 frame types, hive_frame_bare.c |
+| 1 | Foundation | DONE | 16/16 (Phase 1 slice) | Tasks 1.1–1.5 done on Linux + OpenBSD |
+| 2 | Frame Parser | IN PROGRESS | — | Task 2.1 done; 2.2–2.5 pending |
 | 3 | HPACK | NOT STARTED | — | Encoder, decoder, Huffman, standalone API |
 | 4 | Session Core | NOT STARTED | — | Minimal send queue, session struct, stream table, SETTINGS, preface |
 | 5 | Flow Control and DATA | NOT STARTED | — | Windows, recv-side enforcement, WINDOW_UPDATE, DATA delivery |
@@ -156,7 +155,7 @@ compiles clean with zero warnings.
   - `test_huffman_eos_rejected`: EOS symbol in non-terminal position → error
   - `test_huffman_invalid_padding`: trailing bits not all-ones → error
 
-**1.5 — _Static_assert checks**
+**1.5 — _Static_assert checks** ✓ DONE
 - Add all struct size assertions from CODING_STANDARDS.md §1.3 to
   `src/hive_internal.h`. They require the complete struct definitions,
   so they will expand and become active as structs are defined in later phases.
@@ -210,7 +209,7 @@ layer in isolation using minimal stubs.
 
 ### Tasks
 
-**2.1 — Frame type and flag constants**
+**2.1 — Frame type and flag constants** ✓ DONE
 - In `src/hive_frame.h`: define all `HIVE_FRAME_*` constants (0x0–0x9)
   per ARCHITECTURE.md §3.2
 - Define all frame flag constants: `HIVE_FLAG_END_STREAM (0x01)`,
