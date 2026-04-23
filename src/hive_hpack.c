@@ -767,8 +767,7 @@ huff_decode(const uint8_t *src,
 				int bits_used;
 				uint8_t sym;
 
-				bits_used =
-				    huff_decode_long(acc, nbits, &sym);
+				bits_used = huff_decode_long(acc, nbits, &sym);
 				if (bits_used < 0)
 					return HIVE_ERR_COMPRESSION;
 				if (bits_used == 0)
@@ -1675,8 +1674,9 @@ hpack_decode_block(hive_session_t *s,
 	(void)error_stream_id;
 	/* TODO(phase:4): route stream error to error_stream_id per ARCH §4.5.
 	 * For HEADERS blocks: error_stream_id == reassembly_stream_id.
-	 * For PUSH_PROMISE blocks: error_stream_id == reassembly_promised_stream_id.
-	 * The carrying stream is unaffected by PUSH_PROMISE decode errors. */
+	 * For PUSH_PROMISE blocks: error_stream_id ==
+	 * reassembly_promised_stream_id. The carrying stream is unaffected by
+	 * PUSH_PROMISE decode errors. */
 
 	if (s == NULL || (len > 0 && data == NULL))
 		return HIVE_ERR_INVALID_ARG;

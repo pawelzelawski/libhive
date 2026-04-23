@@ -12,6 +12,7 @@
 #include "../include/hive.h"
 #include "hive_frame.h"
 #include "hive_internal.h"
+#include "hive_send.h"
 
 /*
  * NULL-allocator shim.
@@ -272,8 +273,70 @@ hive_session_recv(hive_session_t *session, const uint8_t *data, size_t len)
 int
 hive_session_send(hive_session_t *session)
 {
-	(void)session;
-	return HIVE_ERR_SESSION_CLOSED;
+	struct iovec eff_iov[HIVE_SEND_IOV_MAX];
+	int eff_cnt = 0;
+	size_t total, skip, i;
+	ssize_t written;
+
+	if (session == NULL)
+		return HIVE_ERR_INVALID_ARG;
+
+	/*
+	 * Only flush pending DATA sources when no partial batch is outstanding.
+	 * While send_partial == 1 the existing iov batch must be fully drained
+	 * before new DATA frames may be appended; appending would corrupt the
+	 * send_partial_offset accounting.  See ARCHITECTURE.md §6.6.
+	 */
+	if (!session->send_partial)
+		send_queue_flush_data(session);
+
+	if (session->send_iov_count == 0)
+		return HIVE_OK;
+
+	/*
+	 * Build effective iov by skipping send_partial_offset bytes worth of
+	 * already-sent data from the front of the pending batch.
+	 */
+	skip = session->send_partial_offset;
+	total = 0;
+	for (i = 0; i < (size_t)session->send_iov_count; i++) {
+		size_t entry_len = session->send_iov[i].iov_len;
+
+		total += entry_len;
+		if (skip >= entry_len) {
+			skip -= entry_len; /* this entry already sent */
+		} else {
+			eff_iov[eff_cnt].iov_base =
+			    (char *)session->send_iov[i].iov_base + skip;
+			eff_iov[eff_cnt].iov_len = entry_len - skip;
+			eff_cnt++;
+			skip = 0;
+		}
+	}
+
+	written = session->callbacks.send(
+	    session, eff_iov, eff_cnt, session->user_data);
+
+	if (written < 0) {
+		/* Fatal — session is dead. */
+		session->session_state = HIVE_SESSION_CLOSED;
+		return HIVE_ERR_PROTOCOL;
+	}
+
+	session->send_partial_offset += (size_t)written;
+
+	if (session->send_partial_offset >= total) {
+		/* All bytes sent — reset queue for next batch. */
+		session->send_iov_count = 0;
+		session->send_buf_used = 0;
+		session->send_partial_offset = 0;
+		session->send_partial = 0;
+	} else {
+		/* Partial write — retain unsent tail. */
+		session->send_partial = 1;
+	}
+
+	return HIVE_OK;
 }
 
 int
@@ -286,8 +349,10 @@ hive_session_want_read(hive_session_t *session)
 int
 hive_session_want_write(hive_session_t *session)
 {
-	(void)session;
-	return 0;
+	if (session == NULL)
+		return 0;
+	return (session->send_iov_count > 0 || session->send_partial != 0) ? 1
+	                                                                   : 0;
 }
 
 int

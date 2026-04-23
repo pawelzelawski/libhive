@@ -1,15 +1,13 @@
 /*
  * hive_send.h — send queue helpers (internal)
  *
- * Declares frame_hdr_write(), a session-coupled thin wrapper around
- * frame_hdr_write_at() that writes directly into send_buf and advances
- * send_buf_used.
+ * Declares frame_hdr_write(), send_queue_append_ctrl(), and
+ * send_queue_flush_data(). These are internal to the library only.
  *
- * See ARCHITECTURE.md §6.2 for the canonical frame_hdr_write() pseudocode.
+ * See ARCHITECTURE.md §6.2 for frame_hdr_write() pseudocode.
  * See ARCHITECTURE.md §6.1 for the send buffer layout.
- *
- * Note: hive_send.c is wired into the Makefile in Task 2.5 once the
- * hive_session_t struct definition is in place.
+ * See ARCHITECTURE.md §6.3 for send_queue_append_ctrl() pseudocode.
+ * See ARCHITECTURE.md §6.6 for drain / partial-send model.
  *
  * Not included by embedders — internal to the library only.
  */
@@ -37,5 +35,38 @@ uint8_t *frame_hdr_write(hive_session_t *s,
                          uint8_t type,
                          uint8_t flags,
                          uint32_t stream_id);
+
+/*
+ * send_queue_append_ctrl — serialise one control frame into send_buf and
+ * append one iovec entry pointing at the complete frame.
+ *
+ * Writes the 9-byte frame header followed by `payload_len` bytes from
+ * `payload` (which may be NULL when payload_len == 0) contiguously into
+ * send_buf starting at send_buf_used.  Appends one iovec entry covering the
+ * full frame (9 + payload_len bytes) and advances send_buf_used.
+ *
+ * Control frames: SETTINGS, SETTINGS ACK, PING, PING ACK, RST_STREAM,
+ * WINDOW_UPDATE, GOAWAY.  See ARCHITECTURE.md §6.3.
+ *
+ * The caller must ensure there is room in send_buf and send_iov before
+ * calling.  Overflow checks are the caller's responsibility in Phase 4;
+ * Phase 6 adds iovec-overflow flushing (§6.7).
+ */
+void send_queue_append_ctrl(hive_session_t *s,
+                            uint8_t type,
+                            uint8_t flags,
+                            uint32_t stream_id,
+                            const uint8_t *payload,
+                            uint32_t payload_len);
+
+/*
+ * send_queue_flush_data — drive pending data_source streams into the send
+ * queue within flow control limits.
+ *
+ * Phase 4 stub: does nothing.  Phase 6 provides the real implementation.
+ * Called by hive_session_send() before building the effective iovec.
+ * See ARCHITECTURE.md §6.5 and §6.6.
+ */
+void send_queue_flush_data(hive_session_t *s);
 
 #endif /* HIVE_SEND_H */

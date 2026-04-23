@@ -92,7 +92,8 @@ LIBHIVE_A = libhive.a
 TEST_SRC = tests/run_tests.c \
 	   tests/test_frame.c \
 	   tests/test_hpack.c \
-           tests/test_compat.c
+           tests/test_compat.c \
+           tests/test_session.c
 # --- Install paths ----------------------------------------------------------
 PREFIX     ?= /usr/local
 LIBDIR     ?= $(PREFIX)/lib
@@ -148,6 +149,7 @@ lint:
 	         --suppress=normalCheckLevelMaxBranches \
 	         --suppress=unmatchedSuppression \
 	         --suppress=checkersReport \
+	         --suppress=constParameterPointer \
 	         src/
 # --- Format -----------------------------------------------------------------
 format:

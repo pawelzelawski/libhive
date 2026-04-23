@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-23
 **Current Phase**: Phase 4 — Session Core
-**Next Task**: 4.0 — Minimal send queue
+**Next Task**: 4.1 — Complete hive_session_t struct
 
 ### Phase Summary
 
@@ -593,7 +593,7 @@ without DATA frames (those come in Phase 5).
 
 ### Tasks
 
-**4.0 — Minimal send queue (prerequisite for all SETTINGS/ACK work)**
+**4.0 — Minimal send queue (prerequisite for all SETTINGS/ACK work)** ✓ DONE
 - Implement `send_queue_append_ctrl()` in `src/hive_send.c`:
   writes a 9-byte frame header + optional payload into `send_buf`,
   appends one iovec entry, advances `send_buf_used`

@@ -33,6 +33,25 @@
 #endif
 
 /* ------------------------------------------------------------------ */
+/* Send path compile-time cap (ARCHITECTURE.md §6.6).                 */
+/* opt_max_send_iov must never exceed HIVE_SEND_IOV_MAX.              */
+/* The default is 512; this cap is 1024.                              */
+/* ------------------------------------------------------------------ */
+
+#define HIVE_SEND_IOV_MAX 1024
+
+/* ------------------------------------------------------------------ */
+/* Session state enumeration (ARCHITECTURE.md §2.3).                  */
+/* ------------------------------------------------------------------ */
+
+typedef enum {
+	HIVE_SESSION_OPEN = 0,
+	HIVE_SESSION_GOAWAY_SENT = 1, /* we sent GOAWAY, draining in-flight */
+	HIVE_SESSION_GOAWAY_RECV = 2, /* peer sent GOAWAY, no new streams   */
+	HIVE_SESSION_CLOSED = 3,      /* session is dead, free it           */
+} hive_session_state_t;
+
+/* ------------------------------------------------------------------ */
 /* Compile-time struct size checks                                     */
 /* These are placeholders in Phase 1. Real assertions activate as     */
 /* struct definitions land in Phase 2 onward.                         */
@@ -105,11 +124,17 @@ struct hive_session {
 	uint32_t goaway_last_stream_id_recv;
 	uint32_t goaway_error_code_recv;
 
-	/* Minimal send region subset required by frame_hdr_write() */
+	/* Region C — connection state (minimal, Task 4.0+) */
+	uint8_t session_state; /* hive_session_state_t enum value */
+
+	/* Region J — send buffer (ARCHITECTURE.md §6.1) */
 	uint8_t *send_buf;
 	size_t send_buf_used;
+	size_t send_buf_cap;
 	struct iovec *send_iov;
 	uint32_t send_iov_count;
+	size_t send_partial_offset; /* bytes already sent from current batch */
+	uint8_t send_partial;       /* 1 = unsent tail from previous send    */
 
 	/* Test-visible error latch for Phase 2 parser tests */
 	int last_err;

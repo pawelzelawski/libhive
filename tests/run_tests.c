@@ -116,9 +116,19 @@ int test_hpack_encode_pending_size_update_dual(void);
 /* Phase 3.7 — standalone API */
 int test_hpack_standalone_encoder_decoder(void);
 
+/* --- test_session.c ------------------------------------------------------- */
+int test_send_control_frame_queued(void);
+int test_send_partial_write(void);
+int test_send_fatal_error(void);
+
 int
 main(void)
 {
+	/* Phase 4.0 — minimal send queue */
+	RUN(send_control_frame_queued);
+	RUN(send_partial_write);
+	RUN(send_fatal_error);
+
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);
 	RUN(frame_hdr_write_settings);
