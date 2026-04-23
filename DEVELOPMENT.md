@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-23
 **Current Phase**: Phase 3 — HPACK
-**Next Task**: 3.3 — String encode/decode
+**Next Task**: 3.4 — Full decoder: `hpack_decode_block()`
 
 ### Phase Summary
 
@@ -413,7 +413,7 @@ HPACK is tested standalone before being integrated into the session.)
   callers must check return value against `HPACK_INT_OVERFLOW`
 - `hpack_encode_int()` — encode integer with N-bit prefix into output buffer
 
-**3.3 — String encode/decode**
+**3.3 — String encode/decode** ✓ DONE
 - `hpack_decode_string()`: detect Huffman flag, decode into `hpack_scratch_name`
   (for header names) or `hpack_scratch_value` (for header values) — two separate
   scratch buffers are required so both decoded strings remain valid simultaneously
