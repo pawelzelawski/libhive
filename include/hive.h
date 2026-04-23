@@ -262,11 +262,17 @@ int hive_options_set_max_concurrent_streams(hive_options_t *opt, uint32_t v);
 int hive_options_set_initial_window_size(hive_options_t *opt, uint32_t v);
 int hive_options_set_max_frame_size(hive_options_t *opt, uint32_t v);
 int hive_options_set_max_header_list_size(hive_options_t *opt, uint32_t v);
+int hive_options_set_max_header_count(hive_options_t *opt, uint32_t v);
 int hive_options_set_max_continuation_size(hive_options_t *opt, uint32_t v);
+int hive_options_set_max_settings_pending(hive_options_t *opt, uint32_t v);
+int hive_options_set_rst_stream_flood_threshold(hive_options_t *opt,
+                                                uint32_t v);
+int hive_options_set_rst_stream_flood_window_secs(hive_options_t *opt,
+                                                  uint32_t v);
 int hive_options_set_max_send_iov(hive_options_t *opt, uint32_t v);
-int hive_options_set_settings_flood_limit(hive_options_t *opt, uint32_t v);
-int hive_options_set_rst_flood_threshold(hive_options_t *opt, uint32_t v);
-int hive_options_set_rst_flood_window_secs(hive_options_t *opt, uint32_t v);
+int hive_options_set_max_header_string_size(hive_options_t *opt, uint32_t v);
+int hive_options_set_no_http_messaging(hive_options_t *opt, uint32_t v);
+int hive_options_set_no_auto_ping_ack(hive_options_t *opt, uint32_t v);
 
 /* ------------------------------------------------------------------ */
 /* Session lifecycle                                                   */

@@ -199,16 +199,188 @@ standalone_index_to_name(const hive_hpack_decoder_t *dec,
  * Full implementations land in Phase 4 onward.
  */
 
+/*
+ * Options API — ARCHITECTURE.md §9.5.
+ *
+ * hive_options_t uses system malloc (calloc/free) directly because options
+ * are created once at startup, not per-connection.  This is the only place
+ * in the library where system allocator calls are permitted outside the
+ * NULL-allocator shim above.  See CODING_STANDARDS.md §2.1.
+ */
+
 hive_options_t *
 hive_options_new(void)
 {
-	return NULL;
+	hive_options_t *opt;
+
+	opt = calloc(1u, sizeof(*opt));
+	if (opt == NULL)
+		return NULL;
+
+	/* Apply defaults per ARCHITECTURE.md §9.5. */
+	opt->opt_header_table_size = 4096u;
+	opt->opt_enable_push = 1u;
+	opt->opt_max_concurrent_streams = 100u;
+	opt->opt_initial_window_size = 65535u;
+	opt->opt_max_frame_size = 16384u;
+	opt->opt_max_header_list_size = 65536u;
+	opt->opt_max_header_count = 100u;
+	opt->opt_max_continuation_size = 65536u;
+	opt->opt_max_settings_pending = 3u;
+	opt->opt_rst_flood_threshold = 100u;
+	opt->opt_rst_flood_window_secs = 10u;
+	opt->opt_max_send_iov = 512u;
+	opt->opt_max_header_string_size = 8192u;
+	opt->opt_no_http_messaging = 0u;
+	opt->opt_no_auto_ping_ack = 0u;
+
+	return opt;
 }
 
 void
 hive_options_free(hive_options_t *opt)
 {
-	(void)opt;
+	free(opt);
+}
+
+int
+hive_options_set_header_table_size(hive_options_t *opt, uint32_t v)
+{
+	if (opt == NULL || v > 65536u)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_header_table_size = v;
+	return HIVE_OK;
+}
+
+int
+hive_options_set_enable_push(hive_options_t *opt, uint32_t v)
+{
+	if (opt == NULL || v > 1u)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_enable_push = v;
+	return HIVE_OK;
+}
+
+int
+hive_options_set_max_concurrent_streams(hive_options_t *opt, uint32_t v)
+{
+	if (opt == NULL || v < 1u || v > 65535u)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_max_concurrent_streams = v;
+	return HIVE_OK;
+}
+
+int
+hive_options_set_initial_window_size(hive_options_t *opt, uint32_t v)
+{
+	/* Range: 1 – 2^31-1 = 2147483647. */
+	if (opt == NULL || v < 1u || v > 2147483647u)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_initial_window_size = v;
+	return HIVE_OK;
+}
+
+int
+hive_options_set_max_frame_size(hive_options_t *opt, uint32_t v)
+{
+	if (opt == NULL || v < 16384u || v > 16777215u)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_max_frame_size = v;
+	return HIVE_OK;
+}
+
+int
+hive_options_set_max_header_list_size(hive_options_t *opt, uint32_t v)
+{
+	if (opt == NULL || v < 1u || v > 16777215u)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_max_header_list_size = v;
+	return HIVE_OK;
+}
+
+int
+hive_options_set_max_header_count(hive_options_t *opt, uint32_t v)
+{
+	if (opt == NULL || v < 1u || v > 65535u)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_max_header_count = v;
+	return HIVE_OK;
+}
+
+int
+hive_options_set_max_continuation_size(hive_options_t *opt, uint32_t v)
+{
+	if (opt == NULL || v < 16384u || v > 16777215u)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_max_continuation_size = v;
+	return HIVE_OK;
+}
+
+int
+hive_options_set_max_settings_pending(hive_options_t *opt, uint32_t v)
+{
+	if (opt == NULL || v < 1u || v > 255u)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_max_settings_pending = v;
+	return HIVE_OK;
+}
+
+int
+hive_options_set_rst_stream_flood_threshold(hive_options_t *opt, uint32_t v)
+{
+	if (opt == NULL || v < 1u || v > 65535u)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_rst_flood_threshold = v;
+	return HIVE_OK;
+}
+
+int
+hive_options_set_rst_stream_flood_window_secs(hive_options_t *opt, uint32_t v)
+{
+	if (opt == NULL || v < 1u || v > 3600u)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_rst_flood_window_secs = v;
+	return HIVE_OK;
+}
+
+int
+hive_options_set_max_send_iov(hive_options_t *opt, uint32_t v)
+{
+	/*
+	 * Upper bound capped at HIVE_SEND_IOV_MAX (compile-time constant 1024).
+	 * ARCHITECTURE.md §9.5: exceeding this returns HIVE_ERR_INVALID_ARG.
+	 */
+	if (opt == NULL || v < 64u || v > HIVE_SEND_IOV_MAX)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_max_send_iov = v;
+	return HIVE_OK;
+}
+
+int
+hive_options_set_max_header_string_size(hive_options_t *opt, uint32_t v)
+{
+	if (opt == NULL || v < 256u || v > 65536u)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_max_header_string_size = v;
+	return HIVE_OK;
+}
+
+int
+hive_options_set_no_http_messaging(hive_options_t *opt, uint32_t v)
+{
+	if (opt == NULL || v > 1u)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_no_http_messaging = (uint8_t)v;
+	return HIVE_OK;
+}
+
+int
+hive_options_set_no_auto_ping_ack(hive_options_t *opt, uint32_t v)
+{
+	if (opt == NULL || v > 1u)
+		return HIVE_ERR_INVALID_ARG;
+	opt->opt_no_auto_ping_ack = (uint8_t)v;
+	return HIVE_OK;
 }
 
 hive_session_t *
@@ -549,94 +721,6 @@ hive_stream_get_user_data(hive_session_t *session, uint32_t stream_id)
 	(void)session;
 	(void)stream_id;
 	return NULL;
-}
-
-int
-hive_options_set_header_table_size(hive_options_t *opt, uint32_t v)
-{
-	(void)opt;
-	(void)v;
-	return HIVE_ERR_INVALID_ARG;
-}
-
-int
-hive_options_set_enable_push(hive_options_t *opt, uint32_t v)
-{
-	(void)opt;
-	(void)v;
-	return HIVE_ERR_INVALID_ARG;
-}
-
-int
-hive_options_set_max_concurrent_streams(hive_options_t *opt, uint32_t v)
-{
-	(void)opt;
-	(void)v;
-	return HIVE_ERR_INVALID_ARG;
-}
-
-int
-hive_options_set_initial_window_size(hive_options_t *opt, uint32_t v)
-{
-	(void)opt;
-	(void)v;
-	return HIVE_ERR_INVALID_ARG;
-}
-
-int
-hive_options_set_max_frame_size(hive_options_t *opt, uint32_t v)
-{
-	(void)opt;
-	(void)v;
-	return HIVE_ERR_INVALID_ARG;
-}
-
-int
-hive_options_set_max_header_list_size(hive_options_t *opt, uint32_t v)
-{
-	(void)opt;
-	(void)v;
-	return HIVE_ERR_INVALID_ARG;
-}
-
-int
-hive_options_set_max_continuation_size(hive_options_t *opt, uint32_t v)
-{
-	(void)opt;
-	(void)v;
-	return HIVE_ERR_INVALID_ARG;
-}
-
-int
-hive_options_set_max_send_iov(hive_options_t *opt, uint32_t v)
-{
-	(void)opt;
-	(void)v;
-	return HIVE_ERR_INVALID_ARG;
-}
-
-int
-hive_options_set_settings_flood_limit(hive_options_t *opt, uint32_t v)
-{
-	(void)opt;
-	(void)v;
-	return HIVE_ERR_INVALID_ARG;
-}
-
-int
-hive_options_set_rst_flood_threshold(hive_options_t *opt, uint32_t v)
-{
-	(void)opt;
-	(void)v;
-	return HIVE_ERR_INVALID_ARG;
-}
-
-int
-hive_options_set_rst_flood_window_secs(hive_options_t *opt, uint32_t v)
-{
-	(void)opt;
-	(void)v;
-	return HIVE_ERR_INVALID_ARG;
 }
 
 int

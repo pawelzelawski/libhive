@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-23
 **Current Phase**: Phase 4 — Session Core
-**Next Task**: 4.2 — Options
+**Next Task**: 4.3 — Session creation and teardown
 
 ### Phase Summary
 
@@ -13,7 +13,7 @@
 | 1 | Foundation | DONE | 16/16 (Phase 1 slice) | Tasks 1.1–1.5 done on Linux + OpenBSD |
 | 2 | Frame Parser | DONE | 54/54 (Phase 2 slice) | Tasks 2.1–2.5 done on Linux + OpenBSD; completion criteria confirmed; audit fixes applied 2026-04-23 |
 | 3 | HPACK | DONE | 34/34 (Phase 3 slice) | Tasks 3.1-3.7 done on Linux + OpenBSD; Phase 3 completion criteria confirmed 2026-04-23 |
-| 4 | Session Core | IN PROGRESS | 3/? (Phase 4 slice so far) | Tasks 4.0–4.1 done on Linux + OpenBSD; next: 4.2 Options |
+| 4 | Session Core | IN PROGRESS | 6/? (Phase 4 slice so far) | Tasks 4.0–4.2 done on Linux; next: 4.3 Session creation |
 | 5 | Flow Control and DATA | NOT STARTED | — | Windows, recv-side enforcement, WINDOW_UPDATE, DATA delivery |
 | 6 | Submit and Send | NOT STARTED | — | Full send queue, partial-send, response/request submit, new callbacks |
 | 7 | Security Hardening | NOT STARTED | — | Flood protection, exhaustion, limits, Content-Length, clock abstraction |
@@ -628,7 +628,7 @@ without DATA frames (those come in Phase 5).
   now have real struct definitions to check against
 - Verify `sizeof(hive_stream_t) == 64` on both platforms
 
-**4.2 — Options**
+**4.2 — Options** ✓ DONE
 - Implement `hive_options_t` struct and all `hive_options_set_*()` functions
   using system malloc (options are not per-session)
 - `hive_options_new()`: calloc a zeroed options struct, apply all defaults

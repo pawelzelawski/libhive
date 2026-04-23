@@ -120,6 +120,9 @@ int test_hpack_standalone_encoder_decoder(void);
 int test_send_control_frame_queued(void);
 int test_send_partial_write(void);
 int test_send_fatal_error(void);
+int test_options_defaults(void);
+int test_options_set_valid(void);
+int test_options_set_invalid(void);
 
 int
 main(void)
@@ -128,6 +131,11 @@ main(void)
 	RUN(send_control_frame_queued);
 	RUN(send_partial_write);
 	RUN(send_fatal_error);
+
+	/* Phase 4.2 — options API */
+	RUN(options_defaults);
+	RUN(options_set_valid);
+	RUN(options_set_invalid);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);

@@ -8,12 +8,22 @@
  *     drains completely.
  *   test_send_fatal_error — callback returns -1; session marked CLOSED.
  *
- * The session struct is initialised manually on the stack, following the same
- * pattern as test_frame.c.  Full session lifecycle (create / free) is tested
- * in tasks 4.1–4.3.
+ * Task 4.2: options API.
+ *   test_options_defaults — hive_options_new() applies all defaults from
+ *     ARCHITECTURE.md §9.5.
+ *   test_options_set_valid — each setter accepts its boundary values.
+ *   test_options_set_invalid — each setter rejects out-of-range values.
  *
- * See DEVELOPMENT.md — Phase 4, Task 4.0.
- * See ARCHITECTURE.md §6.1, §6.3, §6.6.
+ * NOTE: test_options_set_max_concurrent (verifying stream_slots size after
+ * session creation) is deferred to Task 4.3 because it requires a fully
+ * working hive_session_server_new().
+ *
+ * The session struct for send-queue tests is initialised manually on the
+ * stack, following the same pattern as test_frame.c.  Full session lifecycle
+ * (create / free) is tested in tasks 4.1–4.3.
+ *
+ * See DEVELOPMENT.md — Phase 4, Tasks 4.0 and 4.2.
+ * See ARCHITECTURE.md §6.1, §6.3, §6.6, §9.5.
  */
 
 #include <stddef.h>
@@ -30,6 +40,9 @@
 int test_send_control_frame_queued(void);
 int test_send_partial_write(void);
 int test_send_fatal_error(void);
+int test_options_defaults(void);
+int test_options_set_valid(void);
+int test_options_set_invalid(void);
 
 /* ------------------------------------------------------------------ */
 /* Shared test infrastructure                                          */
@@ -271,6 +284,325 @@ test_send_fatal_error(void)
 	ASSERT(ret == HIVE_ERR_PROTOCOL);
 	ASSERT(s.session_state == (uint8_t)HIVE_SESSION_CLOSED);
 
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* test_options_defaults                                               */
+/* ------------------------------------------------------------------ */
+
+/*
+ * hive_options_new() must apply every default listed in ARCHITECTURE.md §9.5.
+ * Verified by reading each field directly from the returned struct.
+ * hive_options_free() must not crash and must release the allocation.
+ */
+int
+test_options_defaults(void)
+{
+	hive_options_t *opt;
+
+	opt = hive_options_new();
+	ASSERT(opt != NULL);
+
+	ASSERT(opt->opt_header_table_size      == 4096u);
+	ASSERT(opt->opt_enable_push            == 1u);
+	ASSERT(opt->opt_max_concurrent_streams == 100u);
+	ASSERT(opt->opt_initial_window_size    == 65535u);
+	ASSERT(opt->opt_max_frame_size         == 16384u);
+	ASSERT(opt->opt_max_header_list_size   == 65536u);
+	ASSERT(opt->opt_max_header_count       == 100u);
+	ASSERT(opt->opt_max_continuation_size  == 65536u);
+	ASSERT(opt->opt_max_settings_pending   == 3u);
+	ASSERT(opt->opt_rst_flood_threshold    == 100u);
+	ASSERT(opt->opt_rst_flood_window_secs  == 10u);
+	ASSERT(opt->opt_max_send_iov           == 512u);
+	ASSERT(opt->opt_max_header_string_size == 8192u);
+	ASSERT(opt->opt_no_http_messaging      == 0u);
+	ASSERT(opt->opt_no_auto_ping_ack       == 0u);
+
+	hive_options_free(opt);
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* test_options_set_valid                                              */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Each setter must accept valid boundary values and update the field.
+ */
+int
+test_options_set_valid(void)
+{
+	hive_options_t *opt;
+	int ret;
+
+	opt = hive_options_new();
+	ASSERT(opt != NULL);
+
+	/* header_table_size: 0–65536 */
+	ret = hive_options_set_header_table_size(opt, 0u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_header_table_size == 0u);
+	ret = hive_options_set_header_table_size(opt, 65536u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_header_table_size == 65536u);
+
+	/* enable_push: 0–1 */
+	ret = hive_options_set_enable_push(opt, 0u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_enable_push == 0u);
+	ret = hive_options_set_enable_push(opt, 1u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_enable_push == 1u);
+
+	/* max_concurrent_streams: 1–65535 */
+	ret = hive_options_set_max_concurrent_streams(opt, 1u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_concurrent_streams == 1u);
+	ret = hive_options_set_max_concurrent_streams(opt, 65535u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_concurrent_streams == 65535u);
+
+	/* initial_window_size: 1–2147483647 */
+	ret = hive_options_set_initial_window_size(opt, 1u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_initial_window_size == 1u);
+	ret = hive_options_set_initial_window_size(opt, 2147483647u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_initial_window_size == 2147483647u);
+
+	/* max_frame_size: 16384–16777215 */
+	ret = hive_options_set_max_frame_size(opt, 16384u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_frame_size == 16384u);
+	ret = hive_options_set_max_frame_size(opt, 16777215u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_frame_size == 16777215u);
+
+	/* max_header_list_size: 1–16777215 */
+	ret = hive_options_set_max_header_list_size(opt, 1u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_header_list_size == 1u);
+	ret = hive_options_set_max_header_list_size(opt, 16777215u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_header_list_size == 16777215u);
+
+	/* max_header_count: 1–65535 */
+	ret = hive_options_set_max_header_count(opt, 1u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_header_count == 1u);
+	ret = hive_options_set_max_header_count(opt, 65535u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_header_count == 65535u);
+
+	/* max_continuation_size: 16384–16777215 */
+	ret = hive_options_set_max_continuation_size(opt, 16384u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_continuation_size == 16384u);
+	ret = hive_options_set_max_continuation_size(opt, 16777215u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_continuation_size == 16777215u);
+
+	/* max_settings_pending: 1–255 */
+	ret = hive_options_set_max_settings_pending(opt, 1u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_settings_pending == 1u);
+	ret = hive_options_set_max_settings_pending(opt, 255u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_settings_pending == 255u);
+
+	/* rst_stream_flood_threshold: 1–65535 */
+	ret = hive_options_set_rst_stream_flood_threshold(opt, 1u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_rst_flood_threshold == 1u);
+	ret = hive_options_set_rst_stream_flood_threshold(opt, 65535u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_rst_flood_threshold == 65535u);
+
+	/* rst_stream_flood_window_secs: 1–3600 */
+	ret = hive_options_set_rst_stream_flood_window_secs(opt, 1u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_rst_flood_window_secs == 1u);
+	ret = hive_options_set_rst_stream_flood_window_secs(opt, 3600u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_rst_flood_window_secs == 3600u);
+
+	/* max_send_iov: 64–HIVE_SEND_IOV_MAX (1024) */
+	ret = hive_options_set_max_send_iov(opt, 64u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_send_iov == 64u);
+	ret = hive_options_set_max_send_iov(opt, HIVE_SEND_IOV_MAX);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_send_iov == HIVE_SEND_IOV_MAX);
+
+	/* max_header_string_size: 256–65536 */
+	ret = hive_options_set_max_header_string_size(opt, 256u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_header_string_size == 256u);
+	ret = hive_options_set_max_header_string_size(opt, 65536u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_max_header_string_size == 65536u);
+
+	/* no_http_messaging: 0–1 */
+	ret = hive_options_set_no_http_messaging(opt, 1u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_no_http_messaging == 1u);
+	ret = hive_options_set_no_http_messaging(opt, 0u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_no_http_messaging == 0u);
+
+	/* no_auto_ping_ack: 0–1 */
+	ret = hive_options_set_no_auto_ping_ack(opt, 1u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_no_auto_ping_ack == 1u);
+	ret = hive_options_set_no_auto_ping_ack(opt, 0u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(opt->opt_no_auto_ping_ack == 0u);
+
+	hive_options_free(opt);
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* test_options_set_invalid                                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Each setter must return HIVE_ERR_INVALID_ARG for out-of-range values
+ * and must NOT modify the option field on failure.
+ */
+int
+test_options_set_invalid(void)
+{
+	hive_options_t *opt;
+	int ret;
+
+	opt = hive_options_new();
+	ASSERT(opt != NULL);
+
+	/* header_table_size: > 65536 rejected */
+	ret = hive_options_set_header_table_size(opt, 65537u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+	ASSERT(opt->opt_header_table_size == 4096u); /* default unchanged */
+
+	/* enable_push: > 1 rejected */
+	ret = hive_options_set_enable_push(opt, 2u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+	ASSERT(opt->opt_enable_push == 1u);
+
+	/* max_concurrent_streams: 0 rejected */
+	ret = hive_options_set_max_concurrent_streams(opt, 0u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+	ASSERT(opt->opt_max_concurrent_streams == 100u);
+
+	/* max_concurrent_streams: > 65535 rejected */
+	ret = hive_options_set_max_concurrent_streams(opt, 65536u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* initial_window_size: 0 rejected */
+	ret = hive_options_set_initial_window_size(opt, 0u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+	ASSERT(opt->opt_initial_window_size == 65535u);
+
+	/* initial_window_size: > 2^31-1 rejected */
+	ret = hive_options_set_initial_window_size(opt, 2147483648u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* max_frame_size: < 16384 rejected */
+	ret = hive_options_set_max_frame_size(opt, 16383u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+	ASSERT(opt->opt_max_frame_size == 16384u);
+
+	/* max_frame_size: > 16777215 rejected */
+	ret = hive_options_set_max_frame_size(opt, 16777216u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* max_header_list_size: 0 rejected */
+	ret = hive_options_set_max_header_list_size(opt, 0u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* max_header_count: 0 rejected */
+	ret = hive_options_set_max_header_count(opt, 0u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* max_continuation_size: < 16384 rejected */
+	ret = hive_options_set_max_continuation_size(opt, 16383u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* max_settings_pending: 0 rejected */
+	ret = hive_options_set_max_settings_pending(opt, 0u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* max_settings_pending: > 255 rejected */
+	ret = hive_options_set_max_settings_pending(opt, 256u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* rst_stream_flood_threshold: 0 rejected */
+	ret = hive_options_set_rst_stream_flood_threshold(opt, 0u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* rst_stream_flood_window_secs: > 3600 rejected */
+	ret = hive_options_set_rst_stream_flood_window_secs(opt, 3601u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* max_send_iov: < 64 rejected */
+	ret = hive_options_set_max_send_iov(opt, 63u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* max_send_iov: > HIVE_SEND_IOV_MAX rejected */
+	ret = hive_options_set_max_send_iov(opt, HIVE_SEND_IOV_MAX + 1u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* max_header_string_size: < 256 rejected */
+	ret = hive_options_set_max_header_string_size(opt, 255u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* max_header_string_size: > 65536 rejected */
+	ret = hive_options_set_max_header_string_size(opt, 65537u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* no_http_messaging: > 1 rejected */
+	ret = hive_options_set_no_http_messaging(opt, 2u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* no_auto_ping_ack: > 1 rejected */
+	ret = hive_options_set_no_auto_ping_ack(opt, 2u);
+	ASSERT(ret == HIVE_ERR_INVALID_ARG);
+
+	/* NULL opt pointer: all setters reject it */
+	ASSERT(hive_options_set_header_table_size(NULL, 4096u)
+	    == HIVE_ERR_INVALID_ARG);
+	ASSERT(hive_options_set_enable_push(NULL, 0u)
+	    == HIVE_ERR_INVALID_ARG);
+	ASSERT(hive_options_set_max_concurrent_streams(NULL, 1u)
+	    == HIVE_ERR_INVALID_ARG);
+	ASSERT(hive_options_set_initial_window_size(NULL, 65535u)
+	    == HIVE_ERR_INVALID_ARG);
+	ASSERT(hive_options_set_max_frame_size(NULL, 16384u)
+	    == HIVE_ERR_INVALID_ARG);
+	ASSERT(hive_options_set_max_header_list_size(NULL, 65536u)
+	    == HIVE_ERR_INVALID_ARG);
+	ASSERT(hive_options_set_max_header_count(NULL, 100u)
+	    == HIVE_ERR_INVALID_ARG);
+	ASSERT(hive_options_set_max_continuation_size(NULL, 65536u)
+	    == HIVE_ERR_INVALID_ARG);
+	ASSERT(hive_options_set_max_settings_pending(NULL, 3u)
+	    == HIVE_ERR_INVALID_ARG);
+	ASSERT(hive_options_set_rst_stream_flood_threshold(NULL, 100u)
+	    == HIVE_ERR_INVALID_ARG);
+	ASSERT(hive_options_set_rst_stream_flood_window_secs(NULL, 10u)
+	    == HIVE_ERR_INVALID_ARG);
+	ASSERT(hive_options_set_max_send_iov(NULL, 512u)
+	    == HIVE_ERR_INVALID_ARG);
+	ASSERT(hive_options_set_max_header_string_size(NULL, 8192u)
+	    == HIVE_ERR_INVALID_ARG);
+	ASSERT(hive_options_set_no_http_messaging(NULL, 0u)
+	    == HIVE_ERR_INVALID_ARG);
+	ASSERT(hive_options_set_no_auto_ping_ack(NULL, 0u)
+	    == HIVE_ERR_INVALID_ARG);
+
+	hive_options_free(opt);
 	return 1;
 }
 

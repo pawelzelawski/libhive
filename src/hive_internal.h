@@ -131,12 +131,28 @@ _Static_assert(sizeof(hive_settings_t) == 24,
 /* huff_entry_t size check is active in src/hive_hpack.h next to the type. */
 
 /* ------------------------------------------------------------------ */
-/* Options struct (Phase 4.2 implements the full API)                  */
+/* Options struct (ARCHITECTURE.md §9.5)                              */
+/* Allocated with system calloc by hive_options_new(); freed with     */
+/* system free by hive_options_free().  Not per-session.              */
 /* ------------------------------------------------------------------ */
 
 struct hive_options {
-	/* All option fields go here in Task 4.2.  Placeholder for now. */
-	uint32_t placeholder;
+	uint32_t opt_header_table_size;      /* dflt 4096,  range 0–65536     */
+	uint32_t opt_enable_push;            /* dflt 1,     range 0–1         */
+	uint32_t opt_max_concurrent_streams; /* dflt 100,   range 1–65535     */
+	uint32_t opt_initial_window_size;    /* dflt 65535, range 1–2^31-1   */
+	uint32_t opt_max_frame_size; /* dflt 16384, range 16384–16777215 */
+	uint32_t opt_max_header_list_size; /* dflt 65536, range 1–16777215  */
+	uint32_t opt_max_header_count;     /* dflt 100,   range 1–65535     */
+	uint32_t
+	    opt_max_continuation_size; /* dflt 65536, range 16384–16777215 */
+	uint32_t opt_max_settings_pending;  /* dflt 3,     range 1–255       */
+	uint32_t opt_rst_flood_threshold;   /* dflt 100,   range 1–65535     */
+	uint32_t opt_rst_flood_window_secs; /* dflt 10,    range 1–3600      */
+	uint32_t opt_max_send_iov; /* dflt 512,   range 64–HIVE_SEND_IOV_MAX */
+	uint32_t opt_max_header_string_size; /* dflt 8192,  range 256–65536   */
+	uint8_t opt_no_http_messaging;       /* dflt 0,     range 0–1         */
+	uint8_t opt_no_auto_ping_ack;        /* dflt 0,     range 0–1         */
 };
 
 /* ------------------------------------------------------------------ */
@@ -168,7 +184,7 @@ struct hive_session {
 	uint32_t opt_max_frame_size; /* SETTINGS_MAX_FRAME_SIZE, dflt 16384 */
 	uint32_t opt_max_header_list_size; /* decoded header list limit, dflt
 	                                      65536  */
-	uint32_t opt_max_header_count;     /* max headers per block, dflt 100     */
+	uint32_t opt_max_header_count; /* max headers per block, dflt 100     */
 	uint32_t opt_max_continuation_size; /* reassembly cap, dflt
 	                                       4×max_frame_size  */
 	uint32_t opt_max_settings_pending;  /* max unACK'd outbound SETTINGS,
@@ -179,8 +195,8 @@ struct hive_session {
 	uint32_t opt_max_send_iov; /* iovec array size, dflt 512             */
 	uint32_t opt_max_header_string_size; /* Huffman scratch size/buf, dflt
 	                                        8192    */
-	uint8_t opt_no_http_messaging;       /* 0 = validate per RFC 9113 §8       */
-	uint8_t opt_no_auto_ping_ack;        /* 0 = auto-ACK PING frames	*/
+	uint8_t opt_no_http_messaging; /* 0 = validate per RFC 9113 §8       */
+	uint8_t opt_no_auto_ping_ack;  /* 0 = auto-ACK PING frames	*/
 
 	/* ------------------------------------------------------------ */
 	/* Region C — Connection State                                   */
