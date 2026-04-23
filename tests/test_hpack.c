@@ -1,10 +1,11 @@
 /*
- * test_hpack.c - HPACK static table, Huffman and dynamic table tests
+ * test_hpack.c - HPACK static table, Huffman, dynamic table and varint tests
  *
  * Phase 1.4: static table and Huffman tests.
  * Phase 3.1: dynamic table (hpack_table_t) tests.
+ * Phase 3.2: integer varint encode/decode tests.
  *
- * See DEVELOPMENT.md tasks 1.4 and 3.1.
+ * See DEVELOPMENT.md tasks 1.4, 3.1 and 3.2.
  */
 
 #include <stddef.h>
@@ -34,6 +35,13 @@ int test_hpack_table_evict_to_zero(void);
 int test_hpack_table_rfc_size(void);
 int test_hpack_table_oversized_entry(void);
 int test_hpack_always_copy(void);
+
+/* Phase 3.2 — integer varint encode/decode */
+int test_hpack_int_decode_1byte(void);
+int test_hpack_int_decode_multibyte(void);
+int test_hpack_int_decode_truncated(void);
+int test_hpack_int_decode_overflow(void);
+int test_hpack_int_encode_decode_roundtrip(void);
 
 int
 test_static_table_size(void)
@@ -507,6 +515,156 @@ test_hpack_table_oversized_entry(void)
 	ASSERT(t.count == 1);
 
 	hpack_table_free(&t, &test_mem);
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 3.2 — hpack_decode_int / hpack_encode_int                    */
+/* ------------------------------------------------------------------ */
+
+/*
+ * test_hpack_int_decode_1byte — value fits entirely in the prefix bits.
+ *
+ * RFC 7541 §C.1.1: integer value 10 with a 5-bit prefix.
+ * Input byte: 0x0a (= 10 decimal).  Since 10 < 31 (prefix_max for N=5),
+ * the value is encoded in the single prefix byte.
+ * consumed must be 1.
+ */
+int
+test_hpack_int_decode_1byte(void)
+{
+	static const uint8_t src[] = { 0x0a };
+	size_t   consumed;
+	uint32_t val;
+
+	val = hpack_decode_int(src, sizeof(src), 5, &consumed);
+	ASSERT(val == 10);
+	ASSERT(consumed == 1);
+	return 1;
+}
+
+/*
+ * test_hpack_int_decode_multibyte — multi-byte continuation decoding.
+ *
+ * RFC 7541 §C.1.3: integer value 1337 with a 5-bit prefix.
+ * Encoded as: [0x1f, 0x9a, 0x0a]
+ *   src[0] = 0x1f: prefix value = 31 = prefix_max → continuation
+ *   src[1] = 0x9a: data = 0x1a = 26, continuation bit set
+ *   src[2] = 0x0a: data = 0x0a = 10, continuation bit clear → done
+ *   val = 31 + (26 << 0) + (10 << 7) = 31 + 26 + 1280 = 1337
+ * consumed must be 3.
+ */
+int
+test_hpack_int_decode_multibyte(void)
+{
+	static const uint8_t src[] = { 0x1f, 0x9a, 0x0a };
+	size_t   consumed;
+	uint32_t val;
+
+	val = hpack_decode_int(src, sizeof(src), 5, &consumed);
+	ASSERT(val == 1337);
+	ASSERT(consumed == 3);
+	return 1;
+}
+
+/*
+ * test_hpack_int_decode_truncated — input ends mid-continuation.
+ *
+ * src[0] = 0x1f (prefix_bits=5, value=31, multi-byte required).
+ * src[1] = 0x9a (continuation bit set, but no further byte follows).
+ * The loop exhausts the input without a terminating byte → OVERFLOW.
+ */
+int
+test_hpack_int_decode_truncated(void)
+{
+	static const uint8_t src[] = { 0x1f, 0x9a };
+	size_t   consumed;
+	uint32_t val;
+
+	val = hpack_decode_int(src, sizeof(src), 5, &consumed);
+	ASSERT(val == HPACK_INT_OVERFLOW);
+	return 1;
+}
+
+/*
+ * test_hpack_int_decode_overflow — continuation bytes push value above
+ * UINT32_MAX.
+ *
+ * Input (prefix_bits=5):
+ *   [0x1f, 0xff, 0xff, 0xff, 0xff, 0xff]
+ *   src[0] = 0x1f: val=31, multi-byte
+ *   Bytes 1-4 (0xff each, data=0x7f, continuation set):
+ *     iter1: val = 31 + 127 = 158,            m=7
+ *     iter2: val = 158 + 16256 = 16414,       m=14
+ *     iter3: val = 16414 + 2080768 = 2097182, m=21
+ *     iter4: val = 2097182 + 266338304 = 268435486, m=28
+ *   Byte 5 (0xff, data=0x7f, m=28 at entry):
+ *     tmp = 268435486 + (0x7f << 28) = 34359738398 > UINT32_MAX
+ *     → HPACK_INT_OVERFLOW (64-bit overflow check fires)
+ */
+int
+test_hpack_int_decode_overflow(void)
+{
+	static const uint8_t src[] = { 0x1f, 0xff, 0xff, 0xff, 0xff, 0xff };
+	size_t   consumed;
+	uint32_t val;
+
+	val = hpack_decode_int(src, sizeof(src), 5, &consumed);
+	ASSERT(val == HPACK_INT_OVERFLOW);
+	return 1;
+}
+
+/*
+ * test_hpack_int_encode_decode_roundtrip — encode then decode, verify.
+ *
+ * Tests values covering single-byte (val < prefix_max) and multi-byte
+ * (val >= prefix_max) paths.  Confirms the consumed byte count equals
+ * the encoded byte count for every test vector.
+ */
+int
+test_hpack_int_encode_decode_roundtrip(void)
+{
+	/*
+	 * {val, prefix_bits, expected_encoded_len}
+	 * 0 with 5-bit:  single byte (0 < 31)
+	 * 30 with 5-bit: single byte (30 < 31)
+	 * 1337 with 5-bit: 3 bytes (RFC 7541 §C.1.3)
+	 * 0 with 1-bit:  single byte (0 < 1)
+	 * 1 with 1-bit:  multi-byte (1 >= 1)
+	 * 254 with 8-bit: single byte (254 < 255)
+	 * 256 with 8-bit: 2 bytes (256 - 255 = 1 < 128): 0xFF, 0x01
+	 */
+	static const struct {
+		uint32_t val;
+		int      prefix_bits;
+		size_t   expected_len;
+	} cases[] = {
+		{0,    5, 1},
+		{30,   5, 1},
+		{1337, 5, 3},
+		{0,    1, 1},
+		{1,    1, 2},
+		{254,  8, 1},
+		{256,  8, 2},
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+		uint8_t  buf[16];
+		size_t   enc_len;
+		size_t   consumed;
+		uint32_t decoded;
+
+		enc_len = hpack_encode_int(buf, sizeof(buf), 0x00,
+		    cases[i].prefix_bits, cases[i].val);
+		ASSERT(enc_len == cases[i].expected_len);
+
+		decoded = hpack_decode_int(buf, enc_len, cases[i].prefix_bits,
+		    &consumed);
+		ASSERT(decoded != HPACK_INT_OVERFLOW);
+		ASSERT(decoded == cases[i].val);
+		ASSERT(consumed == enc_len);
+	}
 	return 1;
 }
 

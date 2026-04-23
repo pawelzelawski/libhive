@@ -110,6 +110,20 @@ typedef struct {
 } hpack_table_t;
 
 /* ------------------------------------------------------------------ */
+/* Integer varint constants                                            */
+/* See ARCHITECTURE.md §4.7.                                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * HPACK_INT_OVERFLOW — sentinel returned by hpack_decode_int() on
+ * truncated input or integer overflow.  UINT32_MAX is not a valid
+ * decoded value because all HPACK integer uses are bounded well below
+ * that limit (table sizes, indices, string lengths).  Callers must
+ * compare the return value against this constant before use.
+ */
+#define HPACK_INT_OVERFLOW UINT32_MAX
+
+/* ------------------------------------------------------------------ */
 /* Dynamic table API                                                   */
 /* ------------------------------------------------------------------ */
 
@@ -184,6 +198,54 @@ int hpack_table_lookup(const hpack_table_t *t,
  * Returns a pointer into the allocated entry (do not free directly).
  */
 const hpack_entry_t *hpack_table_get(const hpack_table_t *t, uint32_t dyn_idx);
+
+/* ------------------------------------------------------------------ */
+/* Integer varint encode/decode — Task 3.2                            */
+/* See ARCHITECTURE.md §4.7.                                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * hpack_decode_int — decode an HPACK varint from src[0..len).
+ *
+ * prefix_bits: number of low-order bits in src[0] used for the value
+ * (N in RFC 7541 §5.1; 1..8).  The upper (8 - prefix_bits) bits of
+ * src[0] are the representation tag and are masked off before reading
+ * the prefix value.
+ *
+ * On success: *consumed is set to the number of bytes read (>= 1) and
+ * the decoded value is returned.  On error (truncated input or integer
+ * overflow): returns HPACK_INT_OVERFLOW.  Callers must compare the
+ * return value against HPACK_INT_OVERFLOW before using it.
+ *
+ * Overflow guard: at most 5 continuation bytes are processed.  A sixth
+ * continuation byte (m > 28 after m += 7) returns HPACK_INT_OVERFLOW
+ * even if the 64-bit intermediate has not yet exceeded UINT32_MAX.
+ * See ARCHITECTURE.md §4.7.
+ */
+uint32_t hpack_decode_int(const uint8_t *src,
+                          size_t len,
+                          int prefix_bits,
+                          size_t *consumed);
+
+/*
+ * hpack_encode_int — encode val with an N-bit prefix into out[0..out_cap).
+ *
+ * prefix_top: the upper (8 - prefix_bits) bits to OR into the first
+ * byte (e.g., 0x80 for indexed, 0x40 for literal with indexing, 0x20
+ * for dynamic table size update, 0x00 for literal without indexing).
+ * prefix_bits: N (1..8).
+ * val: the integer value to encode.
+ *
+ * Returns the number of bytes written, or 0 if out_cap is insufficient.
+ * A return of 0 indicates a buffer-too-small condition; callers must
+ * size the output buffer appropriately (worst case: 1 + ceil(32/7) = 6
+ * bytes for any 32-bit value with a 1-bit prefix).
+ */
+size_t hpack_encode_int(uint8_t *out,
+                        size_t out_cap,
+                        uint8_t prefix_top,
+                        int prefix_bits,
+                        uint32_t val);
 
 /* ------------------------------------------------------------------ */
 /* Huffman decode table entry.                                         */

@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-23
 **Current Phase**: Phase 3 — HPACK
-**Next Task**: 3.2 — Integer varint encode/decode
+**Next Task**: 3.3 — String encode/decode
 
 ### Phase Summary
 
@@ -406,7 +406,7 @@ HPACK is tested standalone before being integrated into the session.)
     return index and full/name-only match type
   - `hpack_table_evict_to()`: evict entries until `size <= new_max`
 
-**3.2 — Integer varint encode/decode**
+**3.2 — Integer varint encode/decode** ✓ DONE
 - `hpack_decode_int()` per ARCHITECTURE.md §4.7:
   handle multi-byte continuation, overflow guard at m > 28,
   return `HPACK_INT_OVERFLOW` on truncation or overflow;

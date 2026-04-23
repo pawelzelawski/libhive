@@ -78,6 +78,13 @@ int test_hpack_table_rfc_size(void);
 int test_hpack_table_oversized_entry(void);
 int test_hpack_always_copy(void);
 
+/* Phase 3.2 — integer varint encode/decode */
+int test_hpack_int_decode_1byte(void);
+int test_hpack_int_decode_multibyte(void);
+int test_hpack_int_decode_truncated(void);
+int test_hpack_int_decode_overflow(void);
+int test_hpack_int_encode_decode_roundtrip(void);
+
 int
 main(void)
 {
@@ -148,6 +155,13 @@ main(void)
 	RUN(hpack_table_rfc_size);
 	RUN(hpack_table_oversized_entry);
 	RUN(hpack_always_copy);
+
+	/* Phase 3.2 — integer varint encode/decode */
+	RUN(hpack_int_decode_1byte);
+	RUN(hpack_int_decode_multibyte);
+	RUN(hpack_int_decode_truncated);
+	RUN(hpack_int_decode_overflow);
+	RUN(hpack_int_encode_decode_roundtrip);
 
 	printf("%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_passed == tests_run) ? 0 : 1;

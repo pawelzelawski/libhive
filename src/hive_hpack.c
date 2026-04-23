@@ -1015,3 +1015,107 @@ hpack_table_get(const hpack_table_t *t, uint32_t dyn_idx)
 	idx = (t->ring_head - 1u - dyn_idx) & (t->ring_cap - 1u);
 	return t->ring[idx];
 }
+
+/* ------------------------------------------------------------------ */
+/* Integer varint encode/decode — Task 3.2                            */
+/* See ARCHITECTURE.md §4.7 and RFC 7541 §5.1.                        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * hpack_decode_int — decode HPACK varint from src[0..len).
+ *
+ * See ARCHITECTURE.md §4.7 for the exact algorithm.
+ * Returns the decoded value, or HPACK_INT_OVERFLOW on any error
+ * (truncated input or integer overflow).
+ *
+ * The 64-bit intermediate `tmp` detects overflow before 32-bit
+ * truncation.  The m > 28 guard prevents reading more than 5
+ * continuation bytes regardless of the values they carry.
+ */
+uint32_t
+hpack_decode_int(const uint8_t *src,
+                 size_t len,
+                 int prefix_bits,
+                 size_t *consumed)
+{
+	uint32_t prefix_max;
+	uint32_t val;
+	uint32_t m;
+
+	prefix_max = (1u << prefix_bits) - 1u;
+
+	if (len == 0)
+		return HPACK_INT_OVERFLOW; /* truncated */
+
+	val = src[0] & prefix_max;
+	*consumed = 1;
+
+	if (val < prefix_max)
+		return val; /* fits in prefix — single byte */
+
+	/* Multi-byte continuation */
+	m = 0;
+	while (*consumed < len) {
+		uint8_t b;
+		uint64_t tmp;
+
+		b = src[(*consumed)++];
+		/* Use 64-bit intermediate to detect overflow before m=28 */
+		tmp = (uint64_t)val + ((uint64_t)(b & 0x7Fu) << m);
+		if (tmp > (uint64_t)UINT32_MAX)
+			return HPACK_INT_OVERFLOW;
+		val = (uint32_t)tmp;
+		m += 7;
+		if (!(b & 0x80u))
+			return val; /* complete — continuation bit clear */
+		if (m > 28)
+			return HPACK_INT_OVERFLOW; /* overflow guard */
+	}
+	return HPACK_INT_OVERFLOW; /* truncated — ran out of input bytes */
+}
+
+/*
+ * hpack_encode_int — encode val with N-bit prefix into out[0..out_cap).
+ *
+ * See RFC 7541 §5.1.  prefix_top provides the upper (8 - prefix_bits)
+ * bits that are ORed into the first byte without modification.
+ *
+ * Returns bytes written (>= 1), or 0 if the buffer is too small.
+ */
+size_t
+hpack_encode_int(uint8_t *out,
+                 size_t out_cap,
+                 uint8_t prefix_top,
+                 int prefix_bits,
+                 uint32_t val)
+{
+	uint32_t prefix_max;
+	size_t pos;
+
+	if (out_cap == 0)
+		return 0;
+
+	prefix_max = (1u << prefix_bits) - 1u;
+	pos = 0;
+
+	if (val < prefix_max) {
+		/* Value fits in the prefix — single byte */
+		out[pos++] = prefix_top | (uint8_t)val;
+		return pos;
+	}
+
+	/* Value does not fit: fill prefix bits, then encode remainder */
+	out[pos++] = prefix_top | (uint8_t)prefix_max;
+	val -= prefix_max;
+
+	while (val >= 128u) {
+		if (pos >= out_cap)
+			return 0; /* buffer too small */
+		out[pos++] = (uint8_t)((val & 0x7Fu) | 0x80u);
+		val >>= 7;
+	}
+	if (pos >= out_cap)
+		return 0; /* buffer too small */
+	out[pos++] = (uint8_t)val;
+	return pos;
+}
