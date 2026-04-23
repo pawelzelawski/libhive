@@ -104,6 +104,11 @@ int test_hpack_bomb_size_limit(void);
 int test_hpack_bomb_count_limit(void);
 int test_hpack_header_callback_by_pointer(void);
 
+/* Phase 3.5 — full encoder */
+int test_hpack_encode_decode_roundtrip_no_huff(void);
+int test_hpack_encode_decode_roundtrip_huff(void);
+int test_hpack_encode_pending_size_update_dual(void);
+
 int
 main(void)
 {
@@ -200,6 +205,11 @@ main(void)
 	RUN(hpack_bomb_size_limit);
 	RUN(hpack_bomb_count_limit);
 	RUN(hpack_header_callback_by_pointer);
+
+	/* Phase 3.5 — full encoder */
+	RUN(hpack_encode_decode_roundtrip_no_huff);
+	RUN(hpack_encode_decode_roundtrip_huff);
+	RUN(hpack_encode_pending_size_update_dual);
 
 	printf("%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_passed == tests_run) ? 0 : 1;

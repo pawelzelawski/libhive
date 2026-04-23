@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-23
 **Current Phase**: Phase 3 — HPACK
-**Next Task**: 3.5 — Full encoder: `hpack_encode_block()`
+**Next Task**: 3.6 — Hash index for large tables
 
 ### Phase Summary
 
@@ -447,7 +447,7 @@ HPACK is tested standalone before being integrated into the session.)
   pseudo-header rules, forbidden headers per RFC 9113 §8.3 — placeholder
   stub in Phase 3, full implementation in Phase 7
 
-**3.5 — Full encoder: `hpack_encode_block()`**
+**3.5 — Full encoder: `hpack_encode_block()`** ✓ DONE
 - Implement per ARCHITECTURE.md §4.8 — static table exact match, static
   table name-only match, dynamic table lookup, literal fallback
 - Emit dynamic table size update prefix when `has_pending == 1`

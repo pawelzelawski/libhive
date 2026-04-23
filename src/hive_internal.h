@@ -72,6 +72,7 @@ struct hive_session {
 
 	/* Region E subset used by Task 2.4 inbound frame-size validation */
 	hive_settings_t local_settings;
+	hpack_table_t enc_table;
 	hpack_table_t dec_table;
 
 	/* Region G — receive state machine fields */

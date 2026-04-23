@@ -64,6 +64,11 @@ int test_hpack_bomb_size_limit(void);
 int test_hpack_bomb_count_limit(void);
 int test_hpack_header_callback_by_pointer(void);
 
+/* Phase 3.5 — full encoder */
+int test_hpack_encode_decode_roundtrip_no_huff(void);
+int test_hpack_encode_decode_roundtrip_huff(void);
+int test_hpack_encode_pending_size_update_dual(void);
+
 int
 test_static_table_size(void)
 {
@@ -1255,6 +1260,129 @@ test_hpack_header_callback_by_pointer(void)
 	ASSERT((cap.saved_value->flags & HIVE_BUF_VALID) == 0);
 
 	hpack_test_session_free(&s);
+	return 1;
+}
+
+int
+test_hpack_encode_decode_roundtrip_no_huff(void)
+{
+	static const hive_nv_t nva[] = {
+		{(const uint8_t *)":method", (const uint8_t *)"GET", 7, 3, 0},
+		{(const uint8_t *)"x", (const uint8_t *)"a", 1, 1, 0},
+	};
+	hive_session_t s;
+	hpack_cap_t cap;
+	hpack_table_t enc;
+	uint8_t block[256];
+	size_t block_len;
+	int ret;
+
+	ret = hpack_test_session_init(&s, &cap, 4096);
+	ASSERT(ret == HIVE_OK);
+	ret = hpack_table_init(&enc, &test_mem, 4096);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_encode_block(&enc,
+	                        &test_mem,
+	                        nva,
+	                        sizeof(nva) / sizeof(nva[0]),
+	                        block,
+	                        sizeof(block),
+	                        &block_len);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(block_len > 0);
+
+	ret = hpack_decode_block(&s, block, block_len, 0, 1);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(cap.header_count == 2);
+	ASSERT(strcmp(cap.names[0], ":method") == 0);
+	ASSERT(strcmp(cap.values[0], "GET") == 0);
+	ASSERT(strcmp(cap.names[1], "x") == 0);
+	ASSERT(strcmp(cap.values[1], "a") == 0);
+
+	hpack_table_free(&enc, &test_mem);
+	hpack_test_session_free(&s);
+	return 1;
+}
+
+int
+test_hpack_encode_decode_roundtrip_huff(void)
+{
+	static const hive_nv_t nva[] = {
+		{(const uint8_t *)"x", (const uint8_t *)"www.example.com", 1, 15, 0},
+	};
+	hive_session_t s;
+	hpack_cap_t cap;
+	hpack_table_t enc;
+	uint8_t block[256];
+	size_t block_len;
+	int ret;
+
+	ret = hpack_test_session_init(&s, &cap, 4096);
+	ASSERT(ret == HIVE_OK);
+	ret = hpack_table_init(&enc, &test_mem, 4096);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_encode_block(
+	    &enc, &test_mem, nva, 1, block, sizeof(block), &block_len);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(block_len > 4);
+	ASSERT((block[3] & 0x80u) != 0); /* value string uses Huffman form */
+
+	ret = hpack_decode_block(&s, block, block_len, 0, 1);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(cap.header_count == 1);
+	ASSERT(strcmp(cap.names[0], "x") == 0);
+	ASSERT(strcmp(cap.values[0], "www.example.com") == 0);
+
+	hpack_table_free(&enc, &test_mem);
+	hpack_test_session_free(&s);
+	return 1;
+}
+
+int
+test_hpack_encode_pending_size_update_dual(void)
+{
+	hpack_table_t enc;
+	uint8_t block[16];
+	size_t block_len;
+	int ret;
+
+	ret = hpack_table_init(&enc, &test_mem, 4096);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_table_insert(&enc,
+	                        &test_mem,
+	                        (const uint8_t *)"name",
+	                        4,
+	                        (const uint8_t *)"value",
+	                        5);
+	ASSERT(ret == HIVE_OK);
+
+	enc.pending_min = 64;
+	enc.pending_max = 128;
+	enc.has_pending = 1;
+
+	ret = hpack_encode_block(&enc,
+	                        &test_mem,
+	                        NULL,
+	                        0,
+	                        block,
+	                        sizeof(block),
+	                        &block_len);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(block_len == 4);
+	ASSERT(block[0] == 0x3fu);
+	ASSERT(block[1] == 0x21u);
+	ASSERT(block[2] == 0x3fu);
+	ASSERT(block[3] == 0x61u);
+	ASSERT(enc.max_size == 128);
+	ASSERT(enc.size <= 128);
+	ASSERT(enc.has_pending == 0);
+	ASSERT(enc.pending_min == 128);
+	ASSERT(enc.pending_max == 128);
+
+	hpack_table_free(&enc, &test_mem);
 	return 1;
 }
 

@@ -1622,3 +1622,231 @@ hpack_encode_string(const uint8_t *src,
 	pos += src_len;
 	return pos;
 }
+
+static int
+hpack_nv_equal(const uint8_t *a, size_t a_len, const uint8_t *b, size_t b_len)
+{
+	if (a_len != b_len)
+		return 0;
+	if (a_len == 0)
+		return 1;
+	return memcmp(a, b, a_len) == 0;
+}
+
+static int
+hpack_static_lookup(const hive_nv_t *nv,
+                    uint32_t *exact_idx,
+                    uint32_t *name_idx)
+{
+	uint32_t i;
+
+	*exact_idx = 0;
+	*name_idx = 0;
+	for (i = 0; i < HPACK_STATIC_TABLE_SIZE; i++) {
+		const hive_nv_t *st;
+
+		st = &hpack_static_table[i];
+		if (!hpack_nv_equal(
+		        st->name, st->name_len, nv->name, nv->name_len))
+			continue;
+
+		if (*name_idx == 0)
+			*name_idx = i + 1u;
+		if (hpack_nv_equal(
+		        st->value, st->value_len, nv->value, nv->value_len)) {
+			*exact_idx = i + 1u;
+			return HPACK_LOOKUP_EXACT;
+		}
+	}
+
+	if (*name_idx != 0)
+		return HPACK_LOOKUP_NAME_ONLY;
+	return HPACK_LOOKUP_NOT_FOUND;
+}
+
+/* ------------------------------------------------------------------ */
+/* Full HPACK block encode — Task 3.5                                 */
+/* See ARCHITECTURE.md §4.8 and RFC 7541 §6.1/§6.2/§6.3.             */
+/* ------------------------------------------------------------------ */
+
+int
+hpack_encode_block(hpack_table_t *table,
+                   const hive_mem_t *mem,
+                   const hive_nv_t *nva,
+                   size_t nvlen,
+                   uint8_t *out,
+                   size_t out_cap,
+                   size_t *out_len)
+{
+	size_t pos;
+	size_t i;
+
+	if (table == NULL || mem == NULL || out == NULL || out_len == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (nvlen > 0 && nva == NULL)
+		return HIVE_ERR_INVALID_ARG;
+
+	pos = 0;
+
+	if (table->has_pending) {
+		size_t n;
+		uint32_t min_sz;
+		uint32_t max_sz;
+
+		min_sz = table->pending_min;
+		max_sz = table->pending_max;
+
+		n = hpack_encode_int(
+		    out + pos, out_cap - pos, 0x20u, 5, min_sz);
+		if (n == 0)
+			return HIVE_ERR_NOMEM;
+		pos += n;
+
+		if (max_sz != min_sz) {
+			n = hpack_encode_int(
+			    out + pos, out_cap - pos, 0x20u, 5, max_sz);
+			if (n == 0)
+				return HIVE_ERR_NOMEM;
+			pos += n;
+		}
+
+		hpack_table_evict_to(table, mem, min_sz);
+		table->max_size = min_sz;
+		if (max_sz != min_sz) {
+			hpack_table_evict_to(table, mem, max_sz);
+			table->max_size = max_sz;
+		}
+		table->has_pending = 0;
+		table->pending_min = table->pending_max;
+	}
+
+	for (i = 0; i < nvlen; i++) {
+		const hive_nv_t *nv;
+		uint32_t static_exact;
+		uint32_t static_name;
+		uint32_t dyn_idx;
+		uint32_t idx;
+		size_t n;
+		size_t slen;
+		int st_match;
+		int dyn_match;
+
+		nv = &nva[i];
+		if (nv->name == NULL || nv->name_len > UINT32_MAX ||
+		    nv->value_len > UINT32_MAX)
+			return HIVE_ERR_INVALID_ARG;
+
+		st_match = hpack_static_lookup(nv, &static_exact, &static_name);
+		if (st_match == HPACK_LOOKUP_EXACT) {
+			n = hpack_encode_int(
+			    out + pos, out_cap - pos, 0x80u, 7, static_exact);
+			if (n == 0)
+				return HIVE_ERR_NOMEM;
+			pos += n;
+			continue;
+		}
+
+		dyn_match = hpack_table_lookup(table,
+		                               nv->name,
+		                               (uint32_t)nv->name_len,
+		                               nv->value,
+		                               (uint32_t)nv->value_len,
+		                               &dyn_idx);
+		if (dyn_match == HPACK_LOOKUP_EXACT) {
+			idx = HPACK_STATIC_TABLE_SIZE + 1u + dyn_idx;
+			n = hpack_encode_int(
+			    out + pos, out_cap - pos, 0x80u, 7, idx);
+			if (n == 0)
+				return HIVE_ERR_NOMEM;
+			pos += n;
+			continue;
+		}
+
+		if (st_match == HPACK_LOOKUP_NAME_ONLY) {
+			idx = static_name;
+			n = hpack_encode_int(
+			    out + pos, out_cap - pos, 0x40u, 6, idx);
+			if (n == 0)
+				return HIVE_ERR_NOMEM;
+			pos += n;
+
+			slen = hpack_encode_string(
+			    nv->value, nv->value_len, out + pos, out_cap - pos);
+			if (slen == 0)
+				return HIVE_ERR_NOMEM;
+			pos += slen;
+
+			if ((nv->flags & HIVE_NV_FLAG_NO_INDEX) == 0) {
+				int ret;
+
+				ret =
+				    hpack_table_insert(table,
+				                       mem,
+				                       nv->name,
+				                       (uint32_t)nv->name_len,
+				                       nv->value,
+				                       (uint32_t)nv->value_len);
+				if (ret != HIVE_OK)
+					return ret;
+			}
+			continue;
+		}
+
+		if (dyn_match == HPACK_LOOKUP_NAME_ONLY) {
+			idx = HPACK_STATIC_TABLE_SIZE + 1u + dyn_idx;
+			n = hpack_encode_int(
+			    out + pos, out_cap - pos, 0x40u, 6, idx);
+			if (n == 0)
+				return HIVE_ERR_NOMEM;
+			pos += n;
+
+			slen = hpack_encode_string(
+			    nv->value, nv->value_len, out + pos, out_cap - pos);
+			if (slen == 0)
+				return HIVE_ERR_NOMEM;
+			pos += slen;
+
+			if ((nv->flags & HIVE_NV_FLAG_NO_INDEX) == 0) {
+				int ret;
+
+				ret =
+				    hpack_table_insert(table,
+				                       mem,
+				                       nv->name,
+				                       (uint32_t)nv->name_len,
+				                       nv->value,
+				                       (uint32_t)nv->value_len);
+				if (ret != HIVE_OK)
+					return ret;
+			}
+			continue;
+		}
+
+		/* Literal fallback (RFC 7541 §6.2.2, never indexed when
+		 * requested). */
+		n = hpack_encode_int(
+		    out + pos,
+		    out_cap - pos,
+		    (nv->flags & HIVE_NV_FLAG_NO_INDEX) ? 0x10u : 0x00u,
+		    4,
+		    0);
+		if (n == 0)
+			return HIVE_ERR_NOMEM;
+		pos += n;
+
+		slen = hpack_encode_string(
+		    nv->name, nv->name_len, out + pos, out_cap - pos);
+		if (slen == 0)
+			return HIVE_ERR_NOMEM;
+		pos += slen;
+
+		slen = hpack_encode_string(
+		    nv->value, nv->value_len, out + pos, out_cap - pos);
+		if (slen == 0)
+			return HIVE_ERR_NOMEM;
+		pos += slen;
+	}
+
+	*out_len = pos;
+	return HIVE_OK;
+}

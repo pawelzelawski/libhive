@@ -328,6 +328,28 @@ int hpack_decode_block(hive_session_t *s,
                        uint32_t error_stream_id);
 
 /* ------------------------------------------------------------------ */
+/* Full HPACK block encode — Task 3.5                                 */
+/* See ARCHITECTURE.md §4.8.                                           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * hpack_encode_block — encode one complete header block.
+ *
+ * table points to the encoder dynamic table (session enc_table or
+ * standalone encoder table). mem is used for dynamic table insertions.
+ *
+ * Returns HIVE_OK on success, HIVE_ERR_NOMEM/HIVE_ERR_INVALID_ARG on
+ * argument/allocation failures, and sets *out_len to bytes written.
+ */
+int hpack_encode_block(hpack_table_t *table,
+                       const hive_mem_t *mem,
+                       const hive_nv_t *nva,
+                       size_t nvlen,
+                       uint8_t *out,
+                       size_t out_cap,
+                       size_t *out_len);
+
+/* ------------------------------------------------------------------ */
 /* Huffman decode table entry.                                         */
 /* 4 bytes per entry — 256 entries = 1 KB total.                      */
 /* See ARCHITECTURE.md §4.4 and CODING_STANDARDS.md §1.3.             */
