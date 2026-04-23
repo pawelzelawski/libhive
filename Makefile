@@ -90,6 +90,7 @@ TEST_BIN_VG = $(BUILD_TEST_DIR)/run_tests_vg
 LIBHIVE_A = libhive.a
 # --- Test source ------------------------------------------------------------
 TEST_SRC = tests/run_tests.c \
+	   tests/test_frame.c \
 	   tests/test_hpack.c \
            tests/test_compat.c
 # --- Install paths ----------------------------------------------------------
@@ -164,52 +165,64 @@ clean:
 # BSD make does not support GNU-style pattern rules portably.
 # ---------------------------------------------------------------------------
 # --- Development library ----------------------------------------------------
-$(LIB_DEV): src/hive.c src/hive_hpack.c $(COMPAT_SRC)
+$(LIB_DEV): src/hive.c src/hive_hpack.c src/hive_frame_bare.c $(COMPAT_SRC)
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CFLAGS_DEV) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive.c -o $(BUILD_DIR)/hive.o
 	$(CC) $(CFLAGS_DEV) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive_hpack.c -o $(BUILD_DIR)/hive_hpack.o
+	$(CC) $(CFLAGS_DEV) $(EXTRA_CFLAGS) $(INCLUDES) \
+	    -c src/hive_frame_bare.c -o $(BUILD_DIR)/hive_frame_bare.o
 	test -z "$(COMPAT_SRC)" || \
 	    $(CC) $(CFLAGS_DEV) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/compat_str.c -o $(BUILD_DIR)/compat_str.o
-	ar rcs $(LIB_DEV) $(BUILD_DIR)/hive.o $(BUILD_DIR)/hive_hpack.o
+	ar rcs $(LIB_DEV) $(BUILD_DIR)/hive.o $(BUILD_DIR)/hive_hpack.o \
+	    $(BUILD_DIR)/hive_frame_bare.o
 	test -z "$(COMPAT_SRC)" || ar qs $(LIB_DEV) $(BUILD_DIR)/compat_str.o
 # --- Release library --------------------------------------------------------
-$(LIB_REL): src/hive.c src/hive_hpack.c $(COMPAT_SRC)
+$(LIB_REL): src/hive.c src/hive_hpack.c src/hive_frame_bare.c $(COMPAT_SRC)
 	@mkdir -p $(BUILD_REL_DIR)
 	$(CC) $(CFLAGS_REL) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive.c -o $(BUILD_REL_DIR)/hive.o
 	$(CC) $(CFLAGS_REL) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive_hpack.c -o $(BUILD_REL_DIR)/hive_hpack.o
+	$(CC) $(CFLAGS_REL) $(EXTRA_CFLAGS) $(INCLUDES) \
+	    -c src/hive_frame_bare.c -o $(BUILD_REL_DIR)/hive_frame_bare.o
 	test -z "$(COMPAT_SRC)" || \
 	    $(CC) $(CFLAGS_REL) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/compat_str.c -o $(BUILD_REL_DIR)/compat_str.o
-	ar rcs $(LIB_REL) $(BUILD_REL_DIR)/hive.o $(BUILD_REL_DIR)/hive_hpack.o
+	ar rcs $(LIB_REL) $(BUILD_REL_DIR)/hive.o $(BUILD_REL_DIR)/hive_hpack.o \
+	    $(BUILD_REL_DIR)/hive_frame_bare.o
 	test -z "$(COMPAT_SRC)" || ar qs $(LIB_REL) $(BUILD_REL_DIR)/compat_str.o
 # --- Valgrind library (no sanitizers) ---------------------------------------
-$(LIB_VG): src/hive.c src/hive_hpack.c $(COMPAT_SRC)
+$(LIB_VG): src/hive.c src/hive_hpack.c src/hive_frame_bare.c $(COMPAT_SRC)
 	@mkdir -p $(BUILD_VG_DIR)
 	$(CC) $(CFLAGS_VG) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive.c -o $(BUILD_VG_DIR)/hive.o
 	$(CC) $(CFLAGS_VG) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive_hpack.c -o $(BUILD_VG_DIR)/hive_hpack.o
+	$(CC) $(CFLAGS_VG) $(EXTRA_CFLAGS) $(INCLUDES) \
+	    -c src/hive_frame_bare.c -o $(BUILD_VG_DIR)/hive_frame_bare.o
 	test -z "$(COMPAT_SRC)" || \
 	    $(CC) $(CFLAGS_VG) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/compat_str.c -o $(BUILD_VG_DIR)/compat_str.o
-	ar rcs $(LIB_VG) $(BUILD_VG_DIR)/hive.o $(BUILD_VG_DIR)/hive_hpack.o
+	ar rcs $(LIB_VG) $(BUILD_VG_DIR)/hive.o $(BUILD_VG_DIR)/hive_hpack.o \
+	    $(BUILD_VG_DIR)/hive_frame_bare.o
 	test -z "$(COMPAT_SRC)" || ar qs $(LIB_VG) $(BUILD_VG_DIR)/compat_str.o
 # --- TSan library -----------------------------------------------------------
-$(LIB_TSAN): src/hive.c src/hive_hpack.c $(COMPAT_SRC)
+$(LIB_TSAN): src/hive.c src/hive_hpack.c src/hive_frame_bare.c $(COMPAT_SRC)
 	@mkdir -p $(BUILD_TSAN_DIR)
 	$(CC) $(CFLAGS_TSAN) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive.c -o $(BUILD_TSAN_DIR)/hive.o
 	$(CC) $(CFLAGS_TSAN) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive_hpack.c -o $(BUILD_TSAN_DIR)/hive_hpack.o
+	$(CC) $(CFLAGS_TSAN) $(EXTRA_CFLAGS) $(INCLUDES) \
+	    -c src/hive_frame_bare.c -o $(BUILD_TSAN_DIR)/hive_frame_bare.o
 	test -z "$(COMPAT_SRC)" || \
 	    $(CC) $(CFLAGS_TSAN) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/compat_str.c -o $(BUILD_TSAN_DIR)/compat_str.o
-	ar rcs $(LIB_TSAN) $(BUILD_TSAN_DIR)/hive.o $(BUILD_TSAN_DIR)/hive_hpack.o
+	ar rcs $(LIB_TSAN) $(BUILD_TSAN_DIR)/hive.o $(BUILD_TSAN_DIR)/hive_hpack.o \
+	    $(BUILD_TSAN_DIR)/hive_frame_bare.o
 	test -z "$(COMPAT_SRC)" || ar qs $(LIB_TSAN) $(BUILD_TSAN_DIR)/compat_str.o
 # --- Test binary (ASan/UBSan) -----------------------------------------------
 $(TEST_BIN): $(LIB_DEV) $(TEST_SRC)

@@ -17,6 +17,11 @@ int test_strlcpy_empty_src(void);
 int test_strlcat_basic(void);
 int test_strlcat_full_dst(void);
 
+/* --- test_frame.c --------------------------------------------------------- */
+int test_frame_hdr_write_data(void);
+int test_frame_hdr_write_settings(void);
+int test_frame_hdr_write_headers(void);
+
 /* --- test_hpack.c --------------------------------------------------------- */
 int test_static_table_size(void);
 int test_static_table_index1(void);
@@ -33,6 +38,11 @@ int test_huffman_decode_truncated_long_code(void);
 int
 main(void)
 {
+	/* Phase 2.2 — frame header serialisation */
+	RUN(frame_hdr_write_data);
+	RUN(frame_hdr_write_settings);
+	RUN(frame_hdr_write_headers);
+
 	/* Phase 1.3 — platform compat layer */
 	RUN(strlcpy_basic);
 	RUN(strlcpy_truncation);

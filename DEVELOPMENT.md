@@ -4,14 +4,14 @@
 
 **Last Updated**: 2026-04-23
 **Current Phase**: Phase 2 — Frame Parser
-**Next Task**: 2.2 — Frame header serialisation (`hive_frame_bare.c`, `hive_send.c`)
+**Next Task**: 2.3 — Receive state machine (`hive_frame.c`)
 
 ### Phase Summary
 
 | Phase | Name | Status | Tests | Notes |
 |---|---|---|---|---|
 | 1 | Foundation | DONE | 16/16 (Phase 1 slice) | Tasks 1.1–1.5 done on Linux + OpenBSD |
-| 2 | Frame Parser | IN PROGRESS | — | Task 2.1 done; 2.2–2.5 pending |
+| 2 | Frame Parser | IN PROGRESS | 19/19 (Phase 2 slice) | Tasks 2.1–2.2 done on Linux + OpenBSD; 2.3–2.5 pending |
 | 3 | HPACK | NOT STARTED | — | Encoder, decoder, Huffman, standalone API |
 | 4 | Session Core | NOT STARTED | — | Minimal send queue, session struct, stream table, SETTINGS, preface |
 | 5 | Flow Control and DATA | NOT STARTED | — | Windows, recv-side enforcement, WINDOW_UPDATE, DATA delivery |
@@ -217,7 +217,7 @@ layer in isolation using minimal stubs.
   `HIVE_FLAG_PRIORITY (0x20)`, `HIVE_FLAG_ACK (0x01)` (for SETTINGS/PING)
 - Define `frame_hdr_t` struct per ARCHITECTURE.md §3.2
 
-**2.2 — Frame header serialisation (shared with hive_frame_bare.c)**
+**2.2 — Frame header serialisation (shared with hive_frame_bare.c)** ✓ DONE
 - In `src/hive_frame_bare.c` and `src/hive_frame_bare.h`:
   implement `frame_hdr_write_at()` and `frame_hdr_parse()` as standalone
   functions with no dependency on `hive_session_t`, callbacks, or stream state.
