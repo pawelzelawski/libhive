@@ -226,7 +226,7 @@ void
 frame_recv_init(hive_session_t *s, hive_role_t role)
 {
 	zero_bytes((uint8_t *)s, sizeof(*s));
-	s->role = role;
+	s->role = (uint8_t)role;
 	s->opt_max_frame_size = 16384;
 	s->opt_max_continuation_size = 65536;
 	s->local_settings.max_frame_size = 16384;

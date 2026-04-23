@@ -153,7 +153,7 @@ test_send_control_frame_queued(void)
 
 	/* One frame queued — want_write must be true */
 	ASSERT(hive_session_want_write(&s) == 1);
-	ASSERT(s.send_iov_count == 1u);
+	ASSERT(s.send_iov_count == 1);
 	ASSERT(s.send_buf_used == 9u); /* header only */
 
 	/* Wire up a full-write send callback */
@@ -165,7 +165,7 @@ test_send_control_frame_queued(void)
 
 	/* Queue drained — want_write must be false */
 	ASSERT(hive_session_want_write(&s) == 0);
-	ASSERT(s.send_iov_count == 0u);
+	ASSERT(s.send_iov_count == 0);
 	ASSERT(s.send_buf_used == 0u);
 	ASSERT(s.send_partial == 0);
 	ASSERT(s.send_partial_offset == 0u);
@@ -203,7 +203,7 @@ test_send_partial_write(void)
 	    ping_payload, 8u);
 
 	/* 9-byte header + 8-byte payload = 17 bytes, 1 iov entry */
-	ASSERT(s.send_iov_count == 1u);
+	ASSERT(s.send_iov_count == 1);
 	ASSERT(s.send_buf_used == 17u);
 	ASSERT(hive_session_want_write(&s) == 1);
 
@@ -221,7 +221,7 @@ test_send_partial_write(void)
 	ASSERT(hive_session_want_write(&s) == 1);
 	ASSERT(s.send_partial == 1);
 	ASSERT(s.send_partial_offset == 5u);
-	ASSERT(s.send_iov_count == 1u); /* queue not reset yet */
+	ASSERT(s.send_iov_count == 1); /* queue not reset yet */
 
 	/* Second send: effective iov covers remaining 12 bytes; callback
 	 * returns the full amount on calls > 1. */
@@ -233,7 +233,7 @@ test_send_partial_write(void)
 	ASSERT(hive_session_want_write(&s) == 0);
 	ASSERT(s.send_partial == 0);
 	ASSERT(s.send_partial_offset == 0u);
-	ASSERT(s.send_iov_count == 0u);
+	ASSERT(s.send_iov_count == 0);
 	ASSERT(s.send_buf_used == 0u);
 
 	return 1;

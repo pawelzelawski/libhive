@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-23
 **Current Phase**: Phase 4 — Session Core
-**Next Task**: 4.1 — Complete hive_session_t struct
+**Next Task**: 4.2 — Options
 
 ### Phase Summary
 
@@ -13,7 +13,7 @@
 | 1 | Foundation | DONE | 16/16 (Phase 1 slice) | Tasks 1.1–1.5 done on Linux + OpenBSD |
 | 2 | Frame Parser | DONE | 54/54 (Phase 2 slice) | Tasks 2.1–2.5 done on Linux + OpenBSD; completion criteria confirmed; audit fixes applied 2026-04-23 |
 | 3 | HPACK | DONE | 34/34 (Phase 3 slice) | Tasks 3.1-3.7 done on Linux + OpenBSD; Phase 3 completion criteria confirmed 2026-04-23 |
-| 4 | Session Core | NOT STARTED | — | Minimal send queue, session struct, stream table, SETTINGS, preface |
+| 4 | Session Core | IN PROGRESS | 3/? (Phase 4 slice so far) | Tasks 4.0–4.1 done on Linux + OpenBSD; next: 4.2 Options |
 | 5 | Flow Control and DATA | NOT STARTED | — | Windows, recv-side enforcement, WINDOW_UPDATE, DATA delivery |
 | 6 | Submit and Send | NOT STARTED | — | Full send queue, partial-send, response/request submit, new callbacks |
 | 7 | Security Hardening | NOT STARTED | — | Flood protection, exhaustion, limits, Content-Length, clock abstraction |
@@ -25,8 +25,8 @@
 | ID | Milestone | Status |
 |---|---|---|
 | M1 | Build system works on Linux and OpenBSD | DONE |
-| M2 | All unit tests pass on Linux | NOT STARTED |
-| M3 | All unit tests pass on OpenBSD | NOT STARTED |
+| M2 | All unit tests pass on Linux | DONE |
+| M3 | All unit tests pass on OpenBSD | DONE |
 | M4 | Valgrind clean on Linux | NOT STARTED |
 | M5 | ASan/UBSan clean on both platforms | NOT STARTED |
 | M6 | clang-format clean | NOT STARTED |
@@ -609,7 +609,7 @@ without DATA frames (those come in Phase 5).
 - This minimal implementation handles control frames only. Phase 6 extends
   it with HEADERS and DATA via `send_queue_flush_data()`.
 
-**4.1 — Complete hive_session_t struct**
+**4.1 — Complete hive_session_t struct** ✓ DONE
 - Define the full `hive_session_t` in `src/hive_internal.h` with all 10
   regions (A through J) per ARCHITECTURE.md §2, including:
   - `preface_count` in Region G
