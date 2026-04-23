@@ -70,6 +70,14 @@ int test_huffman_eos_rejected(void);
 int test_huffman_invalid_padding(void);
 int test_huffman_decode_truncated_long_code(void);
 
+/* Phase 3.1 — dynamic table */
+int test_hpack_table_insert_basic(void);
+int test_hpack_table_evict_on_insert(void);
+int test_hpack_table_evict_to_zero(void);
+int test_hpack_table_rfc_size(void);
+int test_hpack_table_oversized_entry(void);
+int test_hpack_always_copy(void);
+
 int
 main(void)
 {
@@ -132,6 +140,14 @@ main(void)
 	RUN(huffman_eos_rejected);
 	RUN(huffman_invalid_padding);
 	RUN(huffman_decode_truncated_long_code);
+
+	/* Phase 3.1 — hpack_table_t: dynamic table */
+	RUN(hpack_table_insert_basic);
+	RUN(hpack_table_evict_on_insert);
+	RUN(hpack_table_evict_to_zero);
+	RUN(hpack_table_rfc_size);
+	RUN(hpack_table_oversized_entry);
+	RUN(hpack_always_copy);
 
 	printf("%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_passed == tests_run) ? 0 : 1;

@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-23
 **Current Phase**: Phase 3 — HPACK
-**Next Task**: 3.1 — hpack_table_t: dynamic table (`src/hive_hpack.c`)
+**Next Task**: 3.2 — Integer varint encode/decode
 
 ### Phase Summary
 
@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | 1 | Foundation | DONE | 16/16 (Phase 1 slice) | Tasks 1.1–1.5 done on Linux + OpenBSD |
 | 2 | Frame Parser | DONE | 54/54 (Phase 2 slice) | Tasks 2.1–2.5 done on Linux + OpenBSD; completion criteria confirmed; audit fixes applied 2026-04-23 |
-| 3 | HPACK | NOT STARTED | — | Encoder, decoder, Huffman, standalone API |
+| 3 | HPACK | IN PROGRESS | — | Encoder, decoder, Huffman, standalone API |
 | 4 | Session Core | NOT STARTED | — | Minimal send queue, session struct, stream table, SETTINGS, preface |
 | 5 | Flow Control and DATA | NOT STARTED | — | Windows, recv-side enforcement, WINDOW_UPDATE, DATA delivery |
 | 6 | Submit and Send | NOT STARTED | — | Full send queue, partial-send, response/request submit, new callbacks |
@@ -389,7 +389,7 @@ HPACK is tested standalone before being integrated into the session.)
 
 ### Tasks
 
-**3.1 — hpack_table_t: dynamic table**
+**3.1 — hpack_table_t: dynamic table** ✓ DONE
 - In `src/hive_hpack.c`: implement `hpack_table_init()`, `hpack_table_free()`
   using the session allocator interface (or standalone allocator for the
   standalone API)

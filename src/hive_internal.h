@@ -15,6 +15,7 @@
 
 #include "../include/hive.h"
 #include "hive_frame.h"
+#include "hive_hpack.h"
 
 /* ------------------------------------------------------------------ */
 /* ASan helpers (HIVE_DEBUG builds only)                               */
@@ -41,7 +42,8 @@
 _Static_assert(1 == 1, "placeholder — hive_stream_t size check (Phase 2+)");
 _Static_assert(1 == 1,
                "placeholder — stream_hash_entry_t size check (Phase 2+)");
-_Static_assert(1 == 1, "placeholder — hpack_entry_t size check (Phase 3+)");
+_Static_assert(sizeof(hpack_entry_t) == 8,
+               "hpack_entry_t size changed — update ARCHITECTURE.md §4.2");
 _Static_assert(1 == 1, "placeholder — hive_settings_t size check (Phase 4+)");
 /* huff_entry_t size check is active in src/hive_hpack.h next to the type. */
 

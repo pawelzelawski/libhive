@@ -1,11 +1,15 @@
 /*
- * test_hpack.c - Phase 1.4 HPACK static and Huffman tests
+ * test_hpack.c - HPACK static table, Huffman and dynamic table tests
  *
- * Covers DEVELOPMENT.md Task 1.4 requirements only.
+ * Phase 1.4: static table and Huffman tests.
+ * Phase 3.1: dynamic table (hpack_table_t) tests.
+ *
+ * See DEVELOPMENT.md tasks 1.4 and 3.1.
  */
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../src/hive_hpack.h"
@@ -22,6 +26,14 @@ int test_huffman_roundtrip_long_codes(void);
 int test_huffman_eos_rejected(void);
 int test_huffman_invalid_padding(void);
 int test_huffman_decode_truncated_long_code(void);
+
+/* Phase 3.1 — dynamic table */
+int test_hpack_table_insert_basic(void);
+int test_hpack_table_evict_on_insert(void);
+int test_hpack_table_evict_to_zero(void);
+int test_hpack_table_rfc_size(void);
+int test_hpack_table_oversized_entry(void);
+int test_hpack_always_copy(void);
 
 int
 test_static_table_size(void)
@@ -222,6 +234,333 @@ test_huffman_decode_truncated_long_code(void)
 
 	ret = huff_decode(in, sizeof(in), out, sizeof(out), &out_len);
 	ASSERT(ret == HIVE_ERR_COMPRESSION);
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 3.1 — hpack_table_t dynamic table                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Minimal allocator shim for dynamic table tests.
+ * Test code is not library source, so direct malloc/free is permitted.
+ */
+static void *
+test_malloc_fn(size_t size, void *ctx)
+{
+	(void)ctx;
+	return malloc(size);
+}
+
+static void
+test_free_fn(void *ptr, void *ctx)
+{
+	(void)ctx;
+	free(ptr);
+}
+
+static void *
+test_calloc_fn(size_t nmemb, size_t size, void *ctx)
+{
+	(void)ctx;
+	return calloc(nmemb, size);
+}
+
+static const hive_mem_t test_mem = {
+	test_malloc_fn,
+	test_free_fn,
+	test_calloc_fn,
+	NULL, /* realloc not needed for table tests */
+	NULL,
+};
+
+/*
+ * test_hpack_table_insert_basic — insert one entry, verify via lookup.
+ *
+ * RFC 7541 §4.1: size = name_len + value_len + 32.
+ */
+int
+test_hpack_table_insert_basic(void)
+{
+	hpack_table_t t;
+	uint32_t      dyn_idx;
+	int           ret, match;
+
+	ret = hpack_table_init(&t, &test_mem, 4096);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(t.count == 0);
+	ASSERT(t.size == 0);
+
+	/* Insert "custom-key" / "custom-value" */
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"custom-key", 10,
+	    (const uint8_t *)"custom-value", 12);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(t.count == 1);
+	ASSERT(t.size == 54); /* 10 + 12 + 32 */
+
+	/* Lookup: should be an exact match at dyn_idx 0 (newest) */
+	match = hpack_table_lookup(&t,
+	    (const uint8_t *)"custom-key", 10,
+	    (const uint8_t *)"custom-value", 12,
+	    &dyn_idx);
+	ASSERT(match == HPACK_LOOKUP_EXACT);
+	ASSERT(dyn_idx == 0);
+
+	/* Name-only lookup: different value should give NAME_ONLY match */
+	match = hpack_table_lookup(&t,
+	    (const uint8_t *)"custom-key", 10,
+	    (const uint8_t *)"other", 5,
+	    &dyn_idx);
+	ASSERT(match == HPACK_LOOKUP_NAME_ONLY);
+	ASSERT(dyn_idx == 0);
+
+	/* Unknown name: should give NOT_FOUND */
+	match = hpack_table_lookup(&t,
+	    (const uint8_t *)"unknown", 7,
+	    (const uint8_t *)"value", 5,
+	    &dyn_idx);
+	ASSERT(match == HPACK_LOOKUP_NOT_FOUND);
+
+	hpack_table_free(&t, &test_mem);
+	return 1;
+}
+
+/*
+ * test_hpack_table_evict_on_insert — verify oldest entry is evicted.
+ *
+ * max_size=135; each entry: 2+2+32=36 bytes.
+ * Three entries total 108 bytes.  Insert of 4th (36 bytes) would reach
+ * 144 > 135 — oldest entry must be evicted first.
+ */
+int
+test_hpack_table_evict_on_insert(void)
+{
+	hpack_table_t t;
+	uint32_t      dyn_idx;
+	int           ret, match;
+
+	ret = hpack_table_init(&t, &test_mem, 135);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"n1", 2, (const uint8_t *)"v1", 2);
+	ASSERT(ret == HIVE_OK);  /* size = 36 */
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"n2", 2, (const uint8_t *)"v2", 2);
+	ASSERT(ret == HIVE_OK);  /* size = 72 */
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"n3", 2, (const uint8_t *)"v3", 2);
+	ASSERT(ret == HIVE_OK);  /* size = 108 */
+
+	ASSERT(t.count == 3);
+	ASSERT(t.size == 108);
+
+	/* 4th insert: 108+36=144 > 135; evict n1/v1; size=72+36=108 */
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"n4", 2, (const uint8_t *)"v4", 2);
+	ASSERT(ret == HIVE_OK);
+
+	ASSERT(t.count == 3);
+	ASSERT(t.size == 108);
+
+	/* n1/v1 should be gone */
+	match = hpack_table_lookup(&t,
+	    (const uint8_t *)"n1", 2, (const uint8_t *)"v1", 2, &dyn_idx);
+	ASSERT(match == HPACK_LOOKUP_NOT_FOUND);
+
+	/* n4/v4 should be newest (dyn_idx 0) */
+	match = hpack_table_lookup(&t,
+	    (const uint8_t *)"n4", 2, (const uint8_t *)"v4", 2, &dyn_idx);
+	ASSERT(match == HPACK_LOOKUP_EXACT);
+	ASSERT(dyn_idx == 0);
+
+	/* n2 is now oldest and at dyn_idx 2 */
+	match = hpack_table_lookup(&t,
+	    (const uint8_t *)"n2", 2, (const uint8_t *)"v2", 2, &dyn_idx);
+	ASSERT(match == HPACK_LOOKUP_EXACT);
+	ASSERT(dyn_idx == 2);
+
+	hpack_table_free(&t, &test_mem);
+	return 1;
+}
+
+/*
+ * test_hpack_table_evict_to_zero — evict_to(0) removes all entries.
+ */
+int
+test_hpack_table_evict_to_zero(void)
+{
+	hpack_table_t t;
+	int           ret;
+
+	ret = hpack_table_init(&t, &test_mem, 4096);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"a", 1, (const uint8_t *)"b", 1);
+	ASSERT(ret == HIVE_OK);
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"c", 1, (const uint8_t *)"d", 1);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(t.count == 2);
+
+	hpack_table_evict_to(&t, &test_mem, 0);
+
+	ASSERT(t.count == 0);
+	ASSERT(t.size == 0);
+
+	/* Table is valid and usable after full eviction */
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"x", 1, (const uint8_t *)"y", 1);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(t.count == 1);
+
+	hpack_table_free(&t, &test_mem);
+	return 1;
+}
+
+/*
+ * test_hpack_table_rfc_size — verify name + value + 32 accounting.
+ *
+ * RFC 7541 §4.1: each entry costs name_len + value_len + 32 bytes.
+ */
+int
+test_hpack_table_rfc_size(void)
+{
+	hpack_table_t t;
+	int           ret;
+
+	ret = hpack_table_init(&t, &test_mem, 4096);
+	ASSERT(ret == HIVE_OK);
+
+	/* "custom-key" (10) + "" (0) + 32 = 42 */
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"custom-key", 10,
+	    (const uint8_t *)"", 0);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(t.size == 42);
+
+	/* "" (0) + "custom-val" (10) + 32 = 42; total = 84 */
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"", 0,
+	    (const uint8_t *)"custom-val", 10);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(t.size == 84);
+
+	/* "ab" (2) + "cd" (2) + 32 = 36; total = 120 */
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"ab", 2, (const uint8_t *)"cd", 2);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(t.size == 120);
+	ASSERT(t.count == 3);
+
+	hpack_table_free(&t, &test_mem);
+	return 1;
+}
+
+/*
+ * test_hpack_table_oversized_entry — rfc_size > max_size.
+ *
+ * RFC 7541 §4.4: when the new entry's rfc_size exceeds max_size, the
+ * entire existing table is evicted and the entry is NOT inserted.
+ * The table must remain valid and empty for future use.
+ */
+int
+test_hpack_table_oversized_entry(void)
+{
+	hpack_table_t t;
+	uint32_t      dyn_idx;
+	int           ret, match;
+
+	/* max_size=64; "hello"/"world" rfc_size=5+5+32=42 — fits */
+	ret = hpack_table_init(&t, &test_mem, 64);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"hello", 5, (const uint8_t *)"world", 5);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(t.count == 1);
+	ASSERT(t.size == 42);
+
+	/*
+	 * Insert oversized entry: 20+20+32=72 > 64.
+	 * Existing entry must be evicted; oversized entry not inserted.
+	 */
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"12345678901234567890", 20,
+	    (const uint8_t *)"12345678901234567890", 20);
+	ASSERT(ret == HIVE_OK);   /* not an error — evict and skip */
+	ASSERT(t.count == 0);     /* table is empty */
+	ASSERT(t.size == 0);
+
+	/* Original entry is also gone */
+	match = hpack_table_lookup(&t,
+	    (const uint8_t *)"hello", 5, (const uint8_t *)"world", 5,
+	    &dyn_idx);
+	ASSERT(match == HPACK_LOOKUP_NOT_FOUND);
+
+	/* Table is still valid: small entries can be inserted again */
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"x", 1, (const uint8_t *)"y", 1);
+	ASSERT(ret == HIVE_OK); /* 1+1+32=34 <= 64 */
+	ASSERT(t.count == 1);
+
+	hpack_table_free(&t, &test_mem);
+	return 1;
+}
+
+/*
+ * test_hpack_always_copy — overwrite source buffers after insert.
+ *
+ * SECURITY: the table must hold its own copies of name and value bytes.
+ * Overwriting the caller's source buffers must not corrupt table data.
+ * See ARCHITECTURE.md §8.1 and CODING_STANDARDS.md §3.2.
+ */
+int
+test_hpack_always_copy(void)
+{
+	hpack_table_t        t;
+	uint8_t              name_buf[10];
+	uint8_t              value_buf[12];
+	int                  ret, match;
+	uint32_t             dyn_idx;
+	const hpack_entry_t *entry;
+
+	ret = hpack_table_init(&t, &test_mem, 4096);
+	ASSERT(ret == HIVE_OK);
+
+	memcpy(name_buf, "custom-key", 10);
+	memcpy(value_buf, "custom-value", 12);
+
+	ret = hpack_table_insert(&t, &test_mem, name_buf, 10, value_buf, 12);
+	ASSERT(ret == HIVE_OK);
+
+	/* Overwrite the original source buffers */
+	memset(name_buf, 0xFF, sizeof(name_buf));
+	memset(value_buf, 0xFF, sizeof(value_buf));
+
+	/*
+	 * Verify the allocated entry still holds the original bytes.
+	 * ring_head advanced past the insertion point; newest is at
+	 * (ring_head - 1) & (ring_cap - 1).
+	 */
+	entry = t.ring[(t.ring_head - 1u) & (t.ring_cap - 1u)];
+	ASSERT(entry != NULL);
+	ASSERT(entry->name_len == 10);
+	ASSERT(entry->value_len == 12);
+	ASSERT(memcmp(HPACK_ENTRY_NAME(entry), "custom-key", 10) == 0);
+	ASSERT(memcmp(HPACK_ENTRY_VALUE(entry), "custom-value", 12) == 0);
+
+	/* Lookup must also succeed using the original bytes */
+	match = hpack_table_lookup(&t,
+	    (const uint8_t *)"custom-key", 10,
+	    (const uint8_t *)"custom-value", 12,
+	    &dyn_idx);
+	ASSERT(match == HPACK_LOOKUP_EXACT);
+	ASSERT(dyn_idx == 0);
+
+	hpack_table_free(&t, &test_mem);
 	return 1;
 }
 

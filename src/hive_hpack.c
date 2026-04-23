@@ -17,6 +17,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "../include/hive.h"
 #include "hive_internal.h"
@@ -788,4 +789,229 @@ huff_encode(const uint8_t *src,
 	}
 	*out_len = pos;
 	return HIVE_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dynamic table — Task 3.1                                            */
+/* See ARCHITECTURE.md §4.1, §4.2, §8.1.                              */
+/* ------------------------------------------------------------------ */
+
+/*
+ * hpack_ring_cap — compute ring buffer capacity from max_size.
+ *
+ * Returns next_power_of_two(max_size / 32), minimum 4.
+ * The minimum 4 avoids degenerate tables at very small max_size values.
+ * Power-of-two is required for the (ring_head - n) & (ring_cap - 1)
+ * modulo idiom used throughout the ring buffer code.
+ */
+static uint32_t
+hpack_ring_cap(uint32_t max_size)
+{
+	uint32_t n;
+
+	n = max_size / 32u;
+	if (n < 4u)
+		return 4u;
+
+	/* round up to next power of two */
+	n--;
+	n |= n >> 1;
+	n |= n >> 2;
+	n |= n >> 4;
+	n |= n >> 8;
+	n |= n >> 16;
+	n++;
+	return n;
+}
+
+int
+hpack_table_init(hpack_table_t *t, const hive_mem_t *mem, uint32_t max_size)
+{
+	uint32_t cap;
+
+	memset(t, 0, sizeof(*t));
+	cap = hpack_ring_cap(max_size);
+
+	t->ring = (hpack_entry_t **)mem->calloc(
+	    cap, sizeof(hpack_entry_t *), mem->ctx);
+	if (t->ring == NULL)
+		return HIVE_ERR_NOMEM;
+
+	t->ring_cap = cap;
+	t->max_size = max_size;
+	t->pending_max = max_size;
+	t->pending_min = max_size;
+	/* hash, hash_mask, count, size, ring_head, has_pending: all 0 */
+	return HIVE_OK;
+}
+
+void
+hpack_table_free(hpack_table_t *t, const hive_mem_t *mem)
+{
+	uint32_t i;
+	uint32_t idx;
+
+	for (i = 0; i < t->count; i++) {
+		idx = (t->ring_head - t->count + i) & (t->ring_cap - 1);
+		if (t->ring[idx] != NULL)
+			mem->free(t->ring[idx], mem->ctx);
+	}
+	if (t->hash != NULL)
+		mem->free(t->hash, mem->ctx);
+	mem->free((void *)t->ring, mem->ctx);
+	memset(t, 0, sizeof(*t));
+}
+
+void
+hpack_table_evict_to(hpack_table_t *t, const hive_mem_t *mem, uint32_t new_max)
+{
+	uint32_t oldest_idx;
+	hpack_entry_t *oldest;
+
+	while (t->count > 0 && t->size > new_max) {
+		oldest_idx = (t->ring_head - t->count) & (t->ring_cap - 1);
+		oldest = t->ring[oldest_idx];
+		t->size -= HPACK_ENTRY_RFC_SIZE(oldest);
+		t->ring[oldest_idx] = NULL;
+		t->count--;
+		mem->free(oldest, mem->ctx);
+	}
+}
+
+int
+hpack_table_insert(hpack_table_t *t,
+                   const hive_mem_t *mem,
+                   const uint8_t *name,
+                   uint32_t name_len,
+                   const uint8_t *value,
+                   uint32_t value_len)
+{
+	uint64_t alloc64;
+	uint32_t rfc_size;
+	hpack_entry_t *entry;
+
+	/* Integer overflow guards per ARCHITECTURE.md §4.2. */
+	alloc64 = (uint64_t)name_len + (uint64_t)value_len;
+	if (alloc64 > (uint64_t)(SIZE_MAX - sizeof(hpack_entry_t)))
+		return HIVE_ERR_COMPRESSION;
+	if (alloc64 > (uint64_t)(UINT32_MAX - 32u))
+		return HIVE_ERR_COMPRESSION;
+
+	rfc_size = (uint32_t)(alloc64 + 32u);
+
+	/*
+	 * Evict oldest entries until there is room for the new entry,
+	 * or until the table is empty.  If rfc_size > max_size the loop
+	 * empties the table and the entry is then not inserted below
+	 * (RFC 7541 §4.4 oversized entry rule).
+	 */
+	while (t->count > 0 && t->size + rfc_size > t->max_size) {
+		uint32_t oldest_idx;
+		hpack_entry_t *oldest;
+
+		oldest_idx = (t->ring_head - t->count) & (t->ring_cap - 1);
+		oldest = t->ring[oldest_idx];
+		t->size -= HPACK_ENTRY_RFC_SIZE(oldest);
+		t->ring[oldest_idx] = NULL;
+		t->count--;
+		mem->free(oldest, mem->ctx);
+	}
+
+	/*
+	 * Oversized entry: rfc_size still exceeds max_size after full
+	 * eviction.  Table is now empty; do not insert.
+	 * See ARCHITECTURE.md §4.2.
+	 */
+	if (rfc_size > t->max_size)
+		return HIVE_OK;
+
+	entry = (hpack_entry_t *)mem->malloc(
+	    sizeof(hpack_entry_t) + (size_t)name_len + (size_t)value_len,
+	    mem->ctx);
+	if (entry == NULL)
+		return HIVE_ERR_NOMEM;
+
+	/*
+	 * SECURITY: always copy name and value bytes into the allocated entry.
+	 * Never store a pointer into caller memory — the source may be
+	 * reassembly_buf, a stack scratch buffer, or a static table region
+	 * that is invalidated or reused after this call returns.
+	 * See ARCHITECTURE.md §8.1 and CODING_STANDARDS.md §3.2.
+	 */
+	entry->name_len = name_len;
+	entry->value_len = value_len;
+	if (name_len > 0)
+		memcpy(HPACK_ENTRY_NAME(entry), name, name_len);
+	if (value_len > 0)
+		memcpy(HPACK_ENTRY_VALUE(entry), value, value_len);
+
+	t->ring[t->ring_head] = entry;
+	t->ring_head = (t->ring_head + 1u) & (t->ring_cap - 1u);
+	t->count++;
+	t->size += rfc_size;
+
+	return HIVE_OK;
+}
+
+int
+hpack_table_lookup(const hpack_table_t *t,
+                   const uint8_t *name,
+                   uint32_t name_len,
+                   const uint8_t *value,
+                   uint32_t value_len,
+                   uint32_t *out_dyn_idx)
+{
+	uint32_t i;
+	uint32_t name_only_idx;
+
+	name_only_idx = UINT32_MAX; /* sentinel: no name-only match yet */
+
+	/*
+	 * Linear scan from newest entry backward.
+	 * i=0 is the newest; i=count-1 is the oldest.
+	 * The first exact match found is the newest and is returned
+	 * immediately.  For name-only matches, the first (newest) is kept.
+	 */
+	for (i = 0; i < t->count; i++) {
+		uint32_t idx;
+		const hpack_entry_t *e;
+
+		idx = (t->ring_head - 1u - i) & (t->ring_cap - 1u);
+		e = t->ring[idx];
+
+		if (e->name_len != name_len)
+			continue;
+		if (memcmp(HPACK_ENTRY_NAME(e), name, name_len) != 0)
+			continue;
+
+		/* Name matches — check value */
+		if (e->value_len == value_len &&
+		    (value_len == 0 ||
+		     memcmp(HPACK_ENTRY_VALUE(e), value, value_len) == 0)) {
+			/* Exact match — return immediately (newest preferred)
+			 */
+			*out_dyn_idx = i;
+			return HPACK_LOOKUP_EXACT;
+		}
+
+		/* Name-only: record first (newest) occurrence */
+		if (name_only_idx == UINT32_MAX)
+			name_only_idx = i;
+	}
+
+	if (name_only_idx != UINT32_MAX) {
+		*out_dyn_idx = name_only_idx;
+		return HPACK_LOOKUP_NAME_ONLY;
+	}
+
+	return HPACK_LOOKUP_NOT_FOUND;
+}
+
+const hpack_entry_t *
+hpack_table_get(const hpack_table_t *t, uint32_t dyn_idx)
+{
+	uint32_t idx;
+
+	idx = (t->ring_head - 1u - dyn_idx) & (t->ring_cap - 1u);
+	return t->ring[idx];
 }

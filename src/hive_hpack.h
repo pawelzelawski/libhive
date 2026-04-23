@@ -18,6 +18,179 @@
 
 #include "../include/hive.h"
 
+/* ------------------------------------------------------------------ */
+/* Dynamic table constants                                             */
+/* See ARCHITECTURE.md §4.1 and §4.9.                                 */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Hash index is only allocated when max_size > this threshold.
+ * Below it, lookup is a linear scan (the common, default-settings case).
+ * See ARCHITECTURE.md §4.1 and §4.9.
+ */
+#define HPACK_LINEAR_THRESHOLD 16384u
+
+/*
+ * Hash slot sentinel values.
+ * EMPTY marks slots that have never been used (safe to stop probing).
+ * TOMBSTONE marks slots whose entry was evicted (must continue probing).
+ * See ARCHITECTURE.md §4.9.
+ */
+#define HPACK_HASH_EMPTY 0xFFFFFFFFu
+#define HPACK_HASH_TOMBSTONE 0xFFFFFFFEu
+
+/*
+ * Return values for hpack_table_lookup().
+ * EXACT:     name and value both match.
+ * NAME_ONLY: only name matches (caller may use as name-index reference).
+ * NOT_FOUND: no entry with this name.
+ */
+#define HPACK_LOOKUP_EXACT 1
+#define HPACK_LOOKUP_NAME_ONLY 0
+#define HPACK_LOOKUP_NOT_FOUND (-1)
+
+/* ------------------------------------------------------------------ */
+/* Dynamic table entry layout                                          */
+/* See ARCHITECTURE.md §4.2.                                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * hpack_entry_t — single contiguous allocation for one dynamic table entry.
+ *
+ * Layout:  [ hpack_entry_t (8 bytes) | name bytes | value bytes ]
+ *
+ * Accessing name/value bytes via the macros below is mandatory;
+ * never compute the offset manually outside this header.
+ */
+typedef struct {
+	uint32_t name_len;
+	uint32_t value_len;
+	/*
+	 * name bytes immediately follow at (uint8_t *)(entry + 1)
+	 * value bytes immediately follow name
+	 */
+} hpack_entry_t;
+
+#define HPACK_ENTRY_NAME(e) ((uint8_t *)((e) + 1))
+#define HPACK_ENTRY_VALUE(e) ((uint8_t *)((e) + 1) + (e)->name_len)
+#define HPACK_ENTRY_RFC_SIZE(e) ((e)->name_len + (e)->value_len + 32u)
+
+/* ------------------------------------------------------------------ */
+/* Hash index slot (used only when max_size > HPACK_LINEAR_THRESHOLD) */
+/* See ARCHITECTURE.md §4.9.                                          */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+	uint32_t name_hash;  /* FNV-1a 32-bit hash of name bytes */
+	uint32_t value_hash; /* FNV-1a 32-bit hash of value bytes */
+	uint32_t ring_idx;   /* ring array index, or EMPTY/TOMBSTONE sentinel */
+} hpack_hash_slot_t;
+
+/* ------------------------------------------------------------------ */
+/* Dynamic table structure                                             */
+/* Embedded in hive_session_t (enc_table / dec_table).               */
+/* See ARCHITECTURE.md §4.1.                                          */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+	hpack_entry_t **ring; /* pointer ring; ring_cap entries */
+	uint32_t ring_cap;    /* next_pow2(max_size/32); min 4 */
+	uint32_t ring_head;   /* insertion point (next free slot) */
+	uint32_t count;       /* live entries */
+	uint32_t size;        /* current RFC size (sum of name+value+32) */
+	uint32_t max_size;    /* current ceiling */
+	uint32_t pending_max; /* new ceiling awaiting application */
+	uint32_t pending_min; /* lowest value reached since last encode */
+	uint8_t has_pending;  /* 1 = encoder must emit size update prefix */
+	uint8_t _pad[3];
+
+	/* hash index — NULL when max_size <= HPACK_LINEAR_THRESHOLD */
+	hpack_hash_slot_t *hash;
+	uint32_t hash_mask;
+} hpack_table_t;
+
+/* ------------------------------------------------------------------ */
+/* Dynamic table API                                                   */
+/* ------------------------------------------------------------------ */
+
+/*
+ * hpack_table_init — allocate and initialise a dynamic table.
+ *
+ * Allocates the ring pointer array via mem->calloc.  hash is left NULL
+ * (hash index is task 3.6, only used above HPACK_LINEAR_THRESHOLD).
+ * pending_max and pending_min are initialised to max_size.
+ *
+ * Returns HIVE_OK or HIVE_ERR_NOMEM.
+ */
+int
+hpack_table_init(hpack_table_t *t, const hive_mem_t *mem, uint32_t max_size);
+
+/*
+ * hpack_table_free — free all live entries and the ring array.
+ *
+ * After this call *t is zeroed.  Callers must not use *t again without
+ * a fresh call to hpack_table_init().
+ */
+void hpack_table_free(hpack_table_t *t, const hive_mem_t *mem);
+
+/*
+ * hpack_table_evict_to — evict oldest entries until size <= new_max.
+ *
+ * No-op if size is already within new_max.  Used both by insert (to
+ * make room) and by the dynamic table size update path.
+ */
+void
+hpack_table_evict_to(hpack_table_t *t, const hive_mem_t *mem, uint32_t new_max);
+
+/*
+ * hpack_table_insert — copy and insert a new entry into the table.
+ *
+ * Evicts oldest entries as needed.  If rfc_size > max_size, the entire
+ * table is evicted and the entry is NOT inserted (RFC 7541 §4.4).
+ *
+ * SECURITY: always copies name/value bytes into the allocated entry.
+ * See ARCHITECTURE.md §8.1.
+ *
+ * Returns HIVE_OK, HIVE_ERR_NOMEM, or HIVE_ERR_COMPRESSION (overflow).
+ */
+int hpack_table_insert(hpack_table_t *t,
+                       const hive_mem_t *mem,
+                       const uint8_t *name,
+                       uint32_t name_len,
+                       const uint8_t *value,
+                       uint32_t value_len);
+
+/*
+ * hpack_table_lookup — linear scan for name (and optionally value).
+ *
+ * Scans from newest entry backward.  Returns HPACK_LOOKUP_EXACT,
+ * HPACK_LOOKUP_NAME_ONLY, or HPACK_LOOKUP_NOT_FOUND.  On a match,
+ * *out_dyn_idx is set to the 0-based index from newest (0 = newest).
+ *
+ * Exact matches end the scan immediately (newest is preferred).
+ * Name-only: first (newest) name match is returned.
+ */
+int hpack_table_lookup(const hpack_table_t *t,
+                       const uint8_t *name,
+                       uint32_t name_len,
+                       const uint8_t *value,
+                       uint32_t value_len,
+                       uint32_t *out_dyn_idx);
+
+/*
+ * hpack_table_get — retrieve entry at 0-based dynamic index from newest.
+ *
+ * 0 = newest, count-1 = oldest.  Caller must ensure dyn_idx < count.
+ * Returns a pointer into the allocated entry (do not free directly).
+ */
+const hpack_entry_t *hpack_table_get(const hpack_table_t *t, uint32_t dyn_idx);
+
+/* ------------------------------------------------------------------ */
+/* Huffman decode table entry.                                         */
+/* 4 bytes per entry — 256 entries = 1 KB total.                      */
+/* See ARCHITECTURE.md §4.4 and CODING_STANDARDS.md §1.3.             */
+/* ------------------------------------------------------------------ */
+
 /*
  * Huffman decode table entry.
  * 4 bytes per entry — 256 entries = 1 KB total.
