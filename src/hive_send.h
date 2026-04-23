@@ -32,8 +32,10 @@
  *
  * The caller must ensure send_buf_used + 9 <= send_buf_cap before calling.
  */
-uint8_t *frame_hdr_write(hive_session_t *s, uint32_t length,
-    uint8_t type, uint8_t flags, uint32_t stream_id);
+uint8_t *frame_hdr_write(hive_session_t *s,
+                         uint32_t length,
+                         uint8_t type,
+                         uint8_t flags,
+                         uint32_t stream_id);
 
 #endif /* HIVE_SEND_H */
-

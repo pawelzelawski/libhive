@@ -37,8 +37,11 @@
  * Does not advance any cursor. The caller decides where to write.
  * See ARCHITECTURE.md §6.2.
  */
-void frame_hdr_write_at(uint8_t *dst, uint32_t length,
-    uint8_t type, uint8_t flags, uint32_t stream_id);
+void frame_hdr_write_at(uint8_t *dst,
+                        uint32_t length,
+                        uint8_t type,
+                        uint8_t flags,
+                        uint32_t stream_id);
 
 /*
  * frame_hdr_parse — parse a 9-byte HTTP/2 frame header from src into *out.
@@ -52,4 +55,3 @@ void frame_hdr_write_at(uint8_t *dst, uint32_t length,
 void frame_hdr_parse(const uint8_t *src, frame_hdr_t *out);
 
 #endif /* HIVE_FRAME_BARE_H */
-

@@ -9,6 +9,7 @@
 #include <stdlib.h>
 
 #include "../include/hive.h"
+#include "hive_frame.h"
 #include "hive_internal.h"
 
 /*
@@ -123,10 +124,10 @@ hive_session_free(hive_session_t *session)
 ssize_t
 hive_session_recv(hive_session_t *session, const uint8_t *data, size_t len)
 {
-	(void)session;
-	(void)data;
-	(void)len;
-	return -1;
+	if (session == NULL) {
+		return -1;
+	}
+	return frame_recv_process(session, data, len);
 }
 
 int

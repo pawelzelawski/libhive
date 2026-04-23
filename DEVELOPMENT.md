@@ -4,14 +4,14 @@
 
 **Last Updated**: 2026-04-23
 **Current Phase**: Phase 2 — Frame Parser
-**Next Task**: 2.3 — Receive state machine (`hive_frame.c`)
+**Next Task**: Phase 2 completion gap closure — exhaustive frame-type tests
 
 ### Phase Summary
 
 | Phase | Name | Status | Tests | Notes |
 |---|---|---|---|---|
 | 1 | Foundation | DONE | 16/16 (Phase 1 slice) | Tasks 1.1–1.5 done on Linux + OpenBSD |
-| 2 | Frame Parser | IN PROGRESS | 19/19 (Phase 2 slice) | Tasks 2.1–2.2 done on Linux + OpenBSD; 2.3–2.5 pending |
+| 2 | Frame Parser | IN PROGRESS | 37/37 (Phase 2 slice) | Tasks 2.1–2.5 done on Linux + OpenBSD; completion criteria gap closure pending |
 | 3 | HPACK | NOT STARTED | — | Encoder, decoder, Huffman, standalone API |
 | 4 | Session Core | NOT STARTED | — | Minimal send queue, session struct, stream table, SETTINGS, preface |
 | 5 | Flow Control and DATA | NOT STARTED | — | Windows, recv-side enforcement, WINDOW_UPDATE, DATA delivery |
@@ -227,7 +227,7 @@ layer in isolation using minimal stubs.
   advances `send_buf_used`
 - Tests verify the exact 9-byte output for known inputs
 
-**2.3 — Receive state machine (hive_frame.c)**
+**2.3 — Receive state machine (hive_frame.c)** ✓ DONE
 - Implement all 18 receive states per ARCHITECTURE.md §3.1, including
   `RECV_SERVER_PREFACE` (client role: first frame must be SETTINGS non-ACK),
   `RECV_HEADERS_PAD` and `RECV_PUSH_PROMISE_PAD` (consume padding bytes after
@@ -258,7 +258,7 @@ layer in isolation using minimal stubs.
   - if `!reassembly_active` and frame is CONTINUATION → same connection error
 - Unknown frame types: transition to RECV_SKIP_PAYLOAD per RFC 9113 §4.1
 
-**2.4 — Frame validation**
+**2.4 — Frame validation** ✓ DONE
 - In RECV_FRAME_HEADER after parsing `cur_frame`:
   - Validate inbound `cur_frame.length` against **`local_settings.max_frame_size`**
     (what we advertised) — NOT `remote_settings`. See ARCHITECTURE.md §2.5
@@ -281,7 +281,7 @@ layer in isolation using minimal stubs.
     in the same list but is equally prohibited)
   - `stream_id != 0` for SETTINGS/PING/GOAWAY → PROTOCOL_ERROR connection error
 
-**2.5 — Stub session struct for testing**
+**2.5 — Stub session struct for testing** ✓ DONE
 - A minimal `hive_session_t` definition in `src/hive_internal.h` containing
   only the fields required by Phase 2: Region B options subset
   (`opt_max_frame_size`, `opt_max_continuation_size`), Region G

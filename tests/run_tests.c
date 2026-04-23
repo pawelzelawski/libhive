@@ -21,6 +21,24 @@ int test_strlcat_full_dst(void);
 int test_frame_hdr_write_data(void);
 int test_frame_hdr_write_settings(void);
 int test_frame_hdr_write_headers(void);
+int test_recv_settings_ack(void);
+int test_recv_ping(void);
+int test_recv_window_update(void);
+int test_recv_rst_stream(void);
+int test_recv_data_full(void);
+int test_recv_headers_end_headers(void);
+int test_recv_priority_ignored(void);
+int test_recv_unknown_type(void);
+int test_recv_split_frame_header(void);
+int test_recv_split_data_payload(void);
+int test_recv_split_settings_param(void);
+int test_recv_headers_plus_continuation(void);
+int test_recv_continuation_lockout(void);
+int test_recv_frame_too_large(void);
+int test_recv_data_on_stream_zero(void);
+int test_recv_settings_nonzero_stream(void);
+int test_recv_ping_wrong_length(void);
+int test_recv_rst_stream_wrong_length(void);
 
 /* --- test_hpack.c --------------------------------------------------------- */
 int test_static_table_size(void);
@@ -42,6 +60,24 @@ main(void)
 	RUN(frame_hdr_write_data);
 	RUN(frame_hdr_write_settings);
 	RUN(frame_hdr_write_headers);
+	RUN(recv_settings_ack);
+	RUN(recv_ping);
+	RUN(recv_window_update);
+	RUN(recv_rst_stream);
+	RUN(recv_data_full);
+	RUN(recv_headers_end_headers);
+	RUN(recv_priority_ignored);
+	RUN(recv_unknown_type);
+	RUN(recv_split_frame_header);
+	RUN(recv_split_data_payload);
+	RUN(recv_split_settings_param);
+	RUN(recv_headers_plus_continuation);
+	RUN(recv_continuation_lockout);
+	RUN(recv_frame_too_large);
+	RUN(recv_data_on_stream_zero);
+	RUN(recv_settings_nonzero_stream);
+	RUN(recv_ping_wrong_length);
+	RUN(recv_rst_stream_wrong_length);
 
 	/* Phase 1.3 — platform compat layer */
 	RUN(strlcpy_basic);

@@ -23,8 +23,11 @@
  * See ARCHITECTURE.md §6.2 for the canonical implementation reference.
  */
 void
-frame_hdr_write_at(uint8_t *dst, uint32_t length,
-    uint8_t type, uint8_t flags, uint32_t stream_id)
+frame_hdr_write_at(uint8_t *dst,
+                   uint32_t length,
+                   uint8_t type,
+                   uint8_t flags,
+                   uint32_t stream_id)
 {
 	dst[0] = (uint8_t)((length >> 16) & 0xFFu);
 	dst[1] = (uint8_t)((length >> 8) & 0xFFu);
@@ -48,14 +51,11 @@ frame_hdr_write_at(uint8_t *dst, uint32_t length,
 void
 frame_hdr_parse(const uint8_t *src, frame_hdr_t *out)
 {
-	out->length = ((uint32_t)src[0] << 16) |
-	    ((uint32_t)src[1] << 8) |
-	    (uint32_t)src[2];
-	out->type   = src[3];
-	out->flags  = src[4];
+	out->length = ((uint32_t)src[0] << 16) | ((uint32_t)src[1] << 8) |
+	              (uint32_t)src[2];
+	out->type = src[3];
+	out->flags = src[4];
 	out->stream_id = (((uint32_t)src[5] & 0x7Fu) << 24) |
-	    ((uint32_t)src[6] << 16) |
-	    ((uint32_t)src[7] << 8) |
-	    (uint32_t)src[8];
+	                 ((uint32_t)src[6] << 16) | ((uint32_t)src[7] << 8) |
+	                 (uint32_t)src[8];
 }
-
