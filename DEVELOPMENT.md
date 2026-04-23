@@ -3,8 +3,8 @@
 ## Status Overview
 
 **Last Updated**: 2026-04-23
-**Current Phase**: Phase 3 — HPACK
-**Next Task**: 3.7 — Standalone API
+**Current Phase**: Phase 4 — Session Core
+**Next Task**: 4.0 — Minimal send queue
 
 ### Phase Summary
 
@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | 1 | Foundation | DONE | 16/16 (Phase 1 slice) | Tasks 1.1–1.5 done on Linux + OpenBSD |
 | 2 | Frame Parser | DONE | 54/54 (Phase 2 slice) | Tasks 2.1–2.5 done on Linux + OpenBSD; completion criteria confirmed; audit fixes applied 2026-04-23 |
-| 3 | HPACK | IN PROGRESS | — | Encoder, decoder, Huffman, standalone API |
+| 3 | HPACK | DONE | 34/34 (Phase 3 slice) | Tasks 3.1-3.7 done on Linux + OpenBSD; Phase 3 completion criteria confirmed 2026-04-23 |
 | 4 | Session Core | NOT STARTED | — | Minimal send queue, session struct, stream table, SETTINGS, preface |
 | 5 | Flow Control and DATA | NOT STARTED | — | Windows, recv-side enforcement, WINDOW_UPDATE, DATA delivery |
 | 6 | Submit and Send | NOT STARTED | — | Full send queue, partial-send, response/request submit, new callbacks |
@@ -32,7 +32,7 @@
 | M6 | clang-format clean | NOT STARTED |
 | M7 | clang-tidy clean | NOT STARTED |
 | M8 | No direct malloc/free calls in src/ except the NULL-allocator shim | NOT STARTED |
-| M9 | Full HPACK test suite passes (encode-decode round-trip) | NOT STARTED |
+| M9 | Full HPACK test suite passes (encode-decode round-trip) | DONE |
 | M10 | Frame state machine handles split delivery (1 byte at a time) | DONE |
 | M11 | h2spec full suite passes — zero failures | NOT STARTED |
 | M12 | Wraith integration: HTTP/2 GET over TLS with arena allocator | NOT STARTED |
@@ -548,16 +548,16 @@ File: `tests/test_hpack.c` (extended from Phase 1)
 
 ### Phase 3 Completion Criteria
 
-- [ ] All RFC 7541 §C.3, §C.4, §C.6 test vectors pass exactly
-- [ ] Always-copy test passes (SECURITY requirement M8 verified for HPACK)
-- [ ] Oversized entry eviction test passes
-- [ ] All negative-case tests pass (index-0, out-of-range, size-update position,
+- [x] All RFC 7541 §C.3, §C.4, §C.6 test vectors pass exactly
+- [x] Always-copy test passes (SECURITY requirement M8 verified for HPACK)
+- [x] Oversized entry eviction test passes
+- [x] All negative-case tests pass (index-0, out-of-range, size-update position,
       truncated varint/string)
-- [ ] Bomb protection tests pass; verified as stream errors (not connection errors)
-- [ ] `on_header` by-pointer test passes
-- [ ] All Phase 3 tests pass on Linux and OpenBSD
-- [ ] Valgrind clean; ASan/UBSan clean on both platforms
-- [ ] Quality milestone M9 confirmed
+- [x] Bomb protection tests pass; verified as stream errors (not connection errors)
+- [x] `on_header` by-pointer test passes
+- [x] All Phase 3 tests pass on Linux and OpenBSD
+- [x] Valgrind clean; ASan/UBSan clean on both platforms
+- [x] Quality milestone M9 confirmed
 
 ---
 

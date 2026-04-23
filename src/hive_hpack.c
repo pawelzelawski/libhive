@@ -680,6 +680,42 @@ huff_decode_long(uint64_t acc, int nbits, uint8_t *out_sym)
 	}
 	return 0;
 }
+
+/*
+ * huff_decode_symbol - generic HPACK Huffman symbol matcher.
+ *
+ * Matches the next symbol by comparing the top L bits (L=5..30)
+ * against the canonical encode table. Returns 1 on match,
+ * 0 when more bits are needed, and -1 on EOS.
+ */
+static int
+huff_decode_symbol(uint64_t acc, int nbits, uint8_t *out_sym, int *bits_used)
+{
+	int L;
+	int s;
+	uint32_t code;
+
+	for (L = 5; L <= 30; L++) {
+		if (nbits < L)
+			return 0;
+		code =
+		    (uint32_t)((acc >> (nbits - L)) & (((uint64_t)1 << L) - 1));
+		for (s = 0; s < 257; s++) {
+			if (huff_encode_table[s].bits != (uint8_t)L)
+				continue;
+			if (huff_encode_table[s].code != code)
+				continue;
+			if (s == 256)
+				return -1;
+			*out_sym = (uint8_t)s;
+			*bits_used = L;
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 int
 huff_decode(const uint8_t *src,
             size_t src_len,
@@ -693,37 +729,33 @@ huff_decode(const uint8_t *src,
 	size_t out;
 	if (scratch == NULL || out_len == NULL)
 		return HIVE_ERR_INVALID_ARG;
+	/* Kept for future fast-path restoration; referenced to avoid warnings.
+	 */
+	(void)huff_decode_table[0].complete;
+	(void)huff_decode_long;
 	acc = 0;
 	nbits = 0;
 	out = 0;
 	for (i = 0; i < src_len; i++) {
 		acc = (acc << 8) | (uint64_t)src[i];
 		nbits += 8;
-		while (nbits >= 8) {
-			const huff_entry_t *e;
-			uint8_t idx;
-			idx = (uint8_t)(acc >> (nbits - 8));
-			e = &huff_decode_table[idx];
-			if (e->complete) {
-				if (e->eos)
-					return HIVE_ERR_COMPRESSION;
-				if (out >= max_len)
-					return HIVE_ERR_COMPRESSION;
-				scratch[out++] = e->sym;
-				nbits -= e->bits_consumed;
-			} else {
-				int bits_used;
-				uint8_t sym;
-				bits_used = huff_decode_long(acc, nbits, &sym);
-				if (bits_used < 0)
-					return HIVE_ERR_COMPRESSION;
-				if (bits_used == 0)
-					break; /* need more input */
-				if (out >= max_len)
-					return HIVE_ERR_COMPRESSION;
-				scratch[out++] = sym;
-				nbits -= bits_used;
-			}
+		while (nbits >= 5) {
+			int match;
+			int bits_used;
+			uint8_t sym;
+
+			bits_used = 0;
+			match =
+			    huff_decode_symbol(acc, nbits, &sym, &bits_used);
+			if (match < 0)
+				return HIVE_ERR_COMPRESSION;
+			if (match == 0)
+				break;
+			if (out >= max_len)
+				return HIVE_ERR_COMPRESSION;
+			scratch[out++] = sym;
+			nbits -= bits_used;
+
 			if (nbits == 0)
 				acc = 0;
 			else
