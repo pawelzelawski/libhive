@@ -77,6 +77,10 @@ int test_hpack_table_evict_to_zero(void);
 int test_hpack_table_rfc_size(void);
 int test_hpack_table_oversized_entry(void);
 int test_hpack_always_copy(void);
+int test_hpack_hash_threshold_activation(void);
+int test_hpack_hash_insert_nomem(void);
+int test_hpack_hash_tombstone_probe_chain(void);
+int test_hpack_hash_rebuild_on_recross(void);
 
 /* Phase 3.2 — integer varint encode/decode */
 int test_hpack_int_decode_1byte(void);
@@ -179,6 +183,10 @@ main(void)
 	RUN(hpack_table_rfc_size);
 	RUN(hpack_table_oversized_entry);
 	RUN(hpack_always_copy);
+	RUN(hpack_hash_threshold_activation);
+	RUN(hpack_hash_insert_nomem);
+	RUN(hpack_hash_tombstone_probe_chain);
+	RUN(hpack_hash_rebuild_on_recross);
 
 	/* Phase 3.2 — integer varint encode/decode */
 	RUN(hpack_int_decode_1byte);

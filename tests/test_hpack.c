@@ -37,6 +37,10 @@ int test_hpack_table_evict_to_zero(void);
 int test_hpack_table_rfc_size(void);
 int test_hpack_table_oversized_entry(void);
 int test_hpack_always_copy(void);
+int test_hpack_hash_threshold_activation(void);
+int test_hpack_hash_insert_nomem(void);
+int test_hpack_hash_tombstone_probe_chain(void);
+int test_hpack_hash_rebuild_on_recross(void);
 
 /* Phase 3.2 — integer varint encode/decode */
 int test_hpack_int_decode_1byte(void);
@@ -307,6 +311,37 @@ static const hive_mem_t test_mem = {
 	NULL, /* realloc not needed for table tests */
 	NULL,
 };
+
+typedef struct {
+	int calloc_calls;
+	int fail_on_calloc_call;
+} fail_alloc_ctx_t;
+
+static void *
+fail_malloc_fn(size_t size, void *ctx)
+{
+	(void)ctx;
+	return malloc(size);
+}
+
+static void
+fail_free_fn(void *ptr, void *ctx)
+{
+	(void)ctx;
+	free(ptr);
+}
+
+static void *
+fail_calloc_fn(size_t nmemb, size_t size, void *ctx)
+{
+	fail_alloc_ctx_t *fctx;
+
+	fctx = (fail_alloc_ctx_t *)ctx;
+	fctx->calloc_calls++;
+	if (fctx->calloc_calls == fctx->fail_on_calloc_call)
+		return NULL;
+	return calloc(nmemb, size);
+}
 
 /*
  * test_hpack_table_insert_basic — insert one entry, verify via lookup.
@@ -743,6 +778,153 @@ test_hpack_always_copy(void)
 	    &dyn_idx);
 	ASSERT(match == HPACK_LOOKUP_EXACT);
 	ASSERT(dyn_idx == 0);
+
+	hpack_table_free(&t, &test_mem);
+	return 1;
+}
+
+/*
+ * test_hpack_hash_threshold_activation — hash remains disabled below the
+ * threshold and is allocated when max_size first crosses above it.
+ */
+int
+test_hpack_hash_threshold_activation(void)
+{
+	hpack_table_t t;
+	uint32_t      dyn_idx;
+	int           ret, match;
+
+	ret = hpack_table_init(&t, &test_mem, 4096);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(t.hash == NULL);
+
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"n1", 2, (const uint8_t *)"v1", 2);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(t.hash == NULL);
+
+	hpack_table_evict_to(&t, &test_mem, 20000);
+	t.max_size = 20000;
+	ASSERT(t.hash != NULL);
+
+	match = hpack_table_lookup(&t,
+	    (const uint8_t *)"n1", 2, (const uint8_t *)"v1", 2, &dyn_idx);
+	ASSERT(match == HPACK_LOOKUP_EXACT);
+	ASSERT(dyn_idx == 0);
+
+	hpack_table_free(&t, &test_mem);
+	return 1;
+}
+
+/*
+ * test_hpack_hash_insert_nomem — large-table insert hard-fails with
+ * HIVE_ERR_NOMEM when hash allocation fails.
+ */
+int
+test_hpack_hash_insert_nomem(void)
+{
+	hpack_table_t    t;
+	fail_alloc_ctx_t fctx;
+	hive_mem_t       mem;
+	int              ret;
+
+	mem.malloc = fail_malloc_fn;
+	mem.free = fail_free_fn;
+	mem.calloc = fail_calloc_fn;
+	mem.realloc = NULL;
+	fctx.calloc_calls = 0;
+	fctx.fail_on_calloc_call = 2; /* ring alloc succeeds; hash alloc fails */
+	mem.ctx = &fctx;
+
+	ret = hpack_table_init(&t, &mem, 20000);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_table_insert(&t, &mem,
+	    (const uint8_t *)"n1", 2, (const uint8_t *)"v1", 2);
+	ASSERT(ret == HIVE_ERR_NOMEM);
+	ASSERT(t.count == 0);
+	ASSERT(t.size == 0);
+	ASSERT(t.hash == NULL);
+
+	hpack_table_free(&t, &mem);
+	return 1;
+}
+
+/*
+ * test_hpack_hash_tombstone_probe_chain — evicting an older colliding entry
+ * must leave a tombstone so lookup can reach the newer colliding entry.
+ */
+int
+test_hpack_hash_tombstone_probe_chain(void)
+{
+	hpack_table_t t;
+	uint32_t      dyn_idx;
+	int           ret, match;
+
+	ret = hpack_table_init(&t, &test_mem, 20000);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"aa", 2, (const uint8_t *)"v1", 2);
+	ASSERT(ret == HIVE_OK);
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"aa", 2, (const uint8_t *)"v2", 2);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(t.hash != NULL);
+	ASSERT(t.count == 2);
+
+	hpack_table_evict_to(&t, &test_mem, 36);
+	ASSERT(t.count == 1);
+
+	match = hpack_table_lookup(&t,
+	    (const uint8_t *)"aa", 2, (const uint8_t *)"v2", 2, &dyn_idx);
+	ASSERT(match == HPACK_LOOKUP_EXACT);
+	ASSERT(dyn_idx == 0);
+
+	match = hpack_table_lookup(&t,
+	    (const uint8_t *)"aa", 2, (const uint8_t *)"v1", 2, &dyn_idx);
+	ASSERT(match == HPACK_LOOKUP_NAME_ONLY);
+	ASSERT(dyn_idx == 0);
+
+	hpack_table_free(&t, &test_mem);
+	return 1;
+}
+
+/*
+ * test_hpack_hash_rebuild_on_recross — existing hash allocation is reused
+ * and rebuilt when table size rises above the threshold after being below it.
+ */
+int
+test_hpack_hash_rebuild_on_recross(void)
+{
+	hpack_table_t      t;
+	hpack_hash_slot_t *hash_ptr;
+	uint32_t           dyn_idx;
+	int                ret, match;
+
+	ret = hpack_table_init(&t, &test_mem, 20000);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"n1", 2, (const uint8_t *)"v1", 2);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(t.hash != NULL);
+	hash_ptr = t.hash;
+
+	hpack_table_evict_to(&t, &test_mem, 4096);
+	t.max_size = 4096;
+
+	ret = hpack_table_insert(&t, &test_mem,
+	    (const uint8_t *)"n2", 2, (const uint8_t *)"v2", 2);
+	ASSERT(ret == HIVE_OK);
+
+	hpack_table_evict_to(&t, &test_mem, 20000);
+	t.max_size = 20000;
+	ASSERT(t.hash == hash_ptr);
+
+	match = hpack_table_lookup(&t,
+	    (const uint8_t *)"n2", 2, (const uint8_t *)"v2", 2, &dyn_idx);
+	ASSERT(match == HPACK_LOOKUP_EXACT);
 
 	hpack_table_free(&t, &test_mem);
 	return 1;

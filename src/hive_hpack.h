@@ -130,9 +130,10 @@ typedef struct {
 /*
  * hpack_table_init — allocate and initialise a dynamic table.
  *
- * Allocates the ring pointer array via mem->calloc.  hash is left NULL
- * (hash index is task 3.6, only used above HPACK_LINEAR_THRESHOLD).
- * pending_max and pending_min are initialised to max_size.
+ * Allocates the ring pointer array via mem->calloc.  The hash index is
+ * allocated lazily when the table first operates above
+ * HPACK_LINEAR_THRESHOLD.  pending_max and pending_min are initialised
+ * to max_size.
  *
  * Returns HIVE_OK or HIVE_ERR_NOMEM.
  */
@@ -166,6 +167,8 @@ hpack_table_evict_to(hpack_table_t *t, const hive_mem_t *mem, uint32_t new_max);
  * See ARCHITECTURE.md §8.1.
  *
  * Returns HIVE_OK, HIVE_ERR_NOMEM, or HIVE_ERR_COMPRESSION (overflow).
+ * In large-table mode (max_size > HPACK_LINEAR_THRESHOLD), inability to
+ * allocate/rebuild the hash index is a hard HIVE_ERR_NOMEM failure.
  */
 int hpack_table_insert(hpack_table_t *t,
                        const hive_mem_t *mem,
@@ -175,9 +178,11 @@ int hpack_table_insert(hpack_table_t *t,
                        uint32_t value_len);
 
 /*
- * hpack_table_lookup — linear scan for name (and optionally value).
+ * hpack_table_lookup — dynamic table lookup for name/value.
  *
- * Scans from newest entry backward.  Returns HPACK_LOOKUP_EXACT,
+ * Uses the hash index when active (hash != NULL and
+ * max_size > HPACK_LINEAR_THRESHOLD), otherwise scans linearly from
+ * newest backward.  Returns HPACK_LOOKUP_EXACT,
  * HPACK_LOOKUP_NAME_ONLY, or HPACK_LOOKUP_NOT_FOUND.  On a match,
  * *out_dyn_idx is set to the 0-based index from newest (0 = newest).
  *

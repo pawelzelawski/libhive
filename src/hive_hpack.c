@@ -824,6 +824,176 @@ hpack_ring_cap(uint32_t max_size)
 	return n;
 }
 
+static uint32_t
+hpack_hash_fnv1a(const uint8_t *p, uint32_t len)
+{
+	uint32_t h;
+	uint32_t i;
+
+	h = 2166136261u;
+	for (i = 0; i < len; i++) {
+		h ^= (uint32_t)p[i];
+		h *= 16777619u;
+	}
+	return h;
+}
+
+static void
+hpack_hash_clear(hpack_table_t *t)
+{
+	uint32_t i;
+	uint32_t slots;
+
+	if (t->hash == NULL)
+		return;
+
+	slots = t->hash_mask + 1u;
+	for (i = 0; i < slots; i++) {
+		t->hash[i].name_hash = 0;
+		t->hash[i].value_hash = 0;
+		t->hash[i].ring_idx = HPACK_HASH_EMPTY;
+	}
+}
+
+static int
+hpack_hash_alloc(hpack_table_t *t, const hive_mem_t *mem)
+{
+	hpack_hash_slot_t *hash;
+	uint32_t slots;
+
+	if (t->hash != NULL)
+		return HIVE_OK;
+
+	slots = t->ring_cap << 1;
+	hash = (hpack_hash_slot_t *)mem->calloc(
+	    slots, sizeof(hpack_hash_slot_t), mem->ctx);
+	if (hash == NULL)
+		return HIVE_ERR_NOMEM;
+
+	t->hash = hash;
+	t->hash_mask = slots - 1u;
+	hpack_hash_clear(t);
+	return HIVE_OK;
+}
+
+static void
+hpack_hash_insert_slot(hpack_table_t *t,
+                       uint32_t ring_idx,
+                       uint32_t name_hash,
+                       uint32_t value_hash)
+{
+	uint32_t i;
+	uint32_t pos;
+	uint32_t first_tomb;
+
+	pos = name_hash & t->hash_mask;
+	first_tomb = UINT32_MAX;
+
+	for (i = 0; i <= t->hash_mask; i++) {
+		hpack_hash_slot_t *slot;
+
+		slot = &t->hash[pos];
+		if (slot->ring_idx == HPACK_HASH_EMPTY) {
+			if (first_tomb != UINT32_MAX)
+				slot = &t->hash[first_tomb];
+			slot->name_hash = name_hash;
+			slot->value_hash = value_hash;
+			slot->ring_idx = ring_idx;
+			return;
+		}
+		if (slot->ring_idx == HPACK_HASH_TOMBSTONE &&
+		    first_tomb == UINT32_MAX)
+			first_tomb = pos;
+		pos = (pos + 1u) & t->hash_mask;
+	}
+
+	if (first_tomb != UINT32_MAX) {
+		t->hash[first_tomb].name_hash = name_hash;
+		t->hash[first_tomb].value_hash = value_hash;
+		t->hash[first_tomb].ring_idx = ring_idx;
+	}
+}
+
+static int
+hpack_hash_rebuild(hpack_table_t *t, const hive_mem_t *mem)
+{
+	uint32_t i;
+
+	if (hpack_hash_alloc(t, mem) != HIVE_OK)
+		return HIVE_ERR_NOMEM;
+
+	hpack_hash_clear(t);
+	for (i = 0; i < t->count; i++) {
+		uint32_t idx;
+		const hpack_entry_t *e;
+
+		idx = (t->ring_head - t->count + i) & (t->ring_cap - 1u);
+		e = t->ring[idx];
+		if (e == NULL)
+			continue;
+		hpack_hash_insert_slot(
+		    t,
+		    idx,
+		    hpack_hash_fnv1a(HPACK_ENTRY_NAME(e), e->name_len),
+		    hpack_hash_fnv1a(HPACK_ENTRY_VALUE(e), e->value_len));
+	}
+
+	return HIVE_OK;
+}
+
+static int
+hpack_hash_prepare_for_max(hpack_table_t *t,
+                           const hive_mem_t *mem,
+                           uint32_t new_max)
+{
+	if (new_max <= HPACK_LINEAR_THRESHOLD)
+		return HIVE_OK;
+	if (t->hash == NULL)
+		return hpack_hash_rebuild(t, mem);
+	if (t->max_size <= HPACK_LINEAR_THRESHOLD)
+		return hpack_hash_rebuild(t, mem);
+	return HIVE_OK;
+}
+
+static int
+hpack_hash_mode_active(const hpack_table_t *t)
+{
+	return t->hash != NULL && t->max_size > HPACK_LINEAR_THRESHOLD;
+}
+
+static void
+hpack_hash_mark_tombstone(hpack_table_t *t,
+                          const hpack_entry_t *e,
+                          uint32_t ring_idx)
+{
+	uint32_t i;
+	uint32_t pos;
+	uint32_t name_hash;
+	uint32_t value_hash;
+
+	if (!hpack_hash_mode_active(t))
+		return;
+
+	name_hash = hpack_hash_fnv1a(HPACK_ENTRY_NAME(e), e->name_len);
+	value_hash = hpack_hash_fnv1a(HPACK_ENTRY_VALUE(e), e->value_len);
+	pos = name_hash & t->hash_mask;
+
+	for (i = 0; i <= t->hash_mask; i++) {
+		hpack_hash_slot_t *slot;
+
+		slot = &t->hash[pos];
+		if (slot->ring_idx == HPACK_HASH_EMPTY)
+			return;
+		if (slot->ring_idx == ring_idx &&
+		    slot->name_hash == name_hash &&
+		    slot->value_hash == value_hash) {
+			slot->ring_idx = HPACK_HASH_TOMBSTONE;
+			return;
+		}
+		pos = (pos + 1u) & t->hash_mask;
+	}
+}
+
 int
 hpack_table_init(hpack_table_t *t, const hive_mem_t *mem, uint32_t max_size)
 {
@@ -868,9 +1038,12 @@ hpack_table_evict_to(hpack_table_t *t, const hive_mem_t *mem, uint32_t new_max)
 	uint32_t oldest_idx;
 	hpack_entry_t *oldest;
 
+	(void)hpack_hash_prepare_for_max(t, mem, new_max);
+
 	while (t->count > 0 && t->size > new_max) {
 		oldest_idx = (t->ring_head - t->count) & (t->ring_cap - 1);
 		oldest = t->ring[oldest_idx];
+		hpack_hash_mark_tombstone(t, oldest, oldest_idx);
 		t->size -= HPACK_ENTRY_RFC_SIZE(oldest);
 		t->ring[oldest_idx] = NULL;
 		t->count--;
@@ -888,7 +1061,22 @@ hpack_table_insert(hpack_table_t *t,
 {
 	uint64_t alloc64;
 	uint32_t rfc_size;
+	uint32_t ins_idx;
 	hpack_entry_t *entry;
+	uint32_t name_hash;
+	uint32_t value_hash;
+	int hash_mode;
+
+	if (hpack_hash_prepare_for_max(t, mem, t->max_size) != HIVE_OK)
+		return HIVE_ERR_NOMEM;
+
+	hash_mode = hpack_hash_mode_active(t);
+	name_hash = 0;
+	value_hash = 0;
+	if (hash_mode) {
+		name_hash = hpack_hash_fnv1a(name, name_len);
+		value_hash = hpack_hash_fnv1a(value, value_len);
+	}
 
 	/* Integer overflow guards per ARCHITECTURE.md §4.2. */
 	alloc64 = (uint64_t)name_len + (uint64_t)value_len;
@@ -911,6 +1099,7 @@ hpack_table_insert(hpack_table_t *t,
 
 		oldest_idx = (t->ring_head - t->count) & (t->ring_cap - 1);
 		oldest = t->ring[oldest_idx];
+		hpack_hash_mark_tombstone(t, oldest, oldest_idx);
 		t->size -= HPACK_ENTRY_RFC_SIZE(oldest);
 		t->ring[oldest_idx] = NULL;
 		t->count--;
@@ -945,10 +1134,14 @@ hpack_table_insert(hpack_table_t *t,
 	if (value_len > 0)
 		memcpy(HPACK_ENTRY_VALUE(entry), value, value_len);
 
-	t->ring[t->ring_head] = entry;
+	ins_idx = t->ring_head;
+	t->ring[ins_idx] = entry;
 	t->ring_head = (t->ring_head + 1u) & (t->ring_cap - 1u);
 	t->count++;
 	t->size += rfc_size;
+
+	if (hash_mode)
+		hpack_hash_insert_slot(t, ins_idx, name_hash, value_hash);
 
 	return HIVE_OK;
 }
@@ -963,8 +1156,72 @@ hpack_table_lookup(const hpack_table_t *t,
 {
 	uint32_t i;
 	uint32_t name_only_idx;
+	uint32_t name_hash;
+	uint32_t value_hash;
 
 	name_only_idx = UINT32_MAX; /* sentinel: no name-only match yet */
+
+	if (hpack_hash_mode_active(t)) {
+		uint32_t exact_idx;
+		uint32_t pos;
+
+		exact_idx = UINT32_MAX;
+		name_hash = hpack_hash_fnv1a(name, name_len);
+		value_hash = hpack_hash_fnv1a(value, value_len);
+		pos = name_hash & t->hash_mask;
+
+		for (i = 0; i <= t->hash_mask; i++) {
+			const hpack_hash_slot_t *slot;
+			const hpack_entry_t *e;
+			uint32_t dyn_idx;
+
+			slot = &t->hash[pos];
+			if (slot->ring_idx == HPACK_HASH_EMPTY)
+				break;
+			if (slot->ring_idx == HPACK_HASH_TOMBSTONE) {
+				pos = (pos + 1u) & t->hash_mask;
+				continue;
+			}
+
+			e = t->ring[slot->ring_idx];
+			if (e == NULL) {
+				pos = (pos + 1u) & t->hash_mask;
+				continue;
+			}
+			if (slot->name_hash != name_hash ||
+			    e->name_len != name_len ||
+			    memcmp(HPACK_ENTRY_NAME(e), name, name_len) != 0) {
+				pos = (pos + 1u) & t->hash_mask;
+				continue;
+			}
+
+			dyn_idx = (t->ring_head - 1u - slot->ring_idx) &
+			          (t->ring_cap - 1u);
+			if (slot->value_hash == value_hash &&
+			    e->value_len == value_len &&
+			    (value_len == 0 ||
+			     memcmp(HPACK_ENTRY_VALUE(e), value, value_len) ==
+			         0)) {
+				if (exact_idx == UINT32_MAX ||
+				    dyn_idx < exact_idx)
+					exact_idx = dyn_idx;
+			} else if (name_only_idx == UINT32_MAX ||
+			           dyn_idx < name_only_idx)
+				name_only_idx = dyn_idx;
+
+			pos = (pos + 1u) & t->hash_mask;
+		}
+
+		if (exact_idx != UINT32_MAX) {
+			*out_dyn_idx = exact_idx;
+			return HPACK_LOOKUP_EXACT;
+		}
+		if (name_only_idx != UINT32_MAX) {
+			*out_dyn_idx = name_only_idx;
+			return HPACK_LOOKUP_NAME_ONLY;
+		}
+		return HPACK_LOOKUP_NOT_FOUND;
+	}
 
 	/*
 	 * Linear scan from newest entry backward.
@@ -1432,11 +1689,15 @@ hpack_decode_block(hive_session_t *s,
 			    data + pos, len - pos, 5, &consumed);
 			if (idx == HPACK_INT_OVERFLOW)
 				return HIVE_ERR_COMPRESSION;
-			pos += consumed;
-
+			if (idx > HPACK_LINEAR_THRESHOLD &&
+			    s->dec_table.hash == NULL)
+				return HIVE_ERR_NOMEM;
 			if (idx > s->dec_table.pending_max)
 				return HIVE_ERR_COMPRESSION;
 			hpack_table_evict_to(&s->dec_table, &s->mem, idx);
+			if (idx > HPACK_LINEAR_THRESHOLD &&
+			    s->dec_table.hash == NULL)
+				return HIVE_ERR_NOMEM;
 			s->dec_table.max_size = idx;
 			continue;
 		} else {
@@ -1711,9 +1972,14 @@ hpack_encode_block(hpack_table_t *table,
 		}
 
 		hpack_table_evict_to(table, mem, min_sz);
+		if (min_sz > HPACK_LINEAR_THRESHOLD && table->hash == NULL)
+			return HIVE_ERR_NOMEM;
 		table->max_size = min_sz;
 		if (max_sz != min_sz) {
 			hpack_table_evict_to(table, mem, max_sz);
+			if (max_sz > HPACK_LINEAR_THRESHOLD &&
+			    table->hash == NULL)
+				return HIVE_ERR_NOMEM;
 			table->max_size = max_sz;
 		}
 		table->has_pending = 0;

@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-23
 **Current Phase**: Phase 3 — HPACK
-**Next Task**: 3.6 — Hash index for large tables
+**Next Task**: 3.7 — Standalone API
 
 ### Phase Summary
 
@@ -455,7 +455,7 @@ HPACK is tested standalone before being integrated into the session.)
   value per RFC 7541 §6.3
 - Write directly into caller-provided output buffer
 
-**3.6 — Hash index for large tables**
+**3.6 — Hash index for large tables** ✓ DONE
 - Implement `hpack_hash_slot_t` index per ARCHITECTURE.md §4.9
 - Hash index allocated only when `max_size > HPACK_LINEAR_THRESHOLD (16384)`
 - FNV-1a on name bytes for probe position; `value_hash` field (FNV-1a on value
