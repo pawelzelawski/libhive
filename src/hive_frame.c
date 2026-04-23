@@ -83,12 +83,23 @@ frame_header_validate(hive_session_t *s)
 {
 	const frame_hdr_t *f = &s->cur_frame;
 
+	/* SECURITY: Inbound frame length must not exceed what we advertised
+	 * in our local SETTINGS (local_settings.max_frame_size). Validating
+	 * against local_settings — not remote_settings — is the correct
+	 * directionality: local_settings governs frames we are willing to
+	 * receive; remote_settings governs frames we are permitted to send.
+	 * See ARCHITECTURE.md §2.5 and CODING_STANDARDS.md §3.1. */
 	if (f->length > s->local_settings.max_frame_size) {
 		return frame_size_error(s);
 	}
 
 	switch (f->type) {
 	case HIVE_FRAME_SETTINGS:
+		/* SECURITY: A SETTINGS frame with the ACK flag must carry
+		 * zero payload (RFC 9113 §6.5); a non-ACK SETTINGS payload
+		 * must be an exact multiple of 6 bytes — one 6-byte
+		 * parameter record per entry. Any other length is a
+		 * FRAME_SIZE_ERROR connection error. */
 		if ((f->flags & HIVE_FLAG_ACK) != 0) {
 			if (f->length != 0) {
 				return frame_size_error(s);
@@ -98,27 +109,45 @@ frame_header_validate(hive_session_t *s)
 		}
 		break;
 	case HIVE_FRAME_PING:
+		/* SECURITY: PING payload must be exactly 8 bytes
+		 * (RFC 9113 §6.7). Any other length is a
+		 * FRAME_SIZE_ERROR connection error. */
 		if (f->length != 8) {
 			return frame_size_error(s);
 		}
 		break;
 	case HIVE_FRAME_RST_STREAM:
 	case HIVE_FRAME_WINDOW_UPDATE:
+		/* SECURITY: RST_STREAM and WINDOW_UPDATE payloads must be
+		 * exactly 4 bytes (RFC 9113 §6.4, §6.9). Any other length
+		 * is a FRAME_SIZE_ERROR connection error. */
 		if (f->length != 4) {
 			return frame_size_error(s);
 		}
 		break;
 	case HIVE_FRAME_PRIORITY:
+		/* SECURITY: PRIORITY payload must be exactly 5 bytes
+		 * (RFC 9113 §6.3). Any other length is a
+		 * FRAME_SIZE_ERROR connection error. */
 		if (f->length != 5) {
 			return frame_size_error(s);
 		}
 		break;
 	case HIVE_FRAME_GOAWAY:
+		/* SECURITY: GOAWAY must carry at least 8 bytes:
+		 * 4-byte last_stream_id + 4-byte error_code
+		 * (RFC 9113 §6.8). Fewer bytes is a FRAME_SIZE_ERROR
+		 * connection error. */
 		if (f->length < 8) {
 			return frame_size_error(s);
 		}
 		break;
 	case HIVE_FRAME_PUSH_PROMISE:
+		/* SECURITY: PUSH_PROMISE must carry at least the 4-byte
+		 * promised stream identifier. When the PADDED flag is set a
+		 * further 1-byte Pad Length field is prepended, so the
+		 * minimum rises to 5 bytes (RFC 9113 §6.6). Shorter frames
+		 * are a FRAME_SIZE_ERROR connection error. */
 		if ((f->flags & HIVE_FLAG_PADDED) != 0) {
 			if (f->length < 5) {
 				return frame_size_error(s);
@@ -128,11 +157,22 @@ frame_header_validate(hive_session_t *s)
 		}
 		break;
 	case HIVE_FRAME_DATA:
+		/* SECURITY: A padded DATA frame must carry at least 1 byte
+		 * for the Pad Length field itself (RFC 9113 §6.1). A
+		 * PADDED frame with length 0 is a FRAME_SIZE_ERROR. */
 		if ((f->flags & HIVE_FLAG_PADDED) != 0 && f->length < 1) {
 			return frame_size_error(s);
 		}
 		break;
 	case HIVE_FRAME_HEADERS:
+		/* SECURITY: A HEADERS frame must be large enough to hold the
+		 * optional Pad Length byte (PADDED flag) and the optional
+		 * 5-byte PRIORITY prefix (PRIORITY flag), alone or in
+		 * combination (RFC 9113 §6.2). Any combination that leaves
+		 * insufficient room is a FRAME_SIZE_ERROR connection error:
+		 *   PADDED + PRIORITY : minimum 6 bytes
+		 *   PRIORITY only     : minimum 5 bytes
+		 *   PADDED only       : minimum 1 byte */
 		if ((f->flags & HIVE_FLAG_PADDED) != 0 &&
 		    (f->flags & HIVE_FLAG_PRIORITY) != 0 && f->length < 6) {
 			return frame_size_error(s);
@@ -157,6 +197,10 @@ frame_header_validate(hive_session_t *s)
 	case HIVE_FRAME_PRIORITY:
 	case HIVE_FRAME_CONTINUATION:
 	case HIVE_FRAME_PUSH_PROMISE:
+		/* SECURITY: These frame types are stream-associated and must
+		 * not appear on the connection-control stream (stream_id 0).
+		 * Receiving any of them on stream 0 is a connection error
+		 * (RFC 9113 §6.1, §6.2, §6.3, §6.4, §6.6, §6.10). */
 		if (f->stream_id == 0) {
 			return protocol_error(s);
 		}
@@ -164,6 +208,9 @@ frame_header_validate(hive_session_t *s)
 	case HIVE_FRAME_SETTINGS:
 	case HIVE_FRAME_PING:
 	case HIVE_FRAME_GOAWAY:
+		/* SECURITY: Connection-level control frames must only appear
+		 * on stream 0. A non-zero stream_id is a connection error
+		 * (RFC 9113 §6.5, §6.7, §6.8). */
 		if (f->stream_id != 0) {
 			return protocol_error(s);
 		}
@@ -225,6 +272,14 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			break;
 
 		case RECV_SERVER_PREFACE:
+			/*
+			 * Set the preface_count=1 sentinel so RECV_FRAME_HEADER
+			 * enforces that the first received frame must be a
+			 * non-ACK SETTINGS (RFC 9113 §3.4).  No bytes are
+			 * consumed here — the state transitions immediately so
+			 * the incoming bytes are processed by RECV_FRAME_HEADER
+			 * on the very next loop iteration.
+			 */
 			s->preface_count = 1;
 			s->recv_state = RECV_FRAME_HEADER;
 			break;
@@ -328,6 +383,15 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				break;
 			}
 			if (s->payload_remaining == 0) {
+				/*
+				 * Fast-path: frame with zero-length payload.
+				 * GOAWAY requires length >= 8 (enforced above
+				 * by frame_header_validate), so the GOAWAY
+				 * branch below is a defensive guard that is
+				 * currently unreachable.  All other zero-length
+				 * frames (e.g. SETTINGS ACK) fall through to
+				 * the unconditional recv_state reset.
+				 */
 				if (s->recv_state == RECV_GOAWAY_PAYLOAD) {
 					s->goaway_last_stream_id_recv = 0;
 					s->goaway_error_code_recv = 0;
@@ -355,6 +419,11 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				s->pad_length_received = 1;
 				consumed++;
 				s->payload_remaining--;
+				/* SECURITY: Pad length must not exceed the
+				 * remaining payload bytes after the Pad Length
+				 * field itself has been consumed.  An oversized
+				 * pad_length is a connection error
+				 * (RFC 9113 §6.1). */
 				if (s->pad_remaining > s->payload_remaining) {
 					return protocol_error(s);
 				}
@@ -422,6 +491,11 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			}
 			if (s->pad_length_received != 0 &&
 			    s->pad_validated == 0) {
+				/* SECURITY: Pad length must not exceed the
+				 * remaining payload bytes after the Pad Length
+				 * field (and any PRIORITY prefix) have been
+				 * consumed.  Oversized padding is a connection
+				 * error (RFC 9113 §6.2). */
 				if (s->pad_remaining > s->payload_remaining) {
 					return protocol_error(s);
 				}
@@ -432,6 +506,12 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				n = avail;
 			}
 			if (n > 0) {
+				/* SECURITY: Total accumulated header block must
+				 * not exceed opt_max_continuation_size.  This
+				 * prevents header-block bomb attacks where an
+				 * adversary chains many CONTINUATION frames to
+				 * exhaust reassembly memory
+				 * (ARCHITECTURE.md §8.2). */
 				if ((s->reassembly_len + n) >
 				    s->opt_max_continuation_size) {
 					return protocol_error(s);
@@ -459,6 +539,7 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 					}
 				} else {
 					s->reassembly_active = 1;
+					s->reassembly_type = 0;
 					s->reassembly_end_stream =
 					    (s->cur_frame.flags &
 					     HIVE_FLAG_END_STREAM) != 0;
@@ -488,6 +569,11 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				n = avail;
 			}
 			if (n > 0) {
+				/* SECURITY: Accumulated header block across
+				 * HEADERS + CONTINUATION frames must not exceed
+				 * opt_max_continuation_size.  Prevents
+				 * CONTINUATION flood / header-block bomb
+				 * attacks (ARCHITECTURE.md §8.2). */
 				if ((s->reassembly_len + n) >
 				    s->opt_max_continuation_size) {
 					return protocol_error(s);
@@ -524,8 +610,10 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			}
 			if (s->pad_validated == 0) {
 				while (s->ctrl_staging_count < 4 &&
-				       s->payload_remaining > 0 && consumed < len) {
-					s->ctrl_staging[s->ctrl_staging_count++] =
+				       s->payload_remaining > 0 &&
+				       consumed < len) {
+					s->ctrl_staging
+					    [s->ctrl_staging_count++] =
 					    data[consumed++];
 					s->payload_remaining--;
 				}
@@ -535,6 +623,11 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				s->reassembly_promised_stream_id =
 				    u32be(s->ctrl_staging) & 0x7fffffffU;
 				s->ctrl_staging_count = 0;
+				/* SECURITY: Pad length must not exceed the
+				 * remaining payload bytes after the
+				 * promised_stream_id field has been consumed.
+				 * Oversized padding is a connection error
+				 * (RFC 9113 §6.6). */
 				if (s->pad_remaining > s->payload_remaining) {
 					return protocol_error(s);
 				}
@@ -546,6 +639,11 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				n = avail;
 			}
 			if (n > 0) {
+				/* SECURITY: Total header block accumulated via
+				 * PUSH_PROMISE + CONTINUATION must not exceed
+				 * opt_max_continuation_size.  Prevents
+				 * header-block bomb attacks
+				 * (ARCHITECTURE.md §8.2). */
 				if ((s->reassembly_len + n) >
 				    s->opt_max_continuation_size) {
 					return protocol_error(s);
@@ -595,6 +693,15 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			break;
 
 		case RECV_SETTINGS_PAYLOAD:
+			/*
+			 * Defensive guard: a SETTINGS ACK always has length 0
+			 * (enforced by frame_header_validate), so the
+			 * zero-payload fast-path in RECV_FRAME_HEADER resets
+			 * recv_state to RECV_FRAME_HEADER before this state is
+			 * ever entered for an ACK frame.  The ACK branch below
+			 * is therefore currently unreachable but is retained as
+			 * a safety net should validation ordering ever change.
+			 */
 			if ((s->cur_frame.flags & HIVE_FLAG_ACK) != 0) {
 				s->payload_remaining = 0;
 				s->recv_state = RECV_FRAME_HEADER;

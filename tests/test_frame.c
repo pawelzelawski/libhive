@@ -18,7 +18,9 @@ int test_recv_ping(void);
 int test_recv_window_update(void);
 int test_recv_rst_stream(void);
 int test_recv_data_full(void);
+int test_recv_data_padded(void);
 int test_recv_headers_end_headers(void);
+int test_recv_headers_priority_prefix(void);
 int test_recv_priority_ignored(void);
 int test_recv_unknown_type(void);
 int test_recv_split_frame_header(void);
@@ -269,6 +271,46 @@ test_recv_data_full(void)
 	return 1;
 }
 
+/*
+ * Padded DATA frame: stream=1, 3 payload bytes + 2 padding bytes + 1
+ * pad-length byte = 6 bytes total payload, PADDED flag set.
+ *
+ * Wire layout (9-byte header + payload):
+ *   [0x02]              — pad_length = 2
+ *   [0x61, 0x62, 0x63]  — data bytes "abc"
+ *   [0x00, 0x00]        — 2 padding bytes
+ *
+ * on_data_chunk must fire with pointer to the first data byte (frame+10,
+ * i.e. one byte past the pad_length field) and length 3.
+ */
+int
+test_recv_data_padded(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	/* payload: pad_length=2, data "abc", 2 pad bytes */
+	uint8_t payload[6] = {0x02, 'a', 'b', 'c', 0x00, 0x00};
+	uint8_t frame[15];
+	data_capture_t cap;
+	size_t n;
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	memset(&cap, 0, sizeof(cap));
+	cap.base = frame;
+	s.callbacks.on_data_chunk = on_data_chunk_capture;
+	s.user_data = &cap;
+	n = build_frame(frame, 6, HIVE_FRAME_DATA, HIVE_FLAG_PADDED, 1,
+	    payload);
+	ASSERT(hive_session_recv(&s, frame, n) == (ssize_t)n);
+	ASSERT(cap.calls == 1);
+	ASSERT(cap.last_len == 3);
+	/* Pointer must point past the 9-byte header AND the 1-byte
+	 * pad_length field to the first real data byte. */
+	ASSERT(cap.last_ptr == frame + 10);
+	ASSERT(s.recv_state == RECV_FRAME_HEADER);
+	return 1;
+}
+
 int
 test_recv_headers_end_headers(void)
 {
@@ -285,6 +327,44 @@ test_recv_headers_end_headers(void)
 	ASSERT(s.reassembly_len == 4);
 	ASSERT(memcmp(reassembly, payload, 4) == 0);
 	ASSERT(s.reassembly_active == 0);
+	return 1;
+}
+
+/*
+ * HEADERS frame with PRIORITY flag (5-byte prefix) + END_HEADERS.
+ *
+ * Payload layout (9 bytes total):
+ *   [0x00, 0x00, 0x00, 0x05, 0x00] — 5-byte PRIORITY prefix
+ *                                     (exclusive=0, dep=5, weight=0)
+ *   [0x82, 0x86, 0x84, 0x41]       — 4-byte HPACK-encoded header block
+ *
+ * The state machine must skip the 5-byte PRIORITY prefix via
+ * priority_payload_len and copy only the 4 header-block bytes into
+ * reassembly_buf.
+ */
+int
+test_recv_headers_priority_prefix(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[1024];
+	/* 5-byte PRIORITY prefix + 4-byte header block = 9 bytes */
+	uint8_t payload[9] = {
+		0x00, 0x00, 0x00, 0x05, 0x00, /* PRIORITY: dep=5, weight=0 */
+		0x82, 0x86, 0x84, 0x41        /* header block */
+	};
+	uint8_t frame[18];
+	size_t n;
+
+	test_session_init(&s, reassembly, sizeof(reassembly));
+	n = build_frame(frame, 9, HIVE_FRAME_HEADERS,
+	    HIVE_FLAG_PRIORITY | HIVE_FLAG_END_HEADERS, 1, payload);
+	ASSERT(hive_session_recv(&s, frame, n) == (ssize_t)n);
+	/* Only the 4 header-block bytes (after the PRIORITY prefix) must
+	 * land in reassembly_buf. */
+	ASSERT(s.reassembly_len == 4);
+	ASSERT(memcmp(reassembly, payload + 5, 4) == 0);
+	ASSERT(s.reassembly_active == 0);
+	ASSERT(s.recv_state == RECV_FRAME_HEADER);
 	return 1;
 }
 
@@ -441,6 +521,7 @@ test_recv_frame_too_large(void)
 	s.local_settings.max_frame_size = 16;
 	frame_hdr_write_at(frame, 17, HIVE_FRAME_DATA, 0, 1);
 	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
 	return 1;
 }
@@ -455,6 +536,7 @@ test_recv_data_on_stream_zero(void)
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	frame_hdr_write_at(frame, 0, HIVE_FRAME_DATA, 0, 0);
 	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s.last_h2_err == HIVE_H2_PROTOCOL_ERROR);
 	return 1;
 }
@@ -469,6 +551,7 @@ test_recv_settings_nonzero_stream(void)
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	frame_hdr_write_at(frame, 0, HIVE_FRAME_SETTINGS, 0, 1);
 	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s.last_h2_err == HIVE_H2_PROTOCOL_ERROR);
 	return 1;
 }
@@ -483,6 +566,7 @@ test_recv_ping_wrong_length(void)
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	frame_hdr_write_at(frame, 4, HIVE_FRAME_PING, 0, 0);
 	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
 	return 1;
 }
@@ -497,6 +581,7 @@ test_recv_rst_stream_wrong_length(void)
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	frame_hdr_write_at(frame, 5, HIVE_FRAME_RST_STREAM, 0, 1);
 	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
 	return 1;
 }
@@ -513,6 +598,7 @@ test_recv_settings_bad_length_nonzero_ack(void)
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	n = build_frame(frame, 6, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0, payload);
 	ASSERT(hive_session_recv(&s, frame, n) == -1);
+	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
 	return 1;
 }
@@ -673,6 +759,7 @@ test_recv_settings_bad_length_non_ack(void)
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	n = build_frame(frame, 5, HIVE_FRAME_SETTINGS, 0, 0, payload);
 	ASSERT(hive_session_recv(&s, frame, n) == -1);
+	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
 	return 1;
 }
@@ -687,6 +774,7 @@ test_recv_window_update_wrong_length(void)
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	frame_hdr_write_at(frame, 5, HIVE_FRAME_WINDOW_UPDATE, 0, 1);
 	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
 	return 1;
 }
@@ -701,6 +789,7 @@ test_recv_priority_wrong_length(void)
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	frame_hdr_write_at(frame, 4, HIVE_FRAME_PRIORITY, 0, 1);
 	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
 	return 1;
 }
@@ -715,6 +804,7 @@ test_recv_goaway_too_short(void)
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	frame_hdr_write_at(frame, 7, HIVE_FRAME_GOAWAY, 0, 0);
 	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
 	return 1;
 }
@@ -729,6 +819,7 @@ test_recv_push_promise_wrong_length_unpadded(void)
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	frame_hdr_write_at(frame, 3, HIVE_FRAME_PUSH_PROMISE, 0, 1);
 	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
 	return 1;
 }
@@ -743,6 +834,7 @@ test_recv_push_promise_wrong_length_padded(void)
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	frame_hdr_write_at(frame, 4, HIVE_FRAME_PUSH_PROMISE, HIVE_FLAG_PADDED, 1);
 	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
 	return 1;
 }
