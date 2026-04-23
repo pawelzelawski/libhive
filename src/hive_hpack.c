@@ -1119,3 +1119,168 @@ hpack_encode_int(uint8_t *out,
 	out[pos++] = (uint8_t)val;
 	return pos;
 }
+
+/* ------------------------------------------------------------------ */
+/* String decode — Task 3.3                                            */
+/* See ARCHITECTURE.md §4.6.                                           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * hpack_decode_string — decode one HPACK string field.
+ *
+ * Detects the Huffman flag in bit 7 of the first byte, decodes the
+ * 7-bit string length prefix, validates that the claimed bytes are
+ * present in src, then either Huffman-decodes into scratch or returns
+ * a direct pointer into the source buffer for literal strings.
+ *
+ * See ARCHITECTURE.md §4.6 for the full specification.
+ */
+int
+hpack_decode_string(const uint8_t *src,
+                    size_t src_len,
+                    uint8_t *scratch,
+                    size_t scratch_cap,
+                    hive_buf_t *out,
+                    size_t *consumed)
+{
+	uint32_t slen;
+	size_t hdr_consumed;
+	int is_huffman;
+
+	if (src_len < 1)
+		return HIVE_ERR_COMPRESSION; /* truncated — no length byte */
+
+	is_huffman = (src[0] >> 7) & 1;
+
+	/* Decode the 7-bit prefix string length (RFC 7541 §5.2) */
+	slen = hpack_decode_int(src, src_len, 7, &hdr_consumed);
+	if (slen == HPACK_INT_OVERFLOW)
+		return HIVE_ERR_COMPRESSION; /* truncated or overflow */
+
+	/* Claimed string bytes must all be present in the block */
+	if ((size_t)slen > src_len - hdr_consumed)
+		return HIVE_ERR_COMPRESSION; /* truncated string */
+
+	/*
+	 * Reject strings whose length exceeds the configured maximum.
+	 * For literal strings this is the definitive check.
+	 * For Huffman strings, huff_decode() enforces scratch_cap on
+	 * the decoded output; we also reject here to fail fast on an
+	 * obviously oversized compressed form (encoded >= decoded).
+	 * See ARCHITECTURE.md §4.6.
+	 */
+	if ((size_t)slen > scratch_cap)
+		return HIVE_ERR_COMPRESSION;
+
+	if (is_huffman) {
+		size_t out_len;
+		int ret;
+
+		ret = huff_decode(src + hdr_consumed,
+		                  (size_t)slen,
+		                  scratch,
+		                  scratch_cap,
+		                  &out_len);
+		if (ret != HIVE_OK)
+			return HIVE_ERR_COMPRESSION;
+		out->data = scratch;
+		out->len = out_len;
+	} else {
+		/*
+		 * Non-Huffman: return a direct pointer into the source
+		 * buffer — no copy.  The caller must not modify the
+		 * source buffer while this hive_buf_t is in use.
+		 * See ARCHITECTURE.md §4.6.
+		 */
+		out->data = src + hdr_consumed;
+		out->len = (size_t)slen;
+	}
+
+	out->flags = HIVE_BUF_VALID;
+	*consumed = hdr_consumed + (size_t)slen;
+	return HIVE_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/* String encode — Task 3.3                                            */
+/* See ARCHITECTURE.md §4.8.                                           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * hpack_encode_string — encode one string into an HPACK wire block.
+ *
+ * Computes the Huffman-encoded byte length by summing bit-lengths from
+ * the encode table, then Huffman-encodes if strictly shorter, otherwise
+ * writes the literal form.  Both paths use hpack_encode_int() for the
+ * 7-bit length prefix.
+ *
+ * See ARCHITECTURE.md §4.8 and RFC 7541 §5.2.
+ */
+size_t
+hpack_encode_string(const uint8_t *src,
+                    size_t src_len,
+                    uint8_t *out,
+                    size_t out_cap)
+{
+	size_t i;
+	uint32_t total_bits;
+	uint32_t huff_len;
+	uint8_t hdr_buf[8];
+	size_t hdr_len;
+	size_t pos;
+
+	/* Compute the Huffman-encoded byte length without writing */
+	total_bits = 0;
+	for (i = 0; i < src_len; i++)
+		total_bits += (uint32_t)huff_encode_table[src[i]].bits;
+	huff_len = (total_bits + 7u) / 8u;
+
+	if (huff_len < (uint32_t)src_len) {
+		/*
+		 * Huffman encoding is strictly shorter — use it.
+		 * Encode the length with the Huffman flag (bit 7 = 1).
+		 */
+		size_t enc_len;
+		int ret;
+
+		hdr_len = hpack_encode_int(
+		    hdr_buf, sizeof(hdr_buf), 0x80u, 7, huff_len);
+		if (hdr_len == 0)
+			return 0; /* buffer sizing error (cannot happen) */
+
+		if (hdr_len + (size_t)huff_len > out_cap)
+			return 0; /* output buffer too small */
+
+		memcpy(out, hdr_buf, hdr_len);
+		pos = hdr_len;
+
+		ret = huff_encode(
+		    src, src_len, out + pos, out_cap - pos, &enc_len);
+		if (ret != HIVE_OK)
+			return 0;
+
+		pos += enc_len;
+		return pos;
+	}
+
+	/*
+	 * Literal form — no Huffman.
+	 * Encode the length with the Huffman flag cleared (bit 7 = 0).
+	 */
+	hdr_len = hpack_encode_int(
+	    hdr_buf, sizeof(hdr_buf), 0x00u, 7, (uint32_t)src_len);
+	if (hdr_len == 0)
+		return 0;
+
+	if (hdr_len + src_len > out_cap)
+		return 0; /* output buffer too small */
+
+	memcpy(out, hdr_buf, hdr_len);
+	pos = hdr_len;
+
+	if (src_len > 0)
+		memcpy(out + pos, src, src_len);
+
+	pos += src_len;
+	return pos;
+}

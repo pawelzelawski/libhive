@@ -85,6 +85,13 @@ int test_hpack_int_decode_truncated(void);
 int test_hpack_int_decode_overflow(void);
 int test_hpack_int_encode_decode_roundtrip(void);
 
+/* Phase 3.3 — string encode/decode */
+int test_hpack_string_decode_literal(void);
+int test_hpack_string_decode_huffman(void);
+int test_hpack_string_encode_huffman(void);
+int test_hpack_string_scratch_limit(void);
+int test_hpack_string_truncated(void);
+
 int
 main(void)
 {
@@ -162,6 +169,13 @@ main(void)
 	RUN(hpack_int_decode_truncated);
 	RUN(hpack_int_decode_overflow);
 	RUN(hpack_int_encode_decode_roundtrip);
+
+	/* Phase 3.3 — string encode/decode */
+	RUN(hpack_string_decode_literal);
+	RUN(hpack_string_decode_huffman);
+	RUN(hpack_string_encode_huffman);
+	RUN(hpack_string_scratch_limit);
+	RUN(hpack_string_truncated);
 
 	printf("%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_passed == tests_run) ? 0 : 1;

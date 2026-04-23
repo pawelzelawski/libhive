@@ -4,8 +4,9 @@
  * Phase 1.4: static table and Huffman tests.
  * Phase 3.1: dynamic table (hpack_table_t) tests.
  * Phase 3.2: integer varint encode/decode tests.
+ * Phase 3.3: string encode/decode tests.
  *
- * See DEVELOPMENT.md tasks 1.4, 3.1 and 3.2.
+ * See DEVELOPMENT.md tasks 1.4, 3.1, 3.2 and 3.3.
  */
 
 #include <stddef.h>
@@ -42,6 +43,13 @@ int test_hpack_int_decode_multibyte(void);
 int test_hpack_int_decode_truncated(void);
 int test_hpack_int_decode_overflow(void);
 int test_hpack_int_encode_decode_roundtrip(void);
+
+/* Phase 3.3 — string encode/decode */
+int test_hpack_string_decode_literal(void);
+int test_hpack_string_decode_huffman(void);
+int test_hpack_string_encode_huffman(void);
+int test_hpack_string_scratch_limit(void);
+int test_hpack_string_truncated(void);
 
 int
 test_static_table_size(void)
@@ -722,3 +730,170 @@ test_hpack_always_copy(void)
 	return 1;
 }
 
+/* ------------------------------------------------------------------ */
+/* Phase 3.3 — hpack_decode_string / hpack_encode_string              */
+/* ------------------------------------------------------------------ */
+
+/*
+ * test_hpack_string_decode_literal — decode a non-Huffman HPACK string.
+ *
+ * Encodes "www.example.com" (15 bytes) as a literal string: the first
+ * byte is 0x0f (Huffman flag = 0, length = 15), followed by the raw
+ * ASCII bytes.  The decoded output must match and consumed must be 16.
+ *
+ * For non-Huffman strings, out.data must point directly into src (no
+ * copy — the zero-copy non-Huffman property per ARCHITECTURE.md §4.6).
+ */
+int
+test_hpack_string_decode_literal(void)
+{
+	static const uint8_t src[] = {
+		0x0f,
+		'w', 'w', 'w', '.', 'e', 'x', 'a', 'm', 'p', 'l', 'e',
+		'.', 'c', 'o', 'm',
+	};
+	uint8_t    scratch[256];
+	hive_buf_t out;
+	size_t     consumed;
+	int        ret;
+
+	ret = hpack_decode_string(src, sizeof(src),
+	    scratch, sizeof(scratch), &out, &consumed);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(consumed == sizeof(src));
+	ASSERT(out.len == 15);
+	ASSERT(memcmp(out.data, "www.example.com", 15) == 0);
+	ASSERT(out.flags & HIVE_BUF_VALID);
+	/* Non-Huffman: data is a direct pointer into src, not a copy */
+	ASSERT(out.data == src + 1);
+	return 1;
+}
+
+/*
+ * test_hpack_string_decode_huffman — decode a Huffman-encoded HPACK string.
+ *
+ * Uses the RFC 7541 §C.4 example: "www.example.com" Huffman-encoded as
+ * 12 bytes.  The HPACK string header is 0x8c (bit 7 = Huffman, length = 12).
+ *
+ * Total consumed = 1 + 12 = 13.  Decoded length = 15.  out.data must
+ * point into the scratch buffer (the Huffman decoder writes there).
+ */
+int
+test_hpack_string_decode_huffman(void)
+{
+	/* 0x8c: Huffman flag set (bit 7 = 1), compressed length = 12 */
+	static const uint8_t src[] = {
+		0x8c,
+		0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a,
+		0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff,
+	};
+	uint8_t    scratch[256];
+	hive_buf_t out;
+	size_t     consumed;
+	int        ret;
+
+	ret = hpack_decode_string(src, sizeof(src),
+	    scratch, sizeof(scratch), &out, &consumed);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(consumed == sizeof(src)); /* 1 header + 12 encoded bytes */
+	ASSERT(out.len == 15);
+	ASSERT(memcmp(out.data, "www.example.com", 15) == 0);
+	ASSERT(out.flags & HIVE_BUF_VALID);
+	/* Huffman: data points into scratch buffer */
+	ASSERT(out.data == scratch);
+	return 1;
+}
+
+/*
+ * test_hpack_string_encode_huffman — encode a string as a shorter Huffman form.
+ *
+ * "no-cache" (8 ASCII bytes) is known to produce a shorter Huffman encoding
+ * (6 bytes, per the RFC 7541 §C.3 example).  The encoder must set bit 7 of
+ * the first output byte (Huffman flag) and the total wire bytes must be
+ * strictly fewer than 1 (header) + 8 (literal) = 9 bytes.
+ *
+ * Decode-back round-trip confirms correctness.
+ */
+int
+test_hpack_string_encode_huffman(void)
+{
+	static const uint8_t src[] = "no-cache"; /* 8 bytes */
+	uint8_t    out[64];
+	uint8_t    dec_scratch[64];
+	hive_buf_t decoded;
+	size_t     enc_len;
+	size_t     consumed;
+	int        ret;
+
+	enc_len = hpack_encode_string(src, 8, out, sizeof(out));
+	ASSERT(enc_len > 0);
+
+	/* Huffman flag must be set in the leading byte */
+	ASSERT(out[0] & 0x80u);
+
+	/*
+	 * Huffman-encoded "no-cache" = 6 bytes, so total wire length is
+	 * 1 (header) + 6 = 7 bytes, strictly less than 9 for literal.
+	 */
+	ASSERT(enc_len < 9u);
+
+	/* Round-trip decode must recover the original string */
+	ret = hpack_decode_string(out, enc_len,
+	    dec_scratch, sizeof(dec_scratch), &decoded, &consumed);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(consumed == enc_len);
+	ASSERT(decoded.len == 8);
+	ASSERT(memcmp(decoded.data, "no-cache", 8) == 0);
+	return 1;
+}
+
+/*
+ * test_hpack_string_scratch_limit — decoded string exceeds scratch_cap.
+ *
+ * A literal string of length 5 is presented with scratch_cap = 4.
+ * The claimed decoded length (5) exceeds the limit (4), so
+ * hpack_decode_string() must return HIVE_ERR_COMPRESSION.
+ *
+ * See ARCHITECTURE.md §4.6 — the limit applies to both Huffman and
+ * literal strings.
+ */
+int
+test_hpack_string_scratch_limit(void)
+{
+	static const uint8_t src[] = {
+		0x05, 'h', 'e', 'l', 'l', 'o', /* length=5, literal "hello" */
+	};
+	uint8_t    scratch[4]; /* capacity = 4, string length = 5 */
+	hive_buf_t out;
+	size_t     consumed;
+	int        ret;
+
+	ret = hpack_decode_string(src, sizeof(src),
+	    scratch, 4, &out, &consumed);
+	ASSERT(ret == HIVE_ERR_COMPRESSION);
+	return 1;
+}
+
+/*
+ * test_hpack_string_truncated — claimed length exceeds remaining bytes.
+ *
+ * The length field claims 10 bytes but only 5 string bytes follow.
+ * hpack_decode_string() must return HIVE_ERR_COMPRESSION (truncated
+ * string per ARCHITECTURE.md §4.6).
+ */
+int
+test_hpack_string_truncated(void)
+{
+	static const uint8_t src[] = {
+		0x0a, 'h', 'e', 'l', 'l', 'o', /* length=10 but only 5 bytes */
+	};
+	uint8_t    scratch[256];
+	hive_buf_t out;
+	size_t     consumed;
+	int        ret;
+
+	ret = hpack_decode_string(src, sizeof(src),
+	    scratch, sizeof(scratch), &out, &consumed);
+	ASSERT(ret == HIVE_ERR_COMPRESSION);
+	return 1;
+}

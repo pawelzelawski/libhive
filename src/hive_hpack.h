@@ -248,6 +248,61 @@ size_t hpack_encode_int(uint8_t *out,
                         uint32_t val);
 
 /* ------------------------------------------------------------------ */
+/* String encode/decode — Task 3.3                                     */
+/* See ARCHITECTURE.md §4.6.                                           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * hpack_decode_string — decode one HPACK string field.
+ *
+ * src:        points to the first byte of the encoded string (the
+ *             byte that carries the Huffman flag and the 7-bit length
+ *             prefix per RFC 7541 §5.2).
+ * src_len:    remaining bytes in the header block from src onward.
+ * scratch:    target buffer for Huffman-decoded output.
+ * scratch_cap: maximum allowed decoded length (opt_max_header_string_size).
+ *             For non-Huffman strings the claimed length is also checked
+ *             against this limit so callers see consistent sizing behaviour.
+ * out:        filled on success; out->data and out->len are set.
+ *             For Huffman strings, out->data points into scratch.
+ *             For literal strings, out->data points directly into src
+ *             (no copy — pointer into the source buffer).
+ *             out->flags is set to HIVE_BUF_VALID on success.
+ * consumed:   set to the total bytes read from src (header + string).
+ *
+ * Returns HIVE_OK on success, HIVE_ERR_COMPRESSION on any encoding
+ * or size error (truncated input, decoded length exceeds scratch_cap,
+ * Huffman decoding error). See ARCHITECTURE.md §4.6.
+ */
+int hpack_decode_string(const uint8_t *src,
+                        size_t src_len,
+                        uint8_t *scratch,
+                        size_t scratch_cap,
+                        hive_buf_t *out,
+                        size_t *consumed);
+
+/*
+ * hpack_encode_string — encode one string into an HPACK wire block.
+ *
+ * Huffman-encodes the string when the result is strictly shorter than
+ * the literal form; otherwise emits a literal.  Writes the 7-bit length
+ * varint (with the Huffman flag in bit 7) followed by the string bytes.
+ *
+ * src, src_len: input string (may be zero length).
+ * out, out_cap: output buffer.
+ *
+ * Returns the number of bytes written (>= 1) on success, or 0 if
+ * out_cap is insufficient (caller must size the buffer appropriately —
+ * worst case: 6 header bytes for a 32-bit length varint + string bytes).
+ *
+ * See ARCHITECTURE.md §4.8.
+ */
+size_t hpack_encode_string(const uint8_t *src,
+                           size_t src_len,
+                           uint8_t *out,
+                           size_t out_cap);
+
+/* ------------------------------------------------------------------ */
 /* Huffman decode table entry.                                         */
 /* 4 bytes per entry — 256 entries = 1 KB total.                      */
 /* See ARCHITECTURE.md §4.4 and CODING_STANDARDS.md §1.3.             */

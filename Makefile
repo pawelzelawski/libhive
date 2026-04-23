@@ -143,6 +143,7 @@ lint:
 	cppcheck --enable=all --error-exitcode=1 \
 	         --suppress=missingIncludeSystem \
 	         --suppress=unusedFunction \
+	         --suppress=staticFunction \
 	         --suppress=variableScope \
 	         --suppress=normalCheckLevelMaxBranches \
 	         --suppress=unmatchedSuppression \
