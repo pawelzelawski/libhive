@@ -113,6 +113,9 @@ int test_hpack_encode_decode_roundtrip_no_huff(void);
 int test_hpack_encode_decode_roundtrip_huff(void);
 int test_hpack_encode_pending_size_update_dual(void);
 
+/* Phase 3.7 — standalone API */
+int test_hpack_standalone_encoder_decoder(void);
+
 int
 main(void)
 {
@@ -218,6 +221,9 @@ main(void)
 	RUN(hpack_encode_decode_roundtrip_no_huff);
 	RUN(hpack_encode_decode_roundtrip_huff);
 	RUN(hpack_encode_pending_size_update_dual);
+
+	/* Phase 3.7 — standalone API */
+	RUN(hpack_standalone_encoder_decoder);
 
 	printf("%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_passed == tests_run) ? 0 : 1;

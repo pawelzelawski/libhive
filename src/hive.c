@@ -7,6 +7,7 @@
  */
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "../include/hive.h"
 #include "hive_frame.h"
@@ -53,6 +54,144 @@ static const hive_mem_t null_allocator = {
     null_alloc_realloc,
     NULL,
 };
+
+struct hive_hpack_encoder {
+	hive_mem_t mem;
+	hpack_table_t table;
+};
+
+struct hive_hpack_decoder {
+	hive_mem_t mem;
+	hpack_table_t table;
+	uint8_t *scratch_name;
+	uint8_t *scratch_value;
+	size_t scratch_name_cap;
+	size_t scratch_value_cap;
+};
+
+static int
+standalone_ensure_scratch(hive_hpack_decoder_t *dec,
+                          uint8_t **scratch,
+                          size_t *scratch_cap,
+                          size_t need)
+{
+	uint8_t *p;
+	size_t cap;
+
+	if (need <= *scratch_cap)
+		return HIVE_OK;
+
+	cap = (*scratch_cap == 0) ? 256u : *scratch_cap;
+	while (cap < need) {
+		if (cap > (SIZE_MAX / 2u)) {
+			cap = need;
+			break;
+		}
+		cap <<= 1;
+	}
+
+	p = dec->mem.realloc(*scratch, cap, dec->mem.ctx);
+	if (p == NULL)
+		return HIVE_ERR_NOMEM;
+
+	*scratch = p;
+	*scratch_cap = cap;
+	return HIVE_OK;
+}
+
+static int
+standalone_decode_string(hive_hpack_decoder_t *dec,
+                         const uint8_t *src,
+                         size_t src_len,
+                         int is_name,
+                         hive_buf_t *out,
+                         size_t *consumed)
+{
+	uint8_t **scratch;
+	size_t *scratch_cap;
+	uint32_t slen;
+	size_t int_consumed;
+	size_t need;
+	int ret;
+
+	slen = hpack_decode_int(src, src_len, 7, &int_consumed);
+	if (slen == HPACK_INT_OVERFLOW)
+		return HIVE_ERR_COMPRESSION;
+	if ((size_t)slen > src_len - int_consumed)
+		return HIVE_ERR_COMPRESSION;
+
+	if ((size_t)slen > (SIZE_MAX - 32u) / 2u)
+		return HIVE_ERR_NOMEM;
+	need = (size_t)slen * 2u + 32u;
+
+	if (is_name) {
+		scratch = &dec->scratch_name;
+		scratch_cap = &dec->scratch_name_cap;
+	} else {
+		scratch = &dec->scratch_value;
+		scratch_cap = &dec->scratch_value_cap;
+	}
+
+	ret = standalone_ensure_scratch(dec, scratch, scratch_cap, need);
+	if (ret != HIVE_OK)
+		return ret;
+
+	ret = hpack_decode_string(
+	    src, src_len, *scratch, *scratch_cap, out, consumed);
+	if (ret != HIVE_OK)
+		return HIVE_ERR_COMPRESSION;
+	return HIVE_OK;
+}
+
+static int
+standalone_index_to_header(const hive_hpack_decoder_t *dec,
+                           uint32_t index,
+                           hive_nv_t *nv)
+{
+	const hpack_entry_t *e;
+
+	if (index == 0)
+		return HIVE_ERR_COMPRESSION;
+
+	if (index <= HPACK_STATIC_TABLE_SIZE) {
+		nv->name = hpack_static_table[index - 1u].name;
+		nv->name_len = hpack_static_table[index - 1u].name_len;
+		nv->value = hpack_static_table[index - 1u].value;
+		nv->value_len = hpack_static_table[index - 1u].value_len;
+		nv->flags = 0;
+		return HIVE_OK;
+	}
+
+	index -= HPACK_STATIC_TABLE_SIZE + 1u;
+	if (index >= dec->table.count)
+		return HIVE_ERR_COMPRESSION;
+
+	e = hpack_table_get(&dec->table, index);
+	nv->name = HPACK_ENTRY_NAME(e);
+	nv->name_len = e->name_len;
+	nv->value = HPACK_ENTRY_VALUE(e);
+	nv->value_len = e->value_len;
+	nv->flags = 0;
+	return HIVE_OK;
+}
+
+static int
+standalone_index_to_name(const hive_hpack_decoder_t *dec,
+                         uint32_t index,
+                         hive_buf_t *name)
+{
+	hive_nv_t nv;
+	int ret;
+
+	ret = standalone_index_to_header(dec, index, &nv);
+	if (ret != HIVE_OK)
+		return ret;
+
+	name->data = nv.name;
+	name->len = nv.name_len;
+	name->flags = HIVE_BUF_VALID;
+	return HIVE_OK;
+}
 
 /*
  * Stub implementations — Phase 1 skeleton only.
@@ -435,18 +574,38 @@ hive_options_set_rst_flood_window_secs(hive_options_t *opt, uint32_t v)
 	return HIVE_ERR_INVALID_ARG;
 }
 
-hive_hpack_encoder_t *
-hive_hpack_encoder_new(const hive_mem_t *mem, uint32_t max_table_size)
+int
+hive_hpack_encoder_new(hive_hpack_encoder_t **enc, size_t max_table_size)
 {
-	(void)mem;
-	(void)max_table_size;
-	return NULL;
+	hive_hpack_encoder_t *p;
+	int ret;
+
+	if (enc == NULL || max_table_size > UINT32_MAX)
+		return HIVE_ERR_INVALID_ARG;
+	*enc = NULL;
+
+	p = null_allocator.calloc(1, sizeof(*p), null_allocator.ctx);
+	if (p == NULL)
+		return HIVE_ERR_NOMEM;
+	p->mem = null_allocator;
+
+	ret = hpack_table_init(&p->table, &p->mem, (uint32_t)max_table_size);
+	if (ret != HIVE_OK) {
+		null_allocator.free(p, null_allocator.ctx);
+		return ret;
+	}
+
+	*enc = p;
+	return HIVE_OK;
 }
 
 void
 hive_hpack_encoder_free(hive_hpack_encoder_t *enc)
 {
-	(void)enc;
+	if (enc == NULL)
+		return;
+	hpack_table_free(&enc->table, &enc->mem);
+	enc->mem.free(enc, enc->mem.ctx);
 }
 
 int
@@ -454,45 +613,210 @@ hive_hpack_encode(hive_hpack_encoder_t *enc,
                   const hive_nv_t *nva,
                   size_t nvlen,
                   uint8_t *out,
-                  size_t out_cap,
                   size_t *out_len)
 {
-	(void)enc;
-	(void)nva;
-	(void)nvlen;
-	(void)out;
-	(void)out_cap;
-	(void)out_len;
-	return HIVE_ERR_SESSION_CLOSED;
+	size_t written;
+	int ret;
+
+	if (enc == NULL || out == NULL || out_len == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (nvlen > 0 && nva == NULL)
+		return HIVE_ERR_INVALID_ARG;
+
+	ret = hpack_encode_block(
+	    &enc->table, &enc->mem, nva, nvlen, out, *out_len, &written);
+	if (ret != HIVE_OK)
+		return ret;
+	*out_len = written;
+	return HIVE_OK;
 }
 
-hive_hpack_decoder_t *
-hive_hpack_decoder_new(const hive_mem_t *mem, uint32_t max_table_size)
+int
+hive_hpack_decoder_new(hive_hpack_decoder_t **dec, size_t max_table_size)
 {
-	(void)mem;
-	(void)max_table_size;
-	return NULL;
+	hive_hpack_decoder_t *p;
+	int ret;
+
+	if (dec == NULL || max_table_size > UINT32_MAX)
+		return HIVE_ERR_INVALID_ARG;
+	*dec = NULL;
+
+	p = null_allocator.calloc(1, sizeof(*p), null_allocator.ctx);
+	if (p == NULL)
+		return HIVE_ERR_NOMEM;
+	p->mem = null_allocator;
+
+	ret = hpack_table_init(&p->table, &p->mem, (uint32_t)max_table_size);
+	if (ret != HIVE_OK) {
+		null_allocator.free(p, null_allocator.ctx);
+		return ret;
+	}
+
+	*dec = p;
+	return HIVE_OK;
 }
 
 void
 hive_hpack_decoder_free(hive_hpack_decoder_t *dec)
 {
-	(void)dec;
+	if (dec == NULL)
+		return;
+	dec->mem.free(dec->scratch_name, dec->mem.ctx);
+	dec->mem.free(dec->scratch_value, dec->mem.ctx);
+	hpack_table_free(&dec->table, &dec->mem);
+	dec->mem.free(dec, dec->mem.ctx);
 }
 
 int
 hive_hpack_decode(hive_hpack_decoder_t *dec,
-                  const uint8_t *data,
-                  size_t len,
-                  int (*on_header)(hive_buf_t *name,
-                                   hive_buf_t *value,
-                                   void *ud),
-                  void *user_data)
+                  const uint8_t *in,
+                  size_t in_len,
+                  size_t *consumed,
+                  hive_nv_t *nv_out)
 {
-	(void)dec;
-	(void)data;
-	(void)len;
-	(void)on_header;
-	(void)user_data;
-	return HIVE_ERR_SESSION_CLOSED;
+	size_t pos;
+
+	if (dec == NULL || consumed == NULL || nv_out == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (in_len > 0 && in == NULL)
+		return HIVE_ERR_INVALID_ARG;
+
+	*consumed = 0;
+	if (in_len == 0)
+		return HIVE_HPACK_DECODE_DONE;
+
+	pos = 0;
+	while (pos < in_len) {
+		hive_buf_t name_buf;
+		hive_buf_t value_buf;
+		size_t n;
+		size_t v;
+		uint32_t idx;
+		uint8_t hdr_flags;
+		int ret;
+
+		memset(&name_buf, 0, sizeof(name_buf));
+		memset(&value_buf, 0, sizeof(value_buf));
+		hdr_flags = 0;
+
+		if (in[pos] & 0x80u) {
+			idx = hpack_decode_int(in + pos, in_len - pos, 7, &n);
+			if (idx == HPACK_INT_OVERFLOW)
+				return HIVE_ERR_COMPRESSION;
+			pos += n;
+
+			ret = standalone_index_to_header(dec, idx, nv_out);
+			if (ret != HIVE_OK)
+				return HIVE_ERR_COMPRESSION;
+			*consumed = pos;
+			return HIVE_HPACK_DECODE_EMIT;
+		} else if (in[pos] & 0x40u) {
+			idx = hpack_decode_int(in + pos, in_len - pos, 6, &n);
+			if (idx == HPACK_INT_OVERFLOW)
+				return HIVE_ERR_COMPRESSION;
+			pos += n;
+
+			if (idx == 0) {
+				ret = standalone_decode_string(dec,
+				                               in + pos,
+				                               in_len - pos,
+				                               1,
+				                               &name_buf,
+				                               &n);
+				if (ret != HIVE_OK)
+					return ret;
+				pos += n;
+			} else {
+				ret = standalone_index_to_name(
+				    dec, idx, &name_buf);
+				if (ret != HIVE_OK)
+					return HIVE_ERR_COMPRESSION;
+			}
+
+			ret = standalone_decode_string(
+			    dec, in + pos, in_len - pos, 0, &value_buf, &v);
+			if (ret != HIVE_OK)
+				return ret;
+			pos += v;
+
+			ret = hpack_table_insert(&dec->table,
+			                         &dec->mem,
+			                         name_buf.data,
+			                         (uint32_t)name_buf.len,
+			                         value_buf.data,
+			                         (uint32_t)value_buf.len);
+			if (ret != HIVE_OK)
+				return ret;
+
+			if (dec->table.count > 0) {
+				const hpack_entry_t *e;
+
+				e = hpack_table_get(&dec->table, 0);
+				nv_out->name = HPACK_ENTRY_NAME(e);
+				nv_out->name_len = e->name_len;
+				nv_out->value = HPACK_ENTRY_VALUE(e);
+				nv_out->value_len = e->value_len;
+			} else {
+				nv_out->name = name_buf.data;
+				nv_out->name_len = name_buf.len;
+				nv_out->value = value_buf.data;
+				nv_out->value_len = value_buf.len;
+			}
+			nv_out->flags = 0;
+			*consumed = pos;
+			return HIVE_HPACK_DECODE_EMIT;
+		} else if (in[pos] & 0x20u) {
+			idx = hpack_decode_int(in + pos, in_len - pos, 5, &n);
+			if (idx == HPACK_INT_OVERFLOW)
+				return HIVE_ERR_COMPRESSION;
+			if (idx > dec->table.pending_max)
+				return HIVE_ERR_COMPRESSION;
+			hpack_table_evict_to(&dec->table, &dec->mem, idx);
+			dec->table.max_size = idx;
+			pos += n;
+			continue;
+		} else {
+			if ((in[pos] & 0xf0u) == 0x10u)
+				hdr_flags = HIVE_NV_FLAG_NO_INDEX;
+
+			idx = hpack_decode_int(in + pos, in_len - pos, 4, &n);
+			if (idx == HPACK_INT_OVERFLOW)
+				return HIVE_ERR_COMPRESSION;
+			pos += n;
+
+			if (idx == 0) {
+				ret = standalone_decode_string(dec,
+				                               in + pos,
+				                               in_len - pos,
+				                               1,
+				                               &name_buf,
+				                               &n);
+				if (ret != HIVE_OK)
+					return ret;
+				pos += n;
+			} else {
+				ret = standalone_index_to_name(
+				    dec, idx, &name_buf);
+				if (ret != HIVE_OK)
+					return HIVE_ERR_COMPRESSION;
+			}
+
+			ret = standalone_decode_string(
+			    dec, in + pos, in_len - pos, 0, &value_buf, &v);
+			if (ret != HIVE_OK)
+				return ret;
+			pos += v;
+
+			nv_out->name = name_buf.data;
+			nv_out->name_len = name_buf.len;
+			nv_out->value = value_buf.data;
+			nv_out->value_len = value_buf.len;
+			nv_out->flags = hdr_flags;
+			*consumed = pos;
+			return HIVE_HPACK_DECODE_EMIT;
+		}
+	}
+
+	*consumed = pos;
+	return HIVE_HPACK_DECODE_DONE;
 }

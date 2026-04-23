@@ -467,7 +467,7 @@ HPACK is tested standalone before being integrated into the session.)
 - On lookup: probe skips tombstones, stops at EMPTY; prefer exact match (name
   + value) over name-only match; prefer newest entry among candidates
 
-**3.7 — Standalone API**
+**3.7 — Standalone API** ✓ DONE
 - `hive_hpack_encoder_new()`, `hive_hpack_encoder_free()`,
   `hive_hpack_encode()` per ARCHITECTURE.md §9.12
 - `hive_hpack_decoder_new()`, `hive_hpack_decoder_free()`,

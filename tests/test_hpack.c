@@ -73,6 +73,9 @@ int test_hpack_encode_decode_roundtrip_no_huff(void);
 int test_hpack_encode_decode_roundtrip_huff(void);
 int test_hpack_encode_pending_size_update_dual(void);
 
+/* Phase 3.7 — standalone API */
+int test_hpack_standalone_encoder_decoder(void);
+
 int
 test_static_table_size(void)
 {
@@ -1565,6 +1568,76 @@ test_hpack_encode_pending_size_update_dual(void)
 	ASSERT(enc.pending_max == 128);
 
 	hpack_table_free(&enc, &test_mem);
+	return 1;
+}
+
+int
+test_hpack_standalone_encoder_decoder(void)
+{
+	static const hive_nv_t in_nva[] = {
+		{(const uint8_t *)":method", (const uint8_t *)"GET", 7, 3, 0},
+		{(const uint8_t *)":scheme", (const uint8_t *)"https", 7, 5, 0},
+		{(const uint8_t *)":path", (const uint8_t *)"/", 5, 1, 0},
+		{(const uint8_t *)":authority", (const uint8_t *)"www.example.com", 10, 15, 0},
+	};
+	hive_hpack_encoder_t *enc;
+	hive_hpack_decoder_t *dec;
+	hive_nv_t out_nv;
+	uint8_t block[512];
+	size_t block_len;
+	size_t off;
+	size_t consumed;
+	size_t emit_count;
+	int ret;
+
+	enc = NULL;
+	dec = NULL;
+
+	ret = hive_hpack_encoder_new(&enc, 4096);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(enc != NULL);
+
+	ret = hive_hpack_decoder_new(&dec, 4096);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(dec != NULL);
+
+	block_len = sizeof(block);
+	ret = hive_hpack_encode(enc,
+	                        in_nva,
+	                        sizeof(in_nva) / sizeof(in_nva[0]),
+	                        block,
+	                        &block_len);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(block_len > 0);
+
+	off = 0;
+	emit_count = 0;
+	while (off < block_len) {
+		ret = hive_hpack_decode(
+		    dec, block + off, block_len - off, &consumed, &out_nv);
+		ASSERT(ret == HIVE_HPACK_DECODE_EMIT);
+		ASSERT(consumed > 0);
+		ASSERT(emit_count < (sizeof(in_nva) / sizeof(in_nva[0])));
+		ASSERT(out_nv.name_len == in_nva[emit_count].name_len);
+		ASSERT(out_nv.value_len == in_nva[emit_count].value_len);
+		ASSERT(memcmp(out_nv.name,
+		              in_nva[emit_count].name,
+		              out_nv.name_len) == 0);
+		ASSERT(memcmp(out_nv.value,
+		              in_nva[emit_count].value,
+		              out_nv.value_len) == 0);
+
+		off += consumed;
+		emit_count++;
+	}
+
+	ASSERT(emit_count == (sizeof(in_nva) / sizeof(in_nva[0])));
+	ret = hive_hpack_decode(dec, NULL, 0, &consumed, &out_nv);
+	ASSERT(ret == HIVE_HPACK_DECODE_DONE);
+	ASSERT(consumed == 0);
+
+	hive_hpack_encoder_free(enc);
+	hive_hpack_decoder_free(dec);
 	return 1;
 }
 

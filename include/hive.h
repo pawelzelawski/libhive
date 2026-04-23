@@ -380,25 +380,23 @@ void *hive_stream_get_user_data(hive_session_t *session, uint32_t stream_id);
 typedef struct hive_hpack_encoder hive_hpack_encoder_t;
 typedef struct hive_hpack_decoder hive_hpack_decoder_t;
 
-hive_hpack_encoder_t *hive_hpack_encoder_new(const hive_mem_t *mem,
-                                             uint32_t max_table_size);
+#define HIVE_HPACK_DECODE_EMIT 1
+#define HIVE_HPACK_DECODE_DONE 2
+
+int hive_hpack_encoder_new(hive_hpack_encoder_t **enc, size_t max_table_size);
 void hive_hpack_encoder_free(hive_hpack_encoder_t *enc);
 int hive_hpack_encode(hive_hpack_encoder_t *enc,
                       const hive_nv_t *nva,
                       size_t nvlen,
                       uint8_t *out,
-                      size_t out_cap,
                       size_t *out_len);
 
-hive_hpack_decoder_t *hive_hpack_decoder_new(const hive_mem_t *mem,
-                                             uint32_t max_table_size);
+int hive_hpack_decoder_new(hive_hpack_decoder_t **dec, size_t max_table_size);
 void hive_hpack_decoder_free(hive_hpack_decoder_t *dec);
 int hive_hpack_decode(hive_hpack_decoder_t *dec,
-                      const uint8_t *data,
-                      size_t len,
-                      int (*on_header)(hive_buf_t *name,
-                                       hive_buf_t *value,
-                                       void *ud),
-                      void *user_data);
+                      const uint8_t *in,
+                      size_t in_len,
+                      size_t *consumed,
+                      hive_nv_t *nv_out);
 
 #endif /* HIVE_H */
