@@ -57,6 +57,7 @@ struct hive_options {
 
 struct hive_session {
 	/* Region A subset */
+	hive_mem_t mem;
 	hive_role_t role;
 	hive_callbacks_t callbacks;
 	void *user_data;
@@ -64,9 +65,14 @@ struct hive_session {
 	/* Region B subset (Phase 2 options used by frame parser) */
 	uint32_t opt_max_frame_size;
 	uint32_t opt_max_continuation_size;
+	uint32_t opt_max_header_list_size;
+	uint32_t opt_max_header_count;
+	uint32_t opt_max_header_string_size;
+	uint8_t opt_no_http_messaging;
 
 	/* Region E subset used by Task 2.4 inbound frame-size validation */
 	hive_settings_t local_settings;
+	hpack_table_t dec_table;
 
 	/* Region G — receive state machine fields */
 	uint8_t frame_hdr_buf[9];
@@ -88,6 +94,10 @@ struct hive_session {
 	uint8_t reassembly_active;
 	uint32_t reassembly_len;
 	uint8_t *reassembly_buf;
+	uint8_t *hpack_scratch_name;
+	uint8_t *hpack_scratch_value;
+	hive_buf_t hpack_name_handle;
+	hive_buf_t hpack_value_handle;
 	uint8_t priority_payload_len;
 
 	/* GOAWAY staging values (used before callback in RECV_GOAWAY_DEBUG) */

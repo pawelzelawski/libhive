@@ -303,6 +303,31 @@ size_t hpack_encode_string(const uint8_t *src,
                            size_t out_cap);
 
 /* ------------------------------------------------------------------ */
+/* Full HPACK block decode — Task 3.4                                 */
+/* See ARCHITECTURE.md §4.5 and §8.2.                                 */
+/* ------------------------------------------------------------------ */
+
+/*
+ * hpack_decode_block — decode one complete HPACK header block.
+ *
+ * suppress_callbacks:
+ *   0 = fire on_begin_headers/on_header/on_headers_complete callbacks.
+ *   1 = decode fully for table synchronization but suppress callbacks.
+ *
+ * error_stream_id identifies the stream associated with this block for
+ * stream-error bookkeeping by higher layers.
+ *
+ * Returns HIVE_OK on success, HIVE_ERR_COMPRESSION on HPACK decoding
+ * failures, and HIVE_ERR_PROTOCOL on decoded-header policy failures
+ * (bomb limits / messaging checks).
+ */
+int hpack_decode_block(hive_session_t *s,
+                       const uint8_t *data,
+                       size_t len,
+                       int suppress_callbacks,
+                       uint32_t error_stream_id);
+
+/* ------------------------------------------------------------------ */
 /* Huffman decode table entry.                                         */
 /* 4 bytes per entry — 256 entries = 1 KB total.                      */
 /* See ARCHITECTURE.md §4.4 and CODING_STANDARDS.md §1.3.             */

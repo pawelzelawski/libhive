@@ -1201,6 +1201,344 @@ hpack_decode_string(const uint8_t *src,
 	return HIVE_OK;
 }
 
+static int
+hpack_index_to_header(const hive_session_t *s,
+                      uint32_t index,
+                      hive_buf_t *name,
+                      hive_buf_t *value)
+{
+	if (index == 0)
+		return HIVE_ERR_COMPRESSION;
+
+	if (index <= HPACK_STATIC_TABLE_SIZE) {
+		const hive_nv_t *nv;
+
+		nv = &hpack_static_table[index - 1u];
+		name->data = nv->name;
+		name->len = nv->name_len;
+		name->flags = HIVE_BUF_VALID;
+		value->data = nv->value;
+		value->len = nv->value_len;
+		value->flags = HIVE_BUF_VALID;
+		return HIVE_OK;
+	}
+
+	index -= (HPACK_STATIC_TABLE_SIZE + 1u);
+	if (index >= s->dec_table.count)
+		return HIVE_ERR_COMPRESSION;
+
+	{
+		const hpack_entry_t *e;
+
+		e = hpack_table_get(&s->dec_table, index);
+		name->data = HPACK_ENTRY_NAME(e);
+		name->len = e->name_len;
+		name->flags = HIVE_BUF_VALID;
+		value->data = HPACK_ENTRY_VALUE(e);
+		value->len = e->value_len;
+		value->flags = HIVE_BUF_VALID;
+	}
+
+	return HIVE_OK;
+}
+
+static int
+hpack_index_to_name(const hive_session_t *s, uint32_t index, hive_buf_t *name)
+{
+	hive_buf_t ignored_value;
+	int ret;
+
+	ret = hpack_index_to_header(s, index, name, &ignored_value);
+	if (ret != HIVE_OK)
+		return ret;
+	return HIVE_OK;
+}
+
+static int
+hpack_ptr_in_region(const uint8_t *ptr,
+                    size_t len,
+                    const uint8_t *region,
+                    size_t region_len)
+{
+	uintptr_t p0;
+	uintptr_t p1;
+	uintptr_t r0;
+	uintptr_t r1;
+
+	if (ptr == NULL || len == 0 || region == NULL || region_len == 0)
+		return 0;
+
+	p0 = (uintptr_t)ptr;
+	p1 = p0 + len;
+	r0 = (uintptr_t)region;
+	r1 = r0 + region_len;
+	if (p1 < p0 || r1 < r0)
+		return 0;
+
+	return p0 >= r0 && p1 <= r1;
+}
+
+static void
+hpack_poison_if_ephemeral(const hive_session_t *s, const hive_buf_t *buf)
+{
+	if ((buf->flags & HIVE_BUF_VALID) != 0)
+		return;
+
+	if (hpack_ptr_in_region(buf->data,
+	                        buf->len,
+	                        s->reassembly_buf,
+	                        s->opt_max_continuation_size)) {
+		HIVE_ASAN_POISON(buf->data, buf->len);
+		return;
+	}
+	if (hpack_ptr_in_region(buf->data,
+	                        buf->len,
+	                        s->hpack_scratch_name,
+	                        s->opt_max_header_string_size)) {
+		HIVE_ASAN_POISON(buf->data, buf->len);
+		return;
+	}
+	if (hpack_ptr_in_region(buf->data,
+	                        buf->len,
+	                        s->hpack_scratch_value,
+	                        s->opt_max_header_string_size)) {
+		HIVE_ASAN_POISON(buf->data, buf->len);
+	}
+}
+
+static int
+hpack_validate_http_messaging_stub(const hive_buf_t *name,
+                                   const hive_buf_t *value)
+{
+	(void)name;
+	(void)value;
+	/* Full RFC 9113 §8 validation is implemented in Phase 7. */
+	return HIVE_OK;
+}
+
+int
+hpack_decode_block(hive_session_t *s,
+                   const uint8_t *data,
+                   size_t len,
+                   int suppress_callbacks,
+                   uint32_t error_stream_id)
+{
+	size_t pos;
+	uint64_t decoded_size;
+	uint32_t decoded_count;
+	int size_update_phase;
+	int stream_error_pending;
+	int cb_ret;
+
+	(void)error_stream_id;
+
+	if (s == NULL || (len > 0 && data == NULL))
+		return HIVE_ERR_INVALID_ARG;
+
+	pos = 0;
+	decoded_size = 0;
+	decoded_count = 0;
+	size_update_phase = 1;
+	stream_error_pending = suppress_callbacks ? 1 : 0;
+
+	if (!suppress_callbacks && s->callbacks.on_begin_headers != NULL) {
+		cb_ret = s->callbacks.on_begin_headers(
+		    s, s->reassembly_stream_id, s->user_data);
+		if (cb_ret == HIVE_ERR_COMPRESSION)
+			return HIVE_ERR_COMPRESSION;
+		if (cb_ret != HIVE_OK)
+			stream_error_pending = 1;
+	}
+
+	while (pos < len) {
+		hive_buf_t *name_buf;
+		hive_buf_t *value_buf;
+		size_t consumed;
+		uint32_t idx;
+		uint8_t header_flags;
+		int ret;
+
+		name_buf = &s->hpack_name_handle;
+		value_buf = &s->hpack_value_handle;
+		memset(name_buf, 0, sizeof(*name_buf));
+		memset(value_buf, 0, sizeof(*value_buf));
+		header_flags = 0;
+
+		if (data[pos] & 0x80u) {
+			/* Indexed header field representation (RFC 7541 §6.1).
+			 */
+			size_update_phase = 0;
+			idx = hpack_decode_int(
+			    data + pos, len - pos, 7, &consumed);
+			if (idx == HPACK_INT_OVERFLOW)
+				return HIVE_ERR_COMPRESSION;
+			pos += consumed;
+
+			ret =
+			    hpack_index_to_header(s, idx, name_buf, value_buf);
+			if (ret != HIVE_OK)
+				return HIVE_ERR_COMPRESSION;
+		} else if (data[pos] & 0x40u) {
+			/* Literal with incremental indexing (RFC 7541 §6.2.1).
+			 */
+			size_update_phase = 0;
+			idx = hpack_decode_int(
+			    data + pos, len - pos, 6, &consumed);
+			if (idx == HPACK_INT_OVERFLOW)
+				return HIVE_ERR_COMPRESSION;
+			pos += consumed;
+
+			if (idx == 0) {
+				ret = hpack_decode_string(
+				    data + pos,
+				    len - pos,
+				    s->hpack_scratch_name,
+				    s->opt_max_header_string_size,
+				    name_buf,
+				    &consumed);
+				if (ret != HIVE_OK)
+					return HIVE_ERR_COMPRESSION;
+				pos += consumed;
+			} else {
+				ret = hpack_index_to_name(s, idx, name_buf);
+				if (ret != HIVE_OK)
+					return HIVE_ERR_COMPRESSION;
+			}
+
+			ret = hpack_decode_string(data + pos,
+			                          len - pos,
+			                          s->hpack_scratch_value,
+			                          s->opt_max_header_string_size,
+			                          value_buf,
+			                          &consumed);
+			if (ret != HIVE_OK)
+				return HIVE_ERR_COMPRESSION;
+			pos += consumed;
+
+			ret = hpack_table_insert(&s->dec_table,
+			                         &s->mem,
+			                         name_buf->data,
+			                         (uint32_t)name_buf->len,
+			                         value_buf->data,
+			                         (uint32_t)value_buf->len);
+			if (ret != HIVE_OK)
+				return ret;
+		} else if (data[pos] & 0x20u) {
+			/* Dynamic table size update (RFC 7541 §6.3). */
+			if (!size_update_phase)
+				return HIVE_ERR_COMPRESSION;
+
+			idx = hpack_decode_int(
+			    data + pos, len - pos, 5, &consumed);
+			if (idx == HPACK_INT_OVERFLOW)
+				return HIVE_ERR_COMPRESSION;
+			pos += consumed;
+
+			if (idx > s->dec_table.pending_max)
+				return HIVE_ERR_COMPRESSION;
+			hpack_table_evict_to(&s->dec_table, &s->mem, idx);
+			s->dec_table.max_size = idx;
+			continue;
+		} else {
+			/* Literal without indexing / never indexed (§6.2.2 /
+			 * §6.2.3). */
+			size_update_phase = 0;
+			if ((data[pos] & 0xf0u) == 0x10u)
+				header_flags = HIVE_NV_FLAG_NO_INDEX;
+
+			idx = hpack_decode_int(
+			    data + pos, len - pos, 4, &consumed);
+			if (idx == HPACK_INT_OVERFLOW)
+				return HIVE_ERR_COMPRESSION;
+			pos += consumed;
+
+			if (idx == 0) {
+				ret = hpack_decode_string(
+				    data + pos,
+				    len - pos,
+				    s->hpack_scratch_name,
+				    s->opt_max_header_string_size,
+				    name_buf,
+				    &consumed);
+				if (ret != HIVE_OK)
+					return HIVE_ERR_COMPRESSION;
+				pos += consumed;
+			} else {
+				ret = hpack_index_to_name(s, idx, name_buf);
+				if (ret != HIVE_OK)
+					return HIVE_ERR_COMPRESSION;
+			}
+
+			ret = hpack_decode_string(data + pos,
+			                          len - pos,
+			                          s->hpack_scratch_value,
+			                          s->opt_max_header_string_size,
+			                          value_buf,
+			                          &consumed);
+			if (ret != HIVE_OK)
+				return HIVE_ERR_COMPRESSION;
+			pos += consumed;
+		}
+
+		decoded_size += name_buf->len + value_buf->len + 32u;
+		decoded_count++;
+		/* SECURITY: enforce HPACK bomb limits incrementally per entry.
+		 */
+		if (decoded_size > s->opt_max_header_list_size)
+			stream_error_pending = 1;
+		if (decoded_count > s->opt_max_header_count)
+			stream_error_pending = 1;
+
+		if (s->opt_no_http_messaging == 0 && !stream_error_pending) {
+			ret = hpack_validate_http_messaging_stub(name_buf,
+			                                         value_buf);
+			if (ret != HIVE_OK)
+				stream_error_pending = 1;
+		}
+
+		if (!suppress_callbacks && !stream_error_pending &&
+		    s->callbacks.on_header != NULL) {
+			cb_ret = s->callbacks.on_header(s,
+			                                s->reassembly_stream_id,
+			                                name_buf,
+			                                value_buf,
+			                                header_flags,
+			                                s->user_data);
+			name_buf->flags &= (uint8_t)~HIVE_BUF_VALID;
+			value_buf->flags &= (uint8_t)~HIVE_BUF_VALID;
+			hpack_poison_if_ephemeral(s, name_buf);
+			hpack_poison_if_ephemeral(s, value_buf);
+
+			if (cb_ret == HIVE_ERR_COMPRESSION)
+				return HIVE_ERR_COMPRESSION;
+			if (cb_ret != HIVE_OK)
+				stream_error_pending = 1;
+		} else {
+			name_buf->flags &= (uint8_t)~HIVE_BUF_VALID;
+			value_buf->flags &= (uint8_t)~HIVE_BUF_VALID;
+			hpack_poison_if_ephemeral(s, name_buf);
+			hpack_poison_if_ephemeral(s, value_buf);
+		}
+	}
+
+	if (stream_error_pending)
+		return HIVE_ERR_PROTOCOL;
+
+	if (!suppress_callbacks && s->callbacks.on_headers_complete != NULL) {
+		cb_ret =
+		    s->callbacks.on_headers_complete(s,
+		                                     s->reassembly_stream_id,
+		                                     s->reassembly_end_stream,
+		                                     s->user_data);
+		if (cb_ret == HIVE_ERR_COMPRESSION)
+			return HIVE_ERR_COMPRESSION;
+		if (cb_ret != HIVE_OK)
+			return HIVE_ERR_PROTOCOL;
+	}
+
+	return HIVE_OK;
+}
+
 /* ------------------------------------------------------------------ */
 /* String encode — Task 3.3                                            */
 /* See ARCHITECTURE.md §4.8.                                           */

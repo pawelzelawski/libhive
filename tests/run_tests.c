@@ -92,6 +92,18 @@ int test_hpack_string_encode_huffman(void);
 int test_hpack_string_scratch_limit(void);
 int test_hpack_string_truncated(void);
 
+/* Phase 3.4 — full decoder */
+int test_hpack_decode_rfc_c3(void);
+int test_hpack_decode_rfc_c4(void);
+int test_hpack_decode_rfc_c6(void);
+int test_hpack_index_zero_rejected(void);
+int test_hpack_index_out_of_range(void);
+int test_hpack_size_update_after_header(void);
+int test_hpack_size_update_exceeds_pending_max(void);
+int test_hpack_bomb_size_limit(void);
+int test_hpack_bomb_count_limit(void);
+int test_hpack_header_callback_by_pointer(void);
+
 int
 main(void)
 {
@@ -176,6 +188,18 @@ main(void)
 	RUN(hpack_string_encode_huffman);
 	RUN(hpack_string_scratch_limit);
 	RUN(hpack_string_truncated);
+
+	/* Phase 3.4 — full decoder */
+	RUN(hpack_decode_rfc_c3);
+	RUN(hpack_decode_rfc_c4);
+	RUN(hpack_decode_rfc_c6);
+	RUN(hpack_index_zero_rejected);
+	RUN(hpack_index_out_of_range);
+	RUN(hpack_size_update_after_header);
+	RUN(hpack_size_update_exceeds_pending_max);
+	RUN(hpack_bomb_size_limit);
+	RUN(hpack_bomb_count_limit);
+	RUN(hpack_header_callback_by_pointer);
 
 	printf("%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_passed == tests_run) ? 0 : 1;

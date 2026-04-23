@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "../src/hive_hpack.h"
+#include "../src/hive_internal.h"
 #include "test_harness.h"
 
 int test_static_table_size(void);
@@ -50,6 +51,18 @@ int test_hpack_string_decode_huffman(void);
 int test_hpack_string_encode_huffman(void);
 int test_hpack_string_scratch_limit(void);
 int test_hpack_string_truncated(void);
+
+/* Phase 3.4 — full decoder */
+int test_hpack_decode_rfc_c3(void);
+int test_hpack_decode_rfc_c4(void);
+int test_hpack_decode_rfc_c6(void);
+int test_hpack_index_zero_rejected(void);
+int test_hpack_index_out_of_range(void);
+int test_hpack_size_update_after_header(void);
+int test_hpack_size_update_exceeds_pending_max(void);
+int test_hpack_bomb_size_limit(void);
+int test_hpack_bomb_count_limit(void);
+int test_hpack_header_callback_by_pointer(void);
 
 int
 test_static_table_size(void)
@@ -897,3 +910,351 @@ test_hpack_string_truncated(void)
 	ASSERT(ret == HIVE_ERR_COMPRESSION);
 	return 1;
 }
+
+/* ------------------------------------------------------------------ */
+/* Phase 3.4 — hpack_decode_block                                     */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+	int begin_count;
+	int header_count;
+	int complete_count;
+	int no_index_count;
+	char names[16][64];
+	char values[16][128];
+	const hive_buf_t *saved_name;
+	const hive_buf_t *saved_value;
+} hpack_cap_t;
+
+static int
+hpack_test_on_begin_headers(hive_session_t *s, uint32_t stream_id, void *ud)
+{
+	(void)s;
+	(void)stream_id;
+	((hpack_cap_t *)ud)->begin_count++;
+	return HIVE_OK;
+}
+
+static int
+hpack_test_on_header(hive_session_t *s,
+                     uint32_t stream_id,
+                     hive_buf_t *name,
+                     hive_buf_t *value,
+                     uint8_t flags,
+                     void *ud)
+{
+	hpack_cap_t *cap;
+	size_t n;
+	size_t v;
+
+	(void)s;
+	(void)stream_id;
+	cap = (hpack_cap_t *)ud;
+	if (cap->header_count >= 16)
+		return HIVE_ERR_PROTOCOL;
+
+	n = name->len;
+	if (n >= sizeof(cap->names[0]))
+		n = sizeof(cap->names[0]) - 1;
+	v = value->len;
+	if (v >= sizeof(cap->values[0]))
+		v = sizeof(cap->values[0]) - 1;
+
+	memcpy(cap->names[cap->header_count], name->data, n);
+	cap->names[cap->header_count][n] = '\0';
+	if (v > 0)
+		memcpy(cap->values[cap->header_count], value->data, v);
+	cap->values[cap->header_count][v] = '\0';
+	if ((flags & HIVE_NV_FLAG_NO_INDEX) != 0)
+		cap->no_index_count++;
+
+	cap->saved_name = name;
+	cap->saved_value = value;
+	cap->header_count++;
+	return HIVE_OK;
+}
+
+static int
+hpack_test_on_headers_complete(hive_session_t *s,
+                               uint32_t stream_id,
+                               uint8_t flags,
+                               void *ud)
+{
+	(void)s;
+	(void)stream_id;
+	(void)flags;
+	((hpack_cap_t *)ud)->complete_count++;
+	return HIVE_OK;
+}
+
+static int
+hpack_test_session_init(hive_session_t *s, hpack_cap_t *cap, uint32_t max_table)
+{
+	int ret;
+
+	memset(s, 0, sizeof(*s));
+	memset(cap, 0, sizeof(*cap));
+
+	s->mem = test_mem;
+	s->opt_max_header_string_size = 8192;
+	s->opt_max_header_list_size = 65536;
+	s->opt_max_header_count = 100;
+	s->opt_max_continuation_size = 65536;
+	s->opt_no_http_messaging = 1;
+	s->reassembly_stream_id = 1;
+
+	s->callbacks.on_begin_headers = hpack_test_on_begin_headers;
+	s->callbacks.on_header = hpack_test_on_header;
+	s->callbacks.on_headers_complete = hpack_test_on_headers_complete;
+	s->user_data = cap;
+
+	s->hpack_scratch_name = malloc(s->opt_max_header_string_size);
+	s->hpack_scratch_value = malloc(s->opt_max_header_string_size);
+	s->reassembly_buf = malloc(s->opt_max_continuation_size);
+	if (s->hpack_scratch_name == NULL ||
+	    s->hpack_scratch_value == NULL ||
+	    s->reassembly_buf == NULL)
+		return HIVE_ERR_NOMEM;
+
+	ret = hpack_table_init(&s->dec_table, &s->mem, max_table);
+	if (ret != HIVE_OK)
+		return ret;
+	return HIVE_OK;
+}
+
+static void
+hpack_test_session_free(hive_session_t *s)
+{
+	hpack_table_free(&s->dec_table, &s->mem);
+	free(s->reassembly_buf);
+	free(s->hpack_scratch_name);
+	free(s->hpack_scratch_value);
+}
+
+int
+test_hpack_decode_rfc_c3(void)
+{
+	static const uint8_t block[] = {
+		0x82, 0x86, 0x84, 0x41, 0x0f, 0x77, 0x77, 0x77,
+		0x2e, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65,
+		0x2e, 0x63, 0x6f, 0x6d,
+	};
+	hive_session_t s;
+	hpack_cap_t cap;
+	int ret;
+
+	ret = hpack_test_session_init(&s, &cap, 4096);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_decode_block(&s, block, sizeof(block), 0, 1);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(cap.begin_count == 1);
+	ASSERT(cap.header_count == 4);
+	ASSERT(cap.complete_count == 1);
+	ASSERT(strcmp(cap.names[0], ":method") == 0);
+	ASSERT(strcmp(cap.values[0], "GET") == 0);
+	ASSERT(strcmp(cap.names[1], ":scheme") == 0);
+	ASSERT(strcmp(cap.values[1], "http") == 0);
+	ASSERT(strcmp(cap.names[2], ":path") == 0);
+	ASSERT(strcmp(cap.values[2], "/") == 0);
+	ASSERT(strcmp(cap.names[3], ":authority") == 0);
+	ASSERT(strcmp(cap.values[3], "www.example.com") == 0);
+	ASSERT(s.dec_table.count == 1);
+
+	hpack_test_session_free(&s);
+	return 1;
+}
+
+int
+test_hpack_decode_rfc_c4(void)
+{
+	static const uint8_t block[] = {
+		0x82, 0x86, 0x84, 0x41, 0x8c, 0xf1, 0xe3, 0xc2,
+		0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4,
+		0xff,
+	};
+	hive_session_t s;
+	hpack_cap_t cap;
+	int ret;
+
+	ret = hpack_test_session_init(&s, &cap, 4096);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_decode_block(&s, block, sizeof(block), 0, 1);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(cap.header_count == 4);
+	ASSERT(strcmp(cap.values[3], "www.example.com") == 0);
+	ASSERT(s.dec_table.count == 1);
+
+	hpack_test_session_free(&s);
+	return 1;
+}
+
+int
+test_hpack_decode_rfc_c6(void)
+{
+	static const uint8_t block[] = {
+		0x82, 0x86, 0x84, 0x41, 0x8c, 0xf1, 0xe3, 0xc2,
+		0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4,
+		0xff,
+	};
+	hive_session_t s;
+	hpack_cap_t cap;
+	int ret;
+
+	ret = hpack_test_session_init(&s, &cap, 4096);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_decode_block(&s, block, sizeof(block), 0, 1);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(cap.header_count == 4);
+	ASSERT(strcmp(cap.names[0], ":method") == 0);
+	ASSERT(strcmp(cap.values[0], "GET") == 0);
+
+	hpack_test_session_free(&s);
+	return 1;
+}
+
+int
+test_hpack_index_zero_rejected(void)
+{
+	static const uint8_t block[] = { 0x80 };
+	hive_session_t s;
+	hpack_cap_t cap;
+	int ret;
+
+	ret = hpack_test_session_init(&s, &cap, 4096);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_decode_block(&s, block, sizeof(block), 0, 1);
+	ASSERT(ret == HIVE_ERR_COMPRESSION);
+
+	hpack_test_session_free(&s);
+	return 1;
+}
+
+int
+test_hpack_index_out_of_range(void)
+{
+	static const uint8_t block[] = { 0xff, 0x00 };
+	hive_session_t s;
+	hpack_cap_t cap;
+	int ret;
+
+	ret = hpack_test_session_init(&s, &cap, 4096);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_decode_block(&s, block, sizeof(block), 0, 1);
+	ASSERT(ret == HIVE_ERR_COMPRESSION);
+
+	hpack_test_session_free(&s);
+	return 1;
+}
+
+int
+test_hpack_size_update_after_header(void)
+{
+	static const uint8_t block[] = {
+		0x82,       /* indexed :method GET */
+		0x3f, 0x00, /* size update to 31 after a header */
+	};
+	hive_session_t s;
+	hpack_cap_t cap;
+	int ret;
+
+	ret = hpack_test_session_init(&s, &cap, 4096);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_decode_block(&s, block, sizeof(block), 0, 1);
+	ASSERT(ret == HIVE_ERR_COMPRESSION);
+
+	hpack_test_session_free(&s);
+	return 1;
+}
+
+int
+test_hpack_size_update_exceeds_pending_max(void)
+{
+	static const uint8_t block[] = { 0x3f, 0x0a };
+	hive_session_t s;
+	hpack_cap_t cap;
+	int ret;
+
+	ret = hpack_test_session_init(&s, &cap, 4096);
+	ASSERT(ret == HIVE_OK);
+	s.dec_table.pending_max = 32;
+
+	ret = hpack_decode_block(&s, block, sizeof(block), 0, 1);
+	ASSERT(ret == HIVE_ERR_COMPRESSION);
+
+	hpack_test_session_free(&s);
+	return 1;
+}
+
+int
+test_hpack_bomb_size_limit(void)
+{
+	static const uint8_t block[] = {
+		0x40, 0x01, 'a', 0x03, 'b', 'b', 'b',
+	};
+	hive_session_t s;
+	hpack_cap_t cap;
+	int ret;
+
+	ret = hpack_test_session_init(&s, &cap, 4096);
+	ASSERT(ret == HIVE_OK);
+	s.opt_max_header_list_size = 35;
+
+	ret = hpack_decode_block(&s, block, sizeof(block), 0, 1);
+	ASSERT(ret == HIVE_ERR_PROTOCOL);
+
+	hpack_test_session_free(&s);
+	return 1;
+}
+
+int
+test_hpack_bomb_count_limit(void)
+{
+	static const uint8_t block[] = {
+		0x40, 0x01, 'a', 0x01, '1',
+		0x40, 0x01, 'b', 0x01, '2',
+	};
+	hive_session_t s;
+	hpack_cap_t cap;
+	int ret;
+
+	ret = hpack_test_session_init(&s, &cap, 4096);
+	ASSERT(ret == HIVE_OK);
+	s.opt_max_header_count = 1;
+
+	ret = hpack_decode_block(&s, block, sizeof(block), 0, 1);
+	ASSERT(ret == HIVE_ERR_PROTOCOL);
+
+	hpack_test_session_free(&s);
+	return 1;
+}
+
+int
+test_hpack_header_callback_by_pointer(void)
+{
+	static const uint8_t block[] = {
+		0x82,
+	};
+	hive_session_t s;
+	hpack_cap_t cap;
+	int ret;
+
+	ret = hpack_test_session_init(&s, &cap, 4096);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_decode_block(&s, block, sizeof(block), 0, 1);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(cap.saved_name != NULL);
+	ASSERT(cap.saved_value != NULL);
+	ASSERT((cap.saved_name->flags & HIVE_BUF_VALID) == 0);
+	ASSERT((cap.saved_value->flags & HIVE_BUF_VALID) == 0);
+
+	hpack_test_session_free(&s);
+	return 1;
+}
+

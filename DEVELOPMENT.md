@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-23
 **Current Phase**: Phase 3 — HPACK
-**Next Task**: 3.4 — Full decoder: `hpack_decode_block()`
+**Next Task**: 3.5 — Full encoder: `hpack_encode_block()`
 
 ### Phase Summary
 
@@ -423,7 +423,7 @@ HPACK is tested standalone before being integrated into the session.)
 - `hpack_encode_string()`: Huffman-encode if shorter, otherwise literal;
   write length prefix and string bytes into output buffer
 
-**3.4 — Full decoder: `hpack_decode_block()`**
+**3.4 — Full decoder: `hpack_decode_block()`** ✓ DONE
 - Implement the decode loop per ARCHITECTURE.md §4.5:
   - All four representations (indexed, literal with indexing, literal no
     index, literal never index, dynamic table size update)
