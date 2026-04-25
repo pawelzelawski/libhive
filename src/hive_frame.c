@@ -11,10 +11,6 @@
 #include "hive_internal.h"
 #include "hive_send.h"
 
-static const uint8_t client_preface_magic[24] = {
-    'P', 'R', 'I',  ' ',  '*',  ' ',  'H', 'T', 'T',  'P',  '/',  '2',
-    '.', '0', '\r', '\n', '\r', '\n', 'S', 'M', '\r', '\n', '\r', '\n'};
-
 static void
 copy_bytes(uint8_t *dst, const uint8_t *src, size_t n)
 {
@@ -681,7 +677,7 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				 * prevents header-block bomb attacks where an
 				 * adversary chains many CONTINUATION frames to
 				 * exhaust reassembly memory
-				 * (ARCHITECTURE.md §8.2). */
+				 * (ARCHITECTURE.md §8.3). */
 				if ((s->reassembly_len + n) >
 				    s->opt_max_continuation_size) {
 					return protocol_error(s);
@@ -750,7 +746,7 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				 * HEADERS + CONTINUATION frames must not exceed
 				 * opt_max_continuation_size.  Prevents
 				 * CONTINUATION flood / header-block bomb
-				 * attacks (ARCHITECTURE.md §8.2). */
+				 * attacks (ARCHITECTURE.md §8.3). */
 				if ((s->reassembly_len + n) >
 				    s->opt_max_continuation_size) {
 					return protocol_error(s);

@@ -56,10 +56,6 @@ static const hive_mem_t null_allocator = {
     NULL,
 };
 
-static const uint8_t client_preface_magic[24] = {
-    'P', 'R', 'I',  ' ',  '*',  ' ',  'H', 'T', 'T',  'P',  '/',  '2',
-    '.', '0', '\r', '\n', '\r', '\n', 'S', 'M', '\r', '\n', '\r', '\n'};
-
 static const hive_options_t default_options = {
     4096u,
     1u,

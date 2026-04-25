@@ -323,6 +323,14 @@ struct hive_session {
 };
 
 /*
+ * Client connection preface magic bytes (RFC 9113 §3.4).
+ * Single definition shared by hive.c and hive_frame.c.
+ */
+static const uint8_t client_preface_magic[24] = {
+    'P', 'R', 'I',  ' ',  '*',  ' ',  'H', 'T', 'T',  'P',  '/',  '2',
+    '.', '0', '\r', '\n', '\r', '\n', 'S', 'M', '\r', '\n', '\r', '\n'};
+
+/*
  * Stream table helpers (ARCHITECTURE.md §5.4–§5.6).
  * Internal-only API used by frame receive and unit tests.
  */
