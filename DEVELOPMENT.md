@@ -680,7 +680,7 @@ without DATA frames (those come in Phase 5).
 - On SETTINGS ACK received: validate `pending_count > 0`; pop from
   `pending_settings` ring; fire `on_settings_ack` callback
 
-**4.6 — Connection preface validation**
+**4.6 — Connection preface validation** ✓ DONE
 - Server role: state = RECV_CLIENT_PREFACE; consume 24 bytes via `preface_count`,
   verify exact match against `PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n`;
   mismatch → `session_error()` PROTOCOL_ERROR

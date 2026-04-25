@@ -65,6 +65,10 @@ int test_settings_header_table_size_updates_encoder(void);
 int test_settings_header_table_size_pending_min(void);
 int test_settings_initial_window_retroactive_adjust(void);
 int test_settings_initial_window_retroactive_overflow(void);
+int test_server_preface_valid(void);
+int test_server_preface_invalid(void);
+int test_client_preface_first_frame_not_settings(void);
+int test_client_preface_settings_with_ack(void);
 
 /* ------------------------------------------------------------------ */
 /* Shared test infrastructure                                          */
@@ -1396,6 +1400,109 @@ test_settings_initial_window_retroactive_overflow(void)
 	ASSERT(hive_session_recv(s, frame, n) == -1);
 	ASSERT(s->last_err == HIVE_ERR_FLOW_CONTROL);
 	ASSERT(s->last_h2_err == HIVE_H2_FLOW_CONTROL_ERROR);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_server_preface_valid(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	uint8_t in[24 + 9];
+	size_t n;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+
+	s = hive_session_server_new(NULL, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+	ASSERT(s->recv_state == RECV_CLIENT_PREFACE);
+
+	memcpy(in, test_client_preface_magic, sizeof(test_client_preface_magic));
+	n = build_settings_frame(in + sizeof(test_client_preface_magic),
+	    0u, NULL, 0u);
+
+	ASSERT(hive_session_recv(s, in, sizeof(test_client_preface_magic) + n) ==
+	    (ssize_t)(sizeof(test_client_preface_magic) + n));
+	ASSERT(s->recv_state == RECV_FRAME_HEADER);
+	ASSERT(s->preface_count == 0u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_server_preface_invalid(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	uint8_t in[24];
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+
+	s = hive_session_server_new(NULL, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+
+	memcpy(in, test_client_preface_magic, sizeof(test_client_preface_magic));
+	in[0] = 'X';
+
+	ASSERT(hive_session_recv(s, in, sizeof(in)) == -1);
+	ASSERT(s->last_err == HIVE_ERR_PROTOCOL);
+	ASSERT(s->last_h2_err == HIVE_H2_PROTOCOL_ERROR);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_client_preface_first_frame_not_settings(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	uint8_t in[17];
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+
+	s = hive_session_client_new(NULL, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+	ASSERT(s->recv_state == RECV_SERVER_PREFACE);
+
+	frame_hdr_write_at(in, 8u, HIVE_FRAME_PING, 0u, 0u);
+	memset(in + 9, 0, 8);
+
+	ASSERT(hive_session_recv(s, in, sizeof(in)) == -1);
+	ASSERT(s->last_err == HIVE_ERR_PROTOCOL);
+	ASSERT(s->last_h2_err == HIVE_H2_PROTOCOL_ERROR);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_client_preface_settings_with_ack(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	uint8_t in[9];
+	size_t n;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+
+	s = hive_session_client_new(NULL, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+	ASSERT(s->recv_state == RECV_SERVER_PREFACE);
+
+	n = build_settings_frame(in, HIVE_FLAG_ACK, NULL, 0u);
+	ASSERT(n == sizeof(in));
+
+	ASSERT(hive_session_recv(s, in, n) == -1);
+	ASSERT(s->last_err == HIVE_ERR_PROTOCOL);
+	ASSERT(s->last_h2_err == HIVE_H2_PROTOCOL_ERROR);
 
 	hive_session_free(s);
 	return 1;

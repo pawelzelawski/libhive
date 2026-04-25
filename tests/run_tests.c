@@ -144,6 +144,10 @@ int test_settings_header_table_size_updates_encoder(void);
 int test_settings_header_table_size_pending_min(void);
 int test_settings_initial_window_retroactive_adjust(void);
 int test_settings_initial_window_retroactive_overflow(void);
+int test_server_preface_valid(void);
+int test_server_preface_invalid(void);
+int test_client_preface_first_frame_not_settings(void);
+int test_client_preface_settings_with_ack(void);
 
 int
 main(void)
@@ -180,6 +184,10 @@ main(void)
 	RUN(settings_header_table_size_pending_min);
 	RUN(settings_initial_window_retroactive_adjust);
 	RUN(settings_initial_window_retroactive_overflow);
+	RUN(server_preface_valid);
+	RUN(server_preface_invalid);
+	RUN(client_preface_first_frame_not_settings);
+	RUN(client_preface_settings_with_ack);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);
