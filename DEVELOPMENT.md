@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-25
 **Current Phase**: Phase 4 — Session Core
-**Next Task**: 4.5 — SETTINGS receive and apply
+**Next Task**: 4.6 — Connection preface validation
 
 ### Phase Summary
 
@@ -13,7 +13,7 @@
 | 1 | Foundation | DONE | 16/16 (Phase 1 slice) | Tasks 1.1–1.5 done on Linux + OpenBSD |
 | 2 | Frame Parser | DONE | 54/54 (Phase 2 slice) | Tasks 2.1–2.5 done on Linux + OpenBSD; completion criteria confirmed; audit fixes applied 2026-04-23 |
 | 3 | HPACK | DONE | 34/34 (Phase 3 slice) | Tasks 3.1-3.7 done on Linux + OpenBSD; Phase 3 completion criteria confirmed 2026-04-23 |
-| 4 | Session Core | IN PROGRESS | 18/? (Phase 4 slice so far) | Tasks 4.0–4.4 and 4.7 done on Linux + OpenBSD; next: 4.5 SETTINGS receive and apply |
+| 4 | Session Core | IN PROGRESS | 27/? (Phase 4 slice so far) | Tasks 4.0–4.5 and 4.7 done on Linux + OpenBSD; next: 4.6 Connection preface validation |
 | 5 | Flow Control and DATA | NOT STARTED | — | Windows, recv-side enforcement, WINDOW_UPDATE, DATA delivery |
 | 6 | Submit and Send | NOT STARTED | — | Full send queue, partial-send, response/request submit, new callbacks |
 | 7 | Security Hardening | NOT STARTED | — | Flood protection, exhaustion, limits, Content-Length, clock abstraction |
@@ -661,12 +661,13 @@ without DATA frames (those come in Phase 5).
 - Implement hash table compaction per ARCHITECTURE.md §5.6
 - Free stack: `stream_free_pop()` and `stream_free_push()`
 
-**4.5 — SETTINGS receive and apply**
+**4.5 — SETTINGS receive and apply** ✓ DONE
 - In the RECV_SETTINGS_PAYLOAD state: process 6-byte parameter chunks via
   `ctrl_staging`, apply each known parameter to `remote_settings`
 - SETTINGS directionality (ARCHITECTURE.md §2.5):
   - `SETTINGS_HEADER_TABLE_SIZE` received from peer → update `enc_table.pending_max`,
-    set `enc_table.has_pending = 1` (constrains our encoder, not our decoder)
+    track `enc_table.pending_min` for multiple updates, and set
+    `enc_table.has_pending = 1` (constrains our encoder, not our decoder)
   - `SETTINGS_INITIAL_WINDOW_SIZE` → retroactively adjust all open stream
     `send_window` values
   - `SETTINGS_MAX_FRAME_SIZE` → update `remote_settings.max_frame_size`
@@ -751,6 +752,16 @@ File: `tests/test_session.c`
 - `test_settings_header_table_size_updates_encoder`: SETTINGS with
   `HEADER_TABLE_SIZE = 512` → `enc_table.pending_max = 512`,
   `enc_table.has_pending = 1` (encoder constrained, not decoder)
+- `test_settings_header_table_size_pending_min`: multiple
+  `HEADER_TABLE_SIZE` updates before encode preserve
+  `enc_table.pending_min` (lowest reached value) while `pending_max` tracks
+  the final value
+- `test_settings_initial_window_retroactive_adjust`:
+  `INITIAL_WINDOW_SIZE` update retroactively adjusts all open stream
+  `send_window` values
+- `test_settings_initial_window_retroactive_overflow`: retroactive
+  `INITIAL_WINDOW_SIZE` adjustment that overflows stream `send_window` →
+  FLOW_CONTROL_ERROR connection error
 
 **Connection preface**:
 - `test_server_preface_valid`: feed the 24-byte client magic + SETTINGS →
@@ -771,8 +782,8 @@ File: `tests/test_session.c`
 - [ ] Session creates and frees with zero memory leaks (tracking allocator test)
 - [ ] Allocation failure during creation leaves no leaks
 - [ ] Partial send test passes (send_partial_offset tracking correct)
-- [ ] SETTINGS exchange test passes; inbound/outbound counters are distinct
-- [ ] SETTINGS_HEADER_TABLE_SIZE correctly updates encoder (not decoder)
+- [x] SETTINGS exchange test passes; inbound/outbound counters are distinct
+- [x] SETTINGS_HEADER_TABLE_SIZE correctly updates encoder (not decoder)
 - [ ] Client preface validation tests pass
 - [ ] End-to-end HEADERS receive test passes (callbacks fire in order)
 - [ ] All Phase 4 tests pass on Linux and OpenBSD

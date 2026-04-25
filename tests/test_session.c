@@ -56,6 +56,15 @@ int test_stream_free_stack(void);
 int test_stream_compaction(void);
 int test_recv_headers_opens_new_stream(void);
 int test_stream_id_monotonicity(void);
+int test_settings_recv_and_ack(void);
+int test_settings_recv_ack(void);
+int test_settings_unsolicited_ack(void);
+int test_settings_invalid_window_size(void);
+int test_settings_invalid_frame_size(void);
+int test_settings_header_table_size_updates_encoder(void);
+int test_settings_header_table_size_pending_min(void);
+int test_settings_initial_window_retroactive_adjust(void);
+int test_settings_initial_window_retroactive_overflow(void);
 
 /* ------------------------------------------------------------------ */
 /* Shared test infrastructure                                          */
@@ -144,6 +153,11 @@ typedef struct {
 	int fail_after;
 } alloc_track_t;
 
+typedef struct {
+	int settings_count;
+	int settings_ack_count;
+} settings_capture_t;
+
 static int
 alloc_should_fail(alloc_track_t *st)
 {
@@ -225,6 +239,74 @@ track_mem(alloc_track_t *st)
 	mem.realloc = track_realloc;
 	mem.ctx = st;
 	return mem;
+}
+
+static int
+on_settings_capture(hive_session_t *session, void *user_data)
+{
+	settings_capture_t *cap;
+
+	(void)session;
+	cap = user_data;
+	cap->settings_count++;
+	return HIVE_OK;
+}
+
+static int
+on_settings_ack_capture(hive_session_t *session, void *user_data)
+{
+	settings_capture_t *cap;
+
+	(void)session;
+	cap = user_data;
+	cap->settings_ack_count++;
+	return HIVE_OK;
+}
+
+static void
+settings_param_write(uint8_t *dst, uint16_t id, uint32_t value)
+{
+	dst[0] = (uint8_t)((id >> 8) & 0xffu);
+	dst[1] = (uint8_t)(id & 0xffu);
+	dst[2] = (uint8_t)((value >> 24) & 0xffu);
+	dst[3] = (uint8_t)((value >> 16) & 0xffu);
+	dst[4] = (uint8_t)((value >> 8) & 0xffu);
+	dst[5] = (uint8_t)(value & 0xffu);
+}
+
+static size_t
+build_settings_frame(uint8_t *dst, uint8_t flags,
+    const uint8_t *payload, uint32_t payload_len)
+{
+	frame_hdr_write_at(dst, payload_len, HIVE_FRAME_SETTINGS, flags, 0u);
+	if (payload_len > 0 && payload != NULL)
+		memcpy(dst + 9, payload, payload_len);
+	return 9u + (size_t)payload_len;
+}
+
+static hive_session_t *
+new_server_recv_session(settings_capture_t *cap)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+	cb.on_settings = on_settings_capture;
+	cb.on_settings_ack = on_settings_ack_capture;
+
+	s = hive_session_server_new(NULL, NULL, &cb, cap);
+	ASSERT(s != NULL);
+
+	/* Ignore queued server preface in receive-path tests. */
+	s->send_iov_count = 0;
+	s->send_buf_used = 0;
+	s->send_partial = 0;
+	s->send_partial_offset = 0;
+	s->recv_state = RECV_FRAME_HEADER;
+	s->preface_count = 0;
+
+	return s;
 }
 
 /*
@@ -1075,6 +1157,245 @@ test_stream_id_monotonicity(void)
 	ASSERT(hive_session_recv(s, frame, sizeof(frame)) == -1);
 	ASSERT(s->last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s->last_h2_err == HIVE_H2_PROTOCOL_ERROR);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_settings_recv_and_ack(void)
+{
+	settings_capture_t cap;
+	hive_session_t *s;
+	uint8_t payload[6];
+	uint8_t frame[15];
+	const uint8_t *ack;
+	size_t n;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_recv_session(&cap);
+
+	settings_param_write(payload, HIVE_SETTINGS_INITIAL_WINDOW_SIZE, 131072u);
+	n = build_settings_frame(frame, 0u, payload, sizeof(payload));
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+
+	ASSERT(s->remote_settings.initial_window_size == 131072u);
+	ASSERT(s->inbound_settings_count == 0u);
+	ASSERT(s->send_iov_count == 1);
+	ASSERT(cap.settings_count == 1);
+
+	ack = s->send_iov[0].iov_base;
+	ASSERT(s->send_iov[0].iov_len == 9u);
+	ASSERT(ack[3] == HIVE_FRAME_SETTINGS);
+	ASSERT(ack[4] == HIVE_FLAG_ACK);
+	ASSERT(ack[5] == 0u);
+	ASSERT(ack[6] == 0u);
+	ASSERT(ack[7] == 0u);
+	ASSERT(ack[8] == 0u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_settings_recv_ack(void)
+{
+	settings_capture_t cap;
+	hive_session_t *s;
+	uint8_t frame[9];
+	size_t n;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_recv_session(&cap);
+
+	s->pending_count = 1;
+	s->pending_head = 0;
+	n = build_settings_frame(frame, HIVE_FLAG_ACK, NULL, 0u);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+
+	ASSERT(s->pending_count == 0u);
+	ASSERT(s->pending_head == 1u);
+	ASSERT(cap.settings_ack_count == 1);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_settings_unsolicited_ack(void)
+{
+	settings_capture_t cap;
+	hive_session_t *s;
+	uint8_t frame[9];
+	size_t n;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_recv_session(&cap);
+
+	n = build_settings_frame(frame, HIVE_FLAG_ACK, NULL, 0u);
+	ASSERT(hive_session_recv(s, frame, n) == -1);
+	ASSERT(s->last_err == HIVE_ERR_PROTOCOL);
+	ASSERT(s->last_h2_err == HIVE_H2_PROTOCOL_ERROR);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_settings_invalid_window_size(void)
+{
+	settings_capture_t cap;
+	hive_session_t *s;
+	uint8_t payload[6];
+	uint8_t frame[15];
+	size_t n;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_recv_session(&cap);
+
+	settings_param_write(
+	    payload, HIVE_SETTINGS_INITIAL_WINDOW_SIZE, 0x80000000u);
+	n = build_settings_frame(frame, 0u, payload, sizeof(payload));
+	ASSERT(hive_session_recv(s, frame, n) == -1);
+	ASSERT(s->last_err == HIVE_ERR_FLOW_CONTROL);
+	ASSERT(s->last_h2_err == HIVE_H2_FLOW_CONTROL_ERROR);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_settings_invalid_frame_size(void)
+{
+	settings_capture_t cap;
+	hive_session_t *s;
+	uint8_t payload[6];
+	uint8_t frame[15];
+	size_t n;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_recv_session(&cap);
+
+	settings_param_write(payload, HIVE_SETTINGS_MAX_FRAME_SIZE, 16383u);
+	n = build_settings_frame(frame, 0u, payload, sizeof(payload));
+	ASSERT(hive_session_recv(s, frame, n) == -1);
+	ASSERT(s->last_err == HIVE_ERR_PROTOCOL);
+	ASSERT(s->last_h2_err == HIVE_H2_PROTOCOL_ERROR);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_settings_header_table_size_updates_encoder(void)
+{
+	settings_capture_t cap;
+	hive_session_t *s;
+	uint8_t payload[6];
+	uint8_t frame[15];
+	size_t n;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_recv_session(&cap);
+
+	settings_param_write(payload, HIVE_SETTINGS_HEADER_TABLE_SIZE, 512u);
+	n = build_settings_frame(frame, 0u, payload, sizeof(payload));
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+
+	ASSERT(s->remote_settings.header_table_size == 512u);
+	ASSERT(s->enc_table.pending_max == 512u);
+	ASSERT(s->enc_table.pending_min == 512u);
+	ASSERT(s->enc_table.has_pending == 1u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_settings_header_table_size_pending_min(void)
+{
+	settings_capture_t cap;
+	hive_session_t *s;
+	uint8_t payload[6];
+	uint8_t frame[15];
+	size_t n;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_recv_session(&cap);
+
+	settings_param_write(payload, HIVE_SETTINGS_HEADER_TABLE_SIZE, 2048u);
+	n = build_settings_frame(frame, 0u, payload, sizeof(payload));
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	settings_param_write(payload, HIVE_SETTINGS_HEADER_TABLE_SIZE, 3072u);
+	n = build_settings_frame(frame, 0u, payload, sizeof(payload));
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+
+	ASSERT(s->enc_table.pending_min == 2048u);
+	ASSERT(s->enc_table.pending_max == 3072u);
+	ASSERT(s->enc_table.has_pending == 1u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_settings_initial_window_retroactive_adjust(void)
+{
+	settings_capture_t cap;
+	hive_session_t *s;
+	uint8_t payload[6];
+	uint8_t frame[15];
+	hive_stream_t *st1;
+	hive_stream_t *st3;
+	size_t n;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_recv_session(&cap);
+
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+	ASSERT(stream_open(s, 3u, HIVE_STREAM_OPEN) == HIVE_OK);
+	st1 = stream_lookup(s, 1u);
+	st3 = stream_lookup(s, 3u);
+	ASSERT(st1 != NULL);
+	ASSERT(st3 != NULL);
+	ASSERT(st1->send_window == 65535);
+	ASSERT(st3->send_window == 65535);
+
+	settings_param_write(payload, HIVE_SETTINGS_INITIAL_WINDOW_SIZE, 70000u);
+	n = build_settings_frame(frame, 0u, payload, sizeof(payload));
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+
+	ASSERT(st1->send_window == 70000);
+	ASSERT(st3->send_window == 70000);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_settings_initial_window_retroactive_overflow(void)
+{
+	settings_capture_t cap;
+	hive_session_t *s;
+	uint8_t payload[6];
+	uint8_t frame[15];
+	hive_stream_t *st;
+	size_t n;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_recv_session(&cap);
+
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+	st->send_window = 0x7fffffff;
+
+	settings_param_write(
+	    payload, HIVE_SETTINGS_INITIAL_WINDOW_SIZE, 2147483647u);
+	n = build_settings_frame(frame, 0u, payload, sizeof(payload));
+	ASSERT(hive_session_recv(s, frame, n) == -1);
+	ASSERT(s->last_err == HIVE_ERR_FLOW_CONTROL);
+	ASSERT(s->last_h2_err == HIVE_H2_FLOW_CONTROL_ERROR);
 
 	hive_session_free(s);
 	return 1;

@@ -76,10 +76,22 @@ on_data_chunk_capture(hive_session_t *session, uint32_t stream_id,
 static void
 test_session_init(hive_session_t *s, uint8_t *reassembly_buf, size_t cap)
 {
+	static uint8_t send_buf[2048];
+	static struct iovec send_iov[16];
+	static hive_settings_t pending_settings[4];
+
 	frame_recv_init(s, HIVE_ROLE_SERVER);
 	s->reassembly_buf = reassembly_buf;
 	s->opt_max_continuation_size = (uint32_t)cap;
 	s->local_settings.max_frame_size = 16384;
+	s->remote_settings.initial_window_size = 65535u;
+	s->opt_max_concurrent_streams = 1u;
+	s->opt_max_settings_pending = 3u;
+	s->send_buf = send_buf;
+	s->send_buf_cap = sizeof(send_buf);
+	s->send_iov = send_iov;
+	s->opt_max_send_iov = 16u;
+	s->pending_settings = pending_settings;
 	s->recv_state = RECV_FRAME_HEADER;
 	s->preface_count = 0;
 }
@@ -192,6 +204,7 @@ test_recv_settings_ack(void)
 	uint8_t frame[9];
 
 	test_session_init(&s, reassembly, sizeof(reassembly));
+	s.pending_count = 1;
 	frame_hdr_write_at(frame, 0, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0);
 	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == (ssize_t)sizeof(frame));
 	ASSERT(s.recv_state == RECV_FRAME_HEADER);
@@ -409,6 +422,7 @@ test_recv_split_frame_header(void)
 	size_t i;
 
 	test_session_init(&s, reassembly, sizeof(reassembly));
+	s.pending_count = 1;
 	frame_hdr_write_at(frame, 0, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0);
 	for (i = 0; i < sizeof(frame); i++) {
 		ASSERT(hive_session_recv(&s, frame + i, 1) == 1);

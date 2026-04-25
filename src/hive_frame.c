@@ -8,6 +8,7 @@
 #include "hive_frame.h"
 #include "hive_frame_bare.h"
 #include "hive_internal.h"
+#include "hive_send.h"
 
 static const uint8_t client_preface_magic[24] = {
     'P', 'R', 'I',  ' ',  '*',  ' ',  'H', 'T', 'T',  'P',  '/',  '2',
@@ -76,6 +77,121 @@ static int
 protocol_error(hive_session_t *s)
 {
 	return session_error(s, HIVE_ERR_PROTOCOL, HIVE_H2_PROTOCOL_ERROR);
+}
+
+static int
+flow_control_error(hive_session_t *s)
+{
+	return session_error(
+	    s, HIVE_ERR_FLOW_CONTROL, HIVE_H2_FLOW_CONTROL_ERROR);
+}
+
+static int
+settings_apply_initial_window(hive_session_t *s, uint32_t val)
+{
+	int64_t delta;
+	uint32_t i;
+
+	if (val > 0x7fffffffU)
+		return flow_control_error(s);
+
+	delta = (int64_t)(int32_t)val -
+	        (int64_t)(int32_t)s->remote_settings.initial_window_size;
+	s->remote_settings.initial_window_size = val;
+
+	if (s->stream_slots == NULL)
+		return 0;
+
+	for (i = 0; i < s->opt_max_concurrent_streams; i++) {
+		hive_stream_t *st;
+		int64_t new_window;
+
+		st = &s->stream_slots[i];
+		if (st->stream_id == 0)
+			continue;
+		new_window = (int64_t)st->send_window + delta;
+		if (new_window > 0x7fffffffLL || new_window < -2147483648LL)
+			return flow_control_error(s);
+		st->send_window = (int32_t)new_window;
+	}
+
+	return 0;
+}
+
+static int
+settings_apply_param(hive_session_t *s, uint16_t param_id, uint32_t param_val)
+{
+	switch (param_id) {
+	case HIVE_SETTINGS_HEADER_TABLE_SIZE:
+		s->remote_settings.header_table_size = param_val;
+		if (s->enc_table.has_pending == 0 ||
+		    param_val < s->enc_table.pending_min) {
+			s->enc_table.pending_min = param_val;
+		}
+		s->enc_table.pending_max = param_val;
+		s->enc_table.has_pending = 1;
+		break;
+	case HIVE_SETTINGS_ENABLE_PUSH:
+		if (param_val > 1)
+			return protocol_error(s);
+		if (s->role == HIVE_ROLE_CLIENT && param_val == 1)
+			return protocol_error(s);
+		s->remote_settings.enable_push = param_val;
+		break;
+	case HIVE_SETTINGS_MAX_CONCURRENT_STREAMS:
+		s->remote_settings.max_concurrent_streams = param_val;
+		break;
+	case HIVE_SETTINGS_INITIAL_WINDOW_SIZE:
+		return settings_apply_initial_window(s, param_val);
+	case HIVE_SETTINGS_MAX_FRAME_SIZE:
+		if (param_val < 16384u || param_val > 16777215u)
+			return protocol_error(s);
+		s->remote_settings.max_frame_size = param_val;
+		break;
+	case HIVE_SETTINGS_MAX_HEADER_LIST_SIZE:
+		s->remote_settings.max_header_list_size = param_val;
+		break;
+	default:
+		/* Unknown SETTINGS parameter IDs are ignored per RFC 9113 §6.5.
+		 */
+		break;
+	}
+
+	return 0;
+}
+
+static int
+settings_payload_complete(hive_session_t *s)
+{
+	if ((s->cur_frame.flags & HIVE_FLAG_ACK) != 0) {
+		if (s->pending_count == 0)
+			return protocol_error(s);
+		if (s->pending_settings != NULL) {
+			zero_bytes(
+			    (uint8_t *)&s->pending_settings[s->pending_head],
+			    sizeof(s->pending_settings[s->pending_head]));
+		}
+		s->pending_head = (uint8_t)((s->pending_head + 1u) %
+		                            s->opt_max_settings_pending);
+		s->pending_count--;
+		if (s->callbacks.on_settings_ack != NULL) {
+			(void)s->callbacks.on_settings_ack(s, s->user_data);
+		}
+		return 0;
+	}
+
+	s->inbound_settings_count++;
+	if (s->inbound_settings_count > s->opt_max_settings_pending)
+		return protocol_error(s);
+
+	send_queue_append_ctrl(
+	    s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u, NULL, 0u);
+	s->inbound_settings_count--;
+
+	if (s->callbacks.on_settings != NULL)
+		(void)s->callbacks.on_settings(s, s->user_data);
+
+	return 0;
 }
 
 static int
@@ -422,27 +538,9 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				break;
 			}
 			if (s->payload_remaining == 0) {
-				/*
-				 * Fast-path: frame with zero-length payload.
-				 * GOAWAY requires length >= 8 (enforced above
-				 * by frame_header_validate), so the GOAWAY
-				 * branch below is a defensive guard that is
-				 * currently unreachable.  All other zero-length
-				 * frames (e.g. SETTINGS ACK) fall through to
-				 * the unconditional recv_state reset.
-				 */
-				if (s->recv_state == RECV_GOAWAY_PAYLOAD) {
-					s->goaway_last_stream_id_recv = 0;
-					s->goaway_error_code_recv = 0;
-					if (s->callbacks.on_goaway != NULL) {
-						(void)s->callbacks.on_goaway(
-						    s,
-						    s->goaway_last_stream_id_recv,
-						    s->goaway_error_code_recv,
-						    NULL,
-						    0,
-						    s->user_data);
-					}
+				if (s->recv_state == RECV_SETTINGS_PAYLOAD) {
+					if (settings_payload_complete(s) != 0)
+						return -1;
 				}
 				s->recv_state = RECV_FRAME_HEADER;
 			}
@@ -732,29 +830,41 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			break;
 
 		case RECV_SETTINGS_PAYLOAD:
-			/*
-			 * Defensive guard: a SETTINGS ACK always has length 0
-			 * (enforced by frame_header_validate), so the
-			 * zero-payload fast-path in RECV_FRAME_HEADER resets
-			 * recv_state to RECV_FRAME_HEADER before this state is
-			 * ever entered for an ACK frame.  The ACK branch below
-			 * is therefore currently unreachable but is retained as
-			 * a safety net should validation ordering ever change.
-			 */
-			if ((s->cur_frame.flags & HIVE_FLAG_ACK) != 0) {
-				s->payload_remaining = 0;
-				s->recv_state = RECV_FRAME_HEADER;
-				break;
+			n = 6u - s->ctrl_staging_count;
+			if (n > s->payload_remaining)
+				n = s->payload_remaining;
+			if (n > avail)
+				n = avail;
+			if (n > 0) {
+				copy_bytes(s->ctrl_staging +
+				               s->ctrl_staging_count,
+				           data + consumed,
+				           n);
+				s->ctrl_staging_count += (uint8_t)n;
+				consumed += n;
+				s->payload_remaining -= (uint32_t)n;
 			}
-			while (s->payload_remaining > 0 && consumed < len) {
-				s->ctrl_staging[s->ctrl_staging_count++] =
-				    data[consumed++];
-				s->payload_remaining--;
-				if (s->ctrl_staging_count == 6) {
-					s->ctrl_staging_count = 0;
-				}
+			if (s->ctrl_staging_count == 6) {
+				uint16_t param_id;
+				uint32_t param_val;
+
+				param_id =
+				    (uint16_t)(((uint16_t)s->ctrl_staging[0]
+				                << 8) |
+				               (uint16_t)s->ctrl_staging[1]);
+				param_val =
+				    ((uint32_t)s->ctrl_staging[2] << 24) |
+				    ((uint32_t)s->ctrl_staging[3] << 16) |
+				    ((uint32_t)s->ctrl_staging[4] << 8) |
+				    (uint32_t)s->ctrl_staging[5];
+				if (settings_apply_param(
+				        s, param_id, param_val) != 0)
+					return -1;
+				s->ctrl_staging_count = 0;
 			}
 			if (s->payload_remaining == 0) {
+				if (settings_payload_complete(s) != 0)
+					return -1;
 				s->recv_state = RECV_FRAME_HEADER;
 			}
 			break;

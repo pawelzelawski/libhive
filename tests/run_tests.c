@@ -135,6 +135,15 @@ int test_stream_free_stack(void);
 int test_stream_compaction(void);
 int test_recv_headers_opens_new_stream(void);
 int test_stream_id_monotonicity(void);
+int test_settings_recv_and_ack(void);
+int test_settings_recv_ack(void);
+int test_settings_unsolicited_ack(void);
+int test_settings_invalid_window_size(void);
+int test_settings_invalid_frame_size(void);
+int test_settings_header_table_size_updates_encoder(void);
+int test_settings_header_table_size_pending_min(void);
+int test_settings_initial_window_retroactive_adjust(void);
+int test_settings_initial_window_retroactive_overflow(void);
 
 int
 main(void)
@@ -162,6 +171,15 @@ main(void)
 	RUN(stream_compaction);
 	RUN(recv_headers_opens_new_stream);
 	RUN(stream_id_monotonicity);
+	RUN(settings_recv_and_ack);
+	RUN(settings_recv_ack);
+	RUN(settings_unsolicited_ack);
+	RUN(settings_invalid_window_size);
+	RUN(settings_invalid_frame_size);
+	RUN(settings_header_table_size_updates_encoder);
+	RUN(settings_header_table_size_pending_min);
+	RUN(settings_initial_window_retroactive_adjust);
+	RUN(settings_initial_window_retroactive_overflow);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);
