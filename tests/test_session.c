@@ -27,6 +27,7 @@
  */
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/uio.h>
@@ -43,6 +44,12 @@ int test_send_fatal_error(void);
 int test_options_defaults(void);
 int test_options_set_valid(void);
 int test_options_set_invalid(void);
+int test_session_server_new_null_alloc(void);
+int test_session_client_new_null_alloc(void);
+int test_session_new_custom_alloc(void);
+int test_session_free_all_allocations(void);
+int test_session_new_alloc_failure(void);
+int test_options_set_max_concurrent(void);
 
 /* ------------------------------------------------------------------ */
 /* Shared test infrastructure                                          */
@@ -50,6 +57,10 @@ int test_options_set_invalid(void);
 
 #define TEST_SEND_BUF_CAP 4096u
 #define TEST_SEND_IOV_CAP 32u
+
+static const uint8_t test_client_preface_magic[24] = {
+	'P', 'R', 'I',  ' ',  '*',  ' ',  'H', 'T', 'T',  'P',  '/',  '2',
+	'.', '0', '\r', '\n', '\r', '\n', 'S', 'M', '\r', '\n', '\r', '\n'};
 
 /*
  * send callback that sums the effective iov and returns the total —
@@ -118,6 +129,96 @@ send_cb_fatal(hive_session_t *session,
 	(void)iovcnt;
 	(void)user_data;
 	return -1;
+}
+
+typedef struct {
+	size_t alloc_calls;
+	size_t free_calls;
+	size_t outstanding;
+	int fail_after;
+} alloc_track_t;
+
+static int
+alloc_should_fail(alloc_track_t *st)
+{
+	st->alloc_calls++;
+	return (st->fail_after > 0 &&
+	    st->alloc_calls >= (size_t)st->fail_after) ? 1 : 0;
+}
+
+static void *
+track_malloc(size_t size, void *ctx)
+{
+	alloc_track_t *st;
+	void *p;
+
+	st = ctx;
+	if (alloc_should_fail(st))
+		return NULL;
+	p = malloc(size);
+	if (p != NULL)
+		st->outstanding++;
+	return p;
+}
+
+static void
+track_free(void *ptr, void *ctx)
+{
+	alloc_track_t *st;
+
+	st = ctx;
+	if (ptr != NULL) {
+		st->free_calls++;
+		st->outstanding--;
+	}
+	free(ptr);
+}
+
+static void *
+track_calloc(size_t nmemb, size_t size, void *ctx)
+{
+	alloc_track_t *st;
+	void *p;
+
+	st = ctx;
+	if (alloc_should_fail(st))
+		return NULL;
+	p = calloc(nmemb, size);
+	if (p != NULL)
+		st->outstanding++;
+	return p;
+}
+
+static void *
+track_realloc(void *ptr, size_t size, void *ctx)
+{
+	alloc_track_t *st;
+	void *p;
+
+	st = ctx;
+	if (ptr == NULL) {
+		if (alloc_should_fail(st))
+			return NULL;
+		p = realloc(NULL, size);
+		if (p != NULL)
+			st->outstanding++;
+		return p;
+	}
+	p = realloc(ptr, size);
+	return p;
+}
+
+static hive_mem_t
+track_mem(alloc_track_t *st)
+{
+	hive_mem_t mem;
+
+	mem.malloc = track_malloc;
+	mem.free = track_free;
+	mem.calloc = track_calloc;
+	mem.realloc = track_realloc;
+	mem.ctx = st;
+	return mem;
 }
 
 /*
@@ -602,6 +703,171 @@ test_options_set_invalid(void)
 	ASSERT(hive_options_set_no_auto_ping_ack(NULL, 0u)
 	    == HIVE_ERR_INVALID_ARG);
 
+	hive_options_free(opt);
+	return 1;
+}
+
+int
+test_session_server_new_null_alloc(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	const uint8_t *p;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+
+	s = hive_session_server_new(NULL, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+	ASSERT(s->role == HIVE_ROLE_SERVER);
+	ASSERT(s->recv_state == RECV_CLIENT_PREFACE);
+	ASSERT(hive_session_want_write(s) == 1);
+	ASSERT(s->send_iov_count == 1);
+	ASSERT(s->send_iov[0].iov_len >= 9u);
+
+	p = s->send_iov[0].iov_base;
+	ASSERT(p[3] == HIVE_FRAME_SETTINGS);
+	ASSERT(p[4] == 0u);
+	ASSERT((p[5] & 0x7fu) == 0u);
+	ASSERT(p[6] == 0u);
+	ASSERT(p[7] == 0u);
+	ASSERT(p[8] == 0u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_session_client_new_null_alloc(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	const uint8_t *p;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+
+	s = hive_session_client_new(NULL, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+	ASSERT(s->role == HIVE_ROLE_CLIENT);
+	ASSERT(s->recv_state == RECV_SERVER_PREFACE);
+	ASSERT(hive_session_want_write(s) == 1);
+	ASSERT(s->send_iov_count == 2);
+	ASSERT(s->send_iov[0].iov_len == sizeof(test_client_preface_magic));
+	ASSERT(memcmp(s->send_iov[0].iov_base, test_client_preface_magic,
+	    sizeof(test_client_preface_magic)) == 0);
+
+	p = s->send_iov[1].iov_base;
+	ASSERT(s->send_iov[1].iov_len >= 9u);
+	ASSERT(p[3] == HIVE_FRAME_SETTINGS);
+	ASSERT(p[4] == 0u);
+	ASSERT((p[5] & 0x7fu) == 0u);
+	ASSERT(p[6] == 0u);
+	ASSERT(p[7] == 0u);
+	ASSERT(p[8] == 0u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_session_new_custom_alloc(void)
+{
+	hive_callbacks_t cb;
+	hive_mem_t mem;
+	alloc_track_t st;
+	hive_session_t *s;
+	int ret;
+	size_t before;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+	memset(&st, 0, sizeof(st));
+	mem = track_mem(&st);
+
+	s = hive_session_server_new(&mem, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+	ASSERT(st.alloc_calls == 12u);
+
+	before = st.alloc_calls;
+	ret = hive_session_send(s);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(st.alloc_calls == before);
+
+	hive_session_free(s);
+	ASSERT(st.outstanding == 0u);
+	return 1;
+}
+
+int
+test_session_free_all_allocations(void)
+{
+	hive_callbacks_t cb;
+	hive_mem_t mem;
+	alloc_track_t st;
+	hive_session_t *s;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+	memset(&st, 0, sizeof(st));
+	mem = track_mem(&st);
+
+	s = hive_session_server_new(&mem, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+	ASSERT(st.outstanding > 0u);
+
+	hive_session_free(s);
+	ASSERT(st.outstanding == 0u);
+	ASSERT(st.free_calls == st.alloc_calls);
+	return 1;
+}
+
+int
+test_session_new_alloc_failure(void)
+{
+	hive_callbacks_t cb;
+	hive_mem_t mem;
+	alloc_track_t st;
+	hive_session_t *s;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+	memset(&st, 0, sizeof(st));
+	st.fail_after = 3;
+	mem = track_mem(&st);
+
+	s = hive_session_server_new(&mem, NULL, &cb, NULL);
+	ASSERT(s == NULL);
+	ASSERT(st.outstanding == 0u);
+	ASSERT(st.free_calls == 2u);
+	return 1;
+}
+
+int
+test_options_set_max_concurrent(void)
+{
+	hive_callbacks_t cb;
+	hive_options_t *opt;
+	hive_session_t *s;
+	int ret;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+
+	opt = hive_options_new();
+	ASSERT(opt != NULL);
+	ret = hive_options_set_max_concurrent_streams(opt, 50u);
+	ASSERT(ret == HIVE_OK);
+
+	s = hive_session_server_new(NULL, opt, &cb, NULL);
+	ASSERT(s != NULL);
+	ASSERT(s->opt_max_concurrent_streams == 50u);
+	ASSERT(s->stream_free_top == 50u);
+	ASSERT(s->stream_free_stack[0] == 0u);
+	ASSERT(s->stream_free_stack[49] == 49u);
+	ASSERT(s->stream_hash_mask == 127u);
+
+	hive_session_free(s);
 	hive_options_free(opt);
 	return 1;
 }

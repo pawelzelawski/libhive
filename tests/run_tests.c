@@ -123,6 +123,12 @@ int test_send_fatal_error(void);
 int test_options_defaults(void);
 int test_options_set_valid(void);
 int test_options_set_invalid(void);
+int test_session_server_new_null_alloc(void);
+int test_session_client_new_null_alloc(void);
+int test_session_new_custom_alloc(void);
+int test_session_free_all_allocations(void);
+int test_session_new_alloc_failure(void);
+int test_options_set_max_concurrent(void);
 
 int
 main(void)
@@ -136,6 +142,14 @@ main(void)
 	RUN(options_defaults);
 	RUN(options_set_valid);
 	RUN(options_set_invalid);
+
+	/* Phase 4.3 — session creation and teardown */
+	RUN(session_server_new_null_alloc);
+	RUN(session_client_new_null_alloc);
+	RUN(session_new_custom_alloc);
+	RUN(session_free_all_allocations);
+	RUN(session_new_alloc_failure);
+	RUN(options_set_max_concurrent);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);

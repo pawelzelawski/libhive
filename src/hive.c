@@ -56,6 +56,28 @@ static const hive_mem_t null_allocator = {
     NULL,
 };
 
+static const uint8_t client_preface_magic[24] = {
+    'P', 'R', 'I',  ' ',  '*',  ' ',  'H', 'T', 'T',  'P',  '/',  '2',
+    '.', '0', '\r', '\n', '\r', '\n', 'S', 'M', '\r', '\n', '\r', '\n'};
+
+static const hive_options_t default_options = {
+    4096u,
+    1u,
+    100u,
+    65535u,
+    16384u,
+    65536u,
+    100u,
+    65536u,
+    3u,
+    100u,
+    10u,
+    512u,
+    8192u,
+    0u,
+    0u,
+};
+
 struct hive_hpack_encoder {
 	hive_mem_t mem;
 	hpack_table_t table;
@@ -383,18 +405,382 @@ hive_options_set_no_auto_ping_ack(hive_options_t *opt, uint32_t v)
 	return HIVE_OK;
 }
 
+static uint32_t
+next_pow2_u32(uint32_t v)
+{
+	uint32_t p;
+
+	if (v <= 1u)
+		return 1u;
+
+	p = 1u;
+	while (p < v)
+		p <<= 1;
+	return p;
+}
+
+static uint32_t
+hpack_ring_cap_for(uint32_t max_size)
+{
+	uint32_t cap;
+
+	cap = max_size / 32u;
+	if (cap < 4u)
+		cap = 4u;
+	return next_pow2_u32(cap);
+}
+
+static size_t
+session_send_buf_cap(uint32_t opt_max_continuation_size)
+{
+	uint32_t frames;
+
+	frames = (opt_max_continuation_size + 16384u - 1u) / 16384u;
+	return (size_t)opt_max_continuation_size + (size_t)frames * 9u + 2048u;
+}
+
+static void
+session_prealloc_free(hive_session_t *s)
+{
+	if (s->pending_settings != NULL) {
+		s->mem.free(s->pending_settings, s->mem.ctx);
+		s->pending_settings = NULL;
+	}
+	if (s->dec_table.ring != NULL)
+		hpack_table_free(&s->dec_table, &s->mem);
+	if (s->enc_table.ring != NULL)
+		hpack_table_free(&s->enc_table, &s->mem);
+	if (s->hpack_scratch_value != NULL) {
+		s->mem.free(s->hpack_scratch_value, s->mem.ctx);
+		s->hpack_scratch_value = NULL;
+	}
+	if (s->hpack_scratch_name != NULL) {
+		s->mem.free(s->hpack_scratch_name, s->mem.ctx);
+		s->hpack_scratch_name = NULL;
+	}
+	if (s->reassembly_buf != NULL) {
+		s->mem.free(s->reassembly_buf, s->mem.ctx);
+		s->reassembly_buf = NULL;
+	}
+	if (s->send_buf != NULL) {
+		s->mem.free(s->send_buf, s->mem.ctx);
+		s->send_buf = NULL;
+	}
+	if (s->send_iov != NULL) {
+		s->mem.free(s->send_iov, s->mem.ctx);
+		s->send_iov = NULL;
+	}
+	if (s->stream_free_stack != NULL) {
+		s->mem.free(s->stream_free_stack, s->mem.ctx);
+		s->stream_free_stack = NULL;
+	}
+	if (s->stream_slots != NULL) {
+		s->mem.free(s->stream_slots, s->mem.ctx);
+		s->stream_slots = NULL;
+	}
+	if (s->stream_hash != NULL) {
+		s->mem.free(s->stream_hash, s->mem.ctx);
+		s->stream_hash = NULL;
+	}
+}
+
+static int
+session_prealloc(hive_session_t *s)
+{
+	uint32_t hash_table_size;
+	uint32_t i;
+	int ret;
+
+	hash_table_size = next_pow2_u32(s->opt_max_concurrent_streams * 2u);
+	s->stream_hash_mask = hash_table_size - 1u;
+	s->send_buf_cap = session_send_buf_cap(s->opt_max_continuation_size);
+
+	ret = HIVE_ERR_NOMEM;
+
+	s->stream_hash =
+	    s->mem.calloc(hash_table_size, sizeof(*s->stream_hash), s->mem.ctx);
+	if (s->stream_hash == NULL)
+		goto cleanup;
+
+	s->stream_slots = s->mem.calloc(s->opt_max_concurrent_streams,
+	                                sizeof(*s->stream_slots),
+	                                s->mem.ctx);
+	if (s->stream_slots == NULL)
+		goto cleanup;
+
+	s->stream_free_stack =
+	    s->mem.malloc((size_t)s->opt_max_concurrent_streams *
+	                      sizeof(*s->stream_free_stack),
+	                  s->mem.ctx);
+	if (s->stream_free_stack == NULL)
+		goto cleanup;
+
+	s->send_iov = s->mem.calloc(
+	    s->opt_max_send_iov, sizeof(*s->send_iov), s->mem.ctx);
+	if (s->send_iov == NULL)
+		goto cleanup;
+
+	s->send_buf = s->mem.malloc(s->send_buf_cap, s->mem.ctx);
+	if (s->send_buf == NULL)
+		goto cleanup;
+
+	s->reassembly_buf =
+	    s->mem.malloc(s->opt_max_continuation_size, s->mem.ctx);
+	if (s->reassembly_buf == NULL)
+		goto cleanup;
+
+	s->hpack_scratch_name =
+	    s->mem.malloc(s->opt_max_header_string_size, s->mem.ctx);
+	if (s->hpack_scratch_name == NULL)
+		goto cleanup;
+
+	s->hpack_scratch_value =
+	    s->mem.malloc(s->opt_max_header_string_size, s->mem.ctx);
+	if (s->hpack_scratch_value == NULL)
+		goto cleanup;
+
+	s->enc_table.ring = (hpack_entry_t **)s->mem.calloc(
+	    hpack_ring_cap_for(s->remote_settings.header_table_size),
+	    sizeof(*s->enc_table.ring),
+	    s->mem.ctx);
+	if (s->enc_table.ring == NULL)
+		goto cleanup;
+	s->enc_table.ring_cap =
+	    hpack_ring_cap_for(s->remote_settings.header_table_size);
+	s->enc_table.max_size = s->remote_settings.header_table_size;
+	s->enc_table.pending_max = s->remote_settings.header_table_size;
+	s->enc_table.pending_min = s->remote_settings.header_table_size;
+
+	s->dec_table.ring = (hpack_entry_t **)s->mem.calloc(
+	    hpack_ring_cap_for(s->local_settings.header_table_size),
+	    sizeof(*s->dec_table.ring),
+	    s->mem.ctx);
+	if (s->dec_table.ring == NULL)
+		goto cleanup;
+	s->dec_table.ring_cap =
+	    hpack_ring_cap_for(s->local_settings.header_table_size);
+	s->dec_table.max_size = s->local_settings.header_table_size;
+	s->dec_table.pending_max = s->local_settings.header_table_size;
+	s->dec_table.pending_min = s->local_settings.header_table_size;
+
+	s->pending_settings = s->mem.calloc(s->opt_max_settings_pending,
+	                                    sizeof(*s->pending_settings),
+	                                    s->mem.ctx);
+	if (s->pending_settings == NULL)
+		goto cleanup;
+
+	for (i = 0; i < hash_table_size; i++)
+		s->stream_hash[i].stream_id = STREAM_HASH_EMPTY;
+	for (i = 0; i < s->opt_max_concurrent_streams; i++)
+		s->stream_free_stack[i] = i;
+	s->stream_free_top = s->opt_max_concurrent_streams;
+
+	ret = HIVE_OK;
+
+cleanup:
+	if (ret != HIVE_OK)
+		session_prealloc_free(s);
+	return ret;
+}
+
+static void
+settings_param_write(uint8_t *dst, uint16_t id, uint32_t value)
+{
+	dst[0] = (uint8_t)((id >> 8) & 0xffu);
+	dst[1] = (uint8_t)(id & 0xffu);
+	dst[2] = (uint8_t)((value >> 24) & 0xffu);
+	dst[3] = (uint8_t)((value >> 16) & 0xffu);
+	dst[4] = (uint8_t)((value >> 8) & 0xffu);
+	dst[5] = (uint8_t)(value & 0xffu);
+}
+
+static uint32_t
+session_build_settings_payload(hive_session_t *s, uint8_t out[36])
+{
+	uint32_t n;
+
+	n = 0;
+	settings_param_write(out + n,
+	                     (uint16_t)HIVE_SETTINGS_HEADER_TABLE_SIZE,
+	                     s->local_settings.header_table_size);
+	n += 6u;
+	if (s->role == HIVE_ROLE_CLIENT) {
+		settings_param_write(out + n,
+		                     (uint16_t)HIVE_SETTINGS_ENABLE_PUSH,
+		                     s->local_settings.enable_push);
+		n += 6u;
+	}
+	settings_param_write(out + n,
+	                     (uint16_t)HIVE_SETTINGS_MAX_CONCURRENT_STREAMS,
+	                     s->local_settings.max_concurrent_streams);
+	n += 6u;
+	settings_param_write(out + n,
+	                     (uint16_t)HIVE_SETTINGS_INITIAL_WINDOW_SIZE,
+	                     s->local_settings.initial_window_size);
+	n += 6u;
+	settings_param_write(out + n,
+	                     (uint16_t)HIVE_SETTINGS_MAX_FRAME_SIZE,
+	                     s->local_settings.max_frame_size);
+	n += 6u;
+	settings_param_write(out + n,
+	                     (uint16_t)HIVE_SETTINGS_MAX_HEADER_LIST_SIZE,
+	                     s->local_settings.max_header_list_size);
+	n += 6u;
+
+	return n;
+}
+
+static int
+session_queue_server_preface(hive_session_t *s)
+{
+	uint8_t payload[36];
+	uint32_t payload_len;
+
+	payload_len = session_build_settings_payload(s, payload);
+	send_queue_append_ctrl(
+	    s, HIVE_FRAME_SETTINGS, 0u, 0u, payload, payload_len);
+	return HIVE_OK;
+}
+
+static int
+session_queue_client_preface(hive_session_t *s)
+{
+	uint8_t payload[36];
+	uint32_t payload_len;
+
+	if (s->send_buf_used + sizeof(client_preface_magic) > s->send_buf_cap)
+		return HIVE_ERR_NOMEM;
+	if (s->send_iov_count >= (int)s->opt_max_send_iov)
+		return HIVE_ERR_NOMEM;
+
+	memcpy(s->send_buf + s->send_buf_used,
+	       client_preface_magic,
+	       sizeof(client_preface_magic));
+	s->send_iov[s->send_iov_count].iov_base =
+	    s->send_buf + s->send_buf_used;
+	s->send_iov[s->send_iov_count].iov_len = sizeof(client_preface_magic);
+	s->send_iov_count++;
+	s->send_buf_used += sizeof(client_preface_magic);
+
+	payload_len = session_build_settings_payload(s, payload);
+	send_queue_append_ctrl(
+	    s, HIVE_FRAME_SETTINGS, 0u, 0u, payload, payload_len);
+	return HIVE_OK;
+}
+
+static void
+session_init_local_settings(hive_session_t *s, const hive_options_t *opt)
+{
+	s->local_settings.header_table_size = opt->opt_header_table_size;
+	s->local_settings.enable_push = opt->opt_enable_push;
+	s->local_settings.max_concurrent_streams =
+	    opt->opt_max_concurrent_streams;
+	s->local_settings.initial_window_size = opt->opt_initial_window_size;
+	s->local_settings.max_frame_size = opt->opt_max_frame_size;
+	s->local_settings.max_header_list_size = opt->opt_max_header_list_size;
+}
+
+static void
+session_init_remote_defaults(hive_session_t *s)
+{
+	s->remote_settings.header_table_size = 4096u;
+	s->remote_settings.enable_push = 1u;
+	s->remote_settings.max_concurrent_streams = UINT32_MAX;
+	s->remote_settings.initial_window_size = 65535u;
+	s->remote_settings.max_frame_size = 16384u;
+	s->remote_settings.max_header_list_size = UINT32_MAX;
+}
+
+static void
+session_copy_options(hive_session_t *s, const hive_options_t *opt)
+{
+	s->opt_header_table_size = opt->opt_header_table_size;
+	s->opt_enable_push = opt->opt_enable_push;
+	s->opt_max_concurrent_streams = opt->opt_max_concurrent_streams;
+	s->opt_initial_window_size = opt->opt_initial_window_size;
+	s->opt_max_frame_size = opt->opt_max_frame_size;
+	s->opt_max_header_list_size = opt->opt_max_header_list_size;
+	s->opt_max_header_count = opt->opt_max_header_count;
+	s->opt_max_continuation_size = opt->opt_max_continuation_size;
+	s->opt_max_settings_pending = opt->opt_max_settings_pending;
+	s->opt_rst_flood_threshold = opt->opt_rst_flood_threshold;
+	s->opt_rst_flood_window_secs = opt->opt_rst_flood_window_secs;
+	s->opt_max_send_iov = opt->opt_max_send_iov;
+	s->opt_max_header_string_size = opt->opt_max_header_string_size;
+	s->opt_no_http_messaging = opt->opt_no_http_messaging;
+	s->opt_no_auto_ping_ack = opt->opt_no_auto_ping_ack;
+}
+
+static hive_session_t *
+session_new_common(hive_role_t role,
+                   const hive_mem_t *mem,
+                   const hive_options_t *opt,
+                   const hive_callbacks_t *callbacks,
+                   void *user_data)
+{
+	const hive_mem_t *alloc;
+	const hive_options_t *eff_opt;
+	hive_session_t *s;
+	int ret;
+
+	if (callbacks == NULL || callbacks->send == NULL)
+		return NULL;
+
+	alloc = mem;
+	if (alloc == NULL) {
+		alloc = &null_allocator;
+	} else if (alloc->malloc == NULL || alloc->free == NULL ||
+	           alloc->calloc == NULL || alloc->realloc == NULL) {
+		return NULL;
+	}
+
+	eff_opt = (opt != NULL) ? opt : &default_options;
+
+	s = alloc->calloc(1u, sizeof(*s), alloc->ctx);
+	if (s == NULL)
+		return NULL;
+
+	s->mem = *alloc;
+	s->callbacks = *callbacks;
+	s->user_data = user_data;
+	s->role = (uint8_t)role;
+
+	session_copy_options(s, eff_opt);
+	session_init_local_settings(s, eff_opt);
+	session_init_remote_defaults(s);
+
+	s->session_state = HIVE_SESSION_OPEN;
+	s->send_window = (int32_t)s->remote_settings.initial_window_size;
+	s->recv_window = (int32_t)s->local_settings.initial_window_size;
+	s->next_stream_id = (role == HIVE_ROLE_CLIENT) ? 1u : 2u;
+	s->recv_state = (role == HIVE_ROLE_SERVER) ? RECV_CLIENT_PREFACE
+	                                           : RECV_SERVER_PREFACE;
+
+	ret = session_prealloc(s);
+	if (ret != HIVE_OK)
+		goto fail;
+
+	ret = (role == HIVE_ROLE_SERVER) ? session_queue_server_preface(s)
+	                                 : session_queue_client_preface(s);
+	if (ret != HIVE_OK)
+		goto fail;
+
+	return s;
+
+fail:
+	session_prealloc_free(s);
+	s->mem.free(s, s->mem.ctx);
+	return NULL;
+}
+
 hive_session_t *
 hive_session_server_new(const hive_mem_t *mem,
                         const hive_options_t *opt,
                         const hive_callbacks_t *callbacks,
                         void *user_data)
 {
-	(void)mem;
-	(void)opt;
-	(void)callbacks;
-	(void)user_data;
-	(void)null_allocator;
-	return NULL;
+	return session_new_common(
+	    HIVE_ROLE_SERVER, mem, opt, callbacks, user_data);
 }
 
 hive_session_t *
@@ -403,11 +789,8 @@ hive_session_client_new(const hive_mem_t *mem,
                         const hive_callbacks_t *callbacks,
                         void *user_data)
 {
-	(void)mem;
-	(void)opt;
-	(void)callbacks;
-	(void)user_data;
-	return NULL;
+	return session_new_common(
+	    HIVE_ROLE_CLIENT, mem, opt, callbacks, user_data);
 }
 
 hive_session_t *
@@ -415,22 +798,22 @@ hive_session_server_upgrade(const hive_mem_t *mem,
                             const hive_options_t *opt,
                             const hive_callbacks_t *callbacks,
                             void *user_data,
-                            const char *http2_settings_b64,
-                            uint32_t upgraded_stream_id)
+                            const uint8_t *settings_payload,
+                            size_t settings_len)
 {
-	(void)mem;
-	(void)opt;
-	(void)callbacks;
-	(void)user_data;
-	(void)http2_settings_b64;
-	(void)upgraded_stream_id;
-	return NULL;
+	if (settings_payload == NULL && settings_len != 0)
+		return NULL;
+	return session_new_common(
+	    HIVE_ROLE_SERVER, mem, opt, callbacks, user_data);
 }
 
 void
 hive_session_free(hive_session_t *session)
 {
-	(void)session;
+	if (session == NULL)
+		return;
+	session_prealloc_free(session);
+	session->mem.free(session, session->mem.ctx);
 }
 
 ssize_t
@@ -647,15 +1030,17 @@ hive_submit_ping_ack(hive_session_t *session, const uint8_t opaque[8])
 
 int
 hive_session_feed_upgrade_headers(hive_session_t *session,
-                                  uint32_t stream_id,
                                   const hive_nv_t *nva,
-                                  size_t nvlen)
+                                  size_t nvlen,
+                                  int end_stream)
 {
-	(void)session;
-	(void)stream_id;
-	(void)nva;
-	(void)nvlen;
-	return HIVE_ERR_SESSION_CLOSED;
+	if (session == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (end_stream != 1)
+		return HIVE_ERR_INVALID_ARG;
+	if (nvlen > 0 && nva == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	return HIVE_OK;
 }
 
 int

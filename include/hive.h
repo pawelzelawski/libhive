@@ -292,8 +292,8 @@ hive_session_t *hive_session_server_upgrade(const hive_mem_t *mem,
                                             const hive_options_t *opt,
                                             const hive_callbacks_t *callbacks,
                                             void *user_data,
-                                            const char *http2_settings_b64,
-                                            uint32_t upgraded_stream_id);
+                                            const uint8_t *settings_payload,
+                                            size_t settings_len);
 
 void hive_session_free(hive_session_t *session);
 
@@ -355,9 +355,9 @@ int hive_submit_ping(hive_session_t *session, const uint8_t opaque[8]);
 int hive_submit_ping_ack(hive_session_t *session, const uint8_t opaque[8]);
 
 int hive_session_feed_upgrade_headers(hive_session_t *session,
-                                      uint32_t stream_id,
                                       const hive_nv_t *nva,
-                                      size_t nvlen);
+                                      size_t nvlen,
+                                      int end_stream);
 
 /* ------------------------------------------------------------------ */
 /* Buffer retain / free                                                */
