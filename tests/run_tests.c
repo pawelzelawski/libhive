@@ -161,6 +161,8 @@ int test_data_recv_partial(void);
 int test_data_recv_exceeds_stream_window(void);
 int test_data_recv_exceeds_connection_window(void);
 int test_window_update_coalescing(void);
+int test_send_window_blocks_data(void);
+int test_send_max_len_respects_remote_max_frame_size(void);
 
 int
 main(void)
@@ -216,6 +218,10 @@ main(void)
 	RUN(data_recv_exceeds_stream_window);
 	RUN(data_recv_exceeds_connection_window);
 	RUN(window_update_coalescing);
+
+	/* Phase 5.3 — DATA send flow-control enforcement */
+	RUN(send_window_blocks_data);
+	RUN(send_max_len_respects_remote_max_frame_size);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);

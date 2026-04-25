@@ -2,7 +2,7 @@
  * hive_send.c — send queue helpers
  *
  * Implements frame_hdr_write(), send_queue_append_ctrl(), and the
- * Phase 4 stub send_queue_flush_data().
+ * Phase 5 flow-control-gated send_queue_flush_data().
  *
  * frame_hdr_write() is a session-coupled thin wrapper around the
  * standalone frame_hdr_write_at() from hive_frame_bare.c.
@@ -10,8 +10,9 @@
  * send_queue_append_ctrl() serialises one control frame (header + payload)
  * into send_buf and records one iovec entry.  See ARCHITECTURE.md §6.3.
  *
- * send_queue_flush_data() is a Phase 4 stub (no-op).  Phase 6 provides
- * the real implementation.  See ARCHITECTURE.md §6.5 and §6.6.
+ * send_queue_flush_data() in Phase 5 enforces send-window gating and
+ * outbound max frame-size capping before calling per-stream read callbacks.
+ * Full DATA frame queuing lands in Phase 6.  See ARCHITECTURE.md §6.5.
  *
  * Requires the full hive_session_t definition (send_buf, send_buf_used,
  * send_iov, send_iov_count).
@@ -82,12 +83,58 @@ send_queue_append_ctrl(hive_session_t *s,
 }
 
 /*
- * Phase 4 stub — does nothing.
- * Phase 6 will drive pending data_source streams into the send queue
- * within flow control limits.  See ARCHITECTURE.md §6.5.
+ * Phase 5.3 — flow-control-gated DATA source scan.
+ *
+ * For each open stream with a pending data_source callback:
+ * - require both connection and stream send windows to be positive,
+ * - cap callback request length to min(remote max frame size,
+ *   connection send window, stream send window),
+ * - if callback returns 0 bytes, skip to the next stream.
+ *
+ * Phase 6 adds actual DATA frame queueing and window decrement on emitted
+ * frames; this Phase 5 step is gating-only enforcement.
  */
 void
 send_queue_flush_data(hive_session_t *s)
 {
-	(void)s;
+	uint32_t i;
+
+	if (s == NULL)
+		return;
+
+	for (i = 0; i < s->opt_max_concurrent_streams; i++) {
+		hive_stream_t *st;
+		hive_read_callback_t cb;
+		uint32_t max_len;
+		uint8_t *body_ptr;
+		ssize_t nread;
+
+		st = &s->stream_slots[i];
+		if (st->stream_id == 0)
+			continue;
+
+		cb = st->data_source.read_callback;
+		if (cb == NULL)
+			continue;
+
+		if (s->send_window <= 0 || st->send_window <= 0)
+			continue;
+
+		max_len = s->remote_settings.max_frame_size;
+		if ((uint32_t)s->send_window < max_len)
+			max_len = (uint32_t)s->send_window;
+		if ((uint32_t)st->send_window < max_len)
+			max_len = (uint32_t)st->send_window;
+		if (max_len == 0)
+			continue;
+
+		body_ptr = s->send_buf + s->send_buf_used;
+		nread = cb(s,
+		           st->stream_id,
+		           &body_ptr,
+		           max_len,
+		           st->data_source.user_data);
+		if (nread <= 0)
+			continue;
+	}
 }

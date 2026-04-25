@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-25
 **Current Phase**: Phase 5 — Flow Control and DATA
-**Next Task**: 5.3 — DATA send (flow control enforcement)
+**Next Task**: 5.4 — `hive_session_want_write()` update
 
 ### Phase Summary
 
@@ -846,7 +846,7 @@ task 4.0 is required for WINDOW_UPDATE queuing.)
 - Note: `data` points into caller-owned memory; the library cannot poison
   it. The on_data_chunk lifetime is a documented contract only, not ASan-enforced.
 
-**5.3 — DATA send (flow control enforcement)**
+**5.3 — DATA send (flow control enforcement)** ✓ DONE
 - In `send_queue_flush_data()` (stub from Phase 4, now implemented):
   for each stream with a pending data_source, check both
   `session->send_window > 0` and `stream->send_window > 0` before calling

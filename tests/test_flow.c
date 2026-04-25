@@ -20,6 +20,8 @@ int test_data_recv_partial(void);
 int test_data_recv_exceeds_stream_window(void);
 int test_data_recv_exceeds_connection_window(void);
 int test_window_update_coalescing(void);
+int test_send_window_blocks_data(void);
+int test_send_max_len_respects_remote_max_frame_size(void);
 
 typedef struct {
 	const uint8_t *buf_start;
@@ -134,6 +136,55 @@ new_server_recv_session_with_data_cb(data_cap_t *cap)
 	s = hive_session_server_new(NULL, NULL, &cb, cap);
 	ASSERT(s != NULL);
 
+	s->send_iov_count = 0;
+	s->send_buf_used = 0;
+	s->send_partial = 0;
+	s->send_partial_offset = 0;
+	s->recv_state = RECV_FRAME_HEADER;
+	s->preface_count = 0;
+
+	return s;
+}
+
+typedef struct {
+	int calls;
+	uint32_t last_max_len;
+} send_read_cap_t;
+
+static ssize_t
+send_read_capture_cb(hive_session_t *session,
+                     uint32_t stream_id,
+                     uint8_t **buf,
+                     uint32_t flags,
+                     void *user_data)
+{
+	send_read_cap_t *cap;
+
+	(void)session;
+	(void)stream_id;
+	(void)buf;
+
+	cap = user_data;
+	cap->calls++;
+	cap->last_max_len = flags;
+
+	/* Phase 5.3: callback returning 0 means skip this stream. */
+	return 0;
+}
+
+static hive_session_t *
+new_server_send_session(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+
+	s = hive_session_server_new(NULL, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+
+	/* Ignore queued server preface while send-path testing. */
 	s->send_iov_count = 0;
 	s->send_buf_used = 0;
 	s->send_partial = 0;
@@ -458,3 +509,71 @@ test_window_update_coalescing(void)
 	return 1;
 }
 
+int
+test_send_window_blocks_data(void)
+{
+	hive_session_t *s;
+	hive_stream_t *st;
+	send_read_cap_t cap;
+	uint8_t frame[13];
+	size_t n;
+
+	memset(&cap, 0, sizeof(cap));
+
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+
+	st->data_source.read_callback = send_read_capture_cb;
+	st->data_source.user_data = &cap;
+	st->send_window = 0;
+
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(cap.calls == 0);
+
+	n = build_window_update_frame(frame, 1u, 128u);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(st->send_window == 128);
+
+	/* Flush queued RST/ACK/WINDOW_UPDATE test artifacts if any. */
+	s->send_iov_count = 0;
+	s->send_buf_used = 0;
+	s->send_partial = 0;
+	s->send_partial_offset = 0;
+
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(cap.calls == 1);
+	ASSERT(cap.last_max_len == 128u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_send_max_len_respects_remote_max_frame_size(void)
+{
+	hive_session_t *s;
+	hive_stream_t *st;
+	send_read_cap_t cap;
+
+	memset(&cap, 0, sizeof(cap));
+
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+
+	s->remote_settings.max_frame_size = 100u;
+	s->send_window = 1000;
+	st->send_window = 500;
+	st->data_source.read_callback = send_read_capture_cb;
+	st->data_source.user_data = &cap;
+
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(cap.calls == 1);
+	ASSERT(cap.last_max_len == 100u);
+
+	hive_session_free(s);
+	return 1;
+}
