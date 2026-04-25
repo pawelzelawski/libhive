@@ -3,8 +3,8 @@
 ## Status Overview
 
 **Last Updated**: 2026-04-25
-**Current Phase**: Phase 4 — Session Core
-**Next Task**: 4.6 — Connection preface validation
+**Current Phase**: Phase 5 — Flow Control and DATA
+**Next Task**: 5.1 — WINDOW_UPDATE receive
 
 ### Phase Summary
 
@@ -13,7 +13,7 @@
 | 1 | Foundation | DONE | 16/16 (Phase 1 slice) | Tasks 1.1–1.5 done on Linux + OpenBSD |
 | 2 | Frame Parser | DONE | 54/54 (Phase 2 slice) | Tasks 2.1–2.5 done on Linux + OpenBSD; completion criteria confirmed; audit fixes applied 2026-04-23 |
 | 3 | HPACK | DONE | 34/34 (Phase 3 slice) | Tasks 3.1-3.7 done on Linux + OpenBSD; Phase 3 completion criteria confirmed 2026-04-23 |
-| 4 | Session Core | IN PROGRESS | 27/? (Phase 4 slice so far) | Tasks 4.0–4.5 and 4.7 done on Linux + OpenBSD; next: 4.6 Connection preface validation |
+| 4 | Session Core | DONE | 32/32 (Phase 4 slice) | Tasks 4.0–4.7 done on Linux + OpenBSD; completion criteria confirmed 2026-04-25 |
 | 5 | Flow Control and DATA | NOT STARTED | — | Windows, recv-side enforcement, WINDOW_UPDATE, DATA delivery |
 | 6 | Submit and Send | NOT STARTED | — | Full send queue, partial-send, response/request submit, new callbacks |
 | 7 | Security Hardening | NOT STARTED | — | Flood protection, exhaustion, limits, Content-Length, clock abstraction |
@@ -779,15 +779,15 @@ File: `tests/test_session.c`
 
 ### Phase 4 Completion Criteria
 
-- [ ] Session creates and frees with zero memory leaks (tracking allocator test)
-- [ ] Allocation failure during creation leaves no leaks
-- [ ] Partial send test passes (send_partial_offset tracking correct)
+- [x] Session creates and frees with zero memory leaks (tracking allocator test)
+- [x] Allocation failure during creation leaves no leaks
+- [x] Partial send test passes (send_partial_offset tracking correct)
 - [x] SETTINGS exchange test passes; inbound/outbound counters are distinct
 - [x] SETTINGS_HEADER_TABLE_SIZE correctly updates encoder (not decoder)
-- [ ] Client preface validation tests pass
-- [ ] End-to-end HEADERS receive test passes (callbacks fire in order)
-- [ ] All Phase 4 tests pass on Linux and OpenBSD
-- [ ] Valgrind clean; ASan/UBSan clean on both platforms
+- [x] Client preface validation tests pass
+- [x] End-to-end HEADERS receive test passes (callbacks fire in order)
+- [x] All Phase 4 tests pass on Linux and OpenBSD
+- [x] Valgrind clean; ASan/UBSan clean on both platforms
 
 ---
 

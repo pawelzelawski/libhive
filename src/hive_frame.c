@@ -7,6 +7,7 @@
 
 #include "hive_frame.h"
 #include "hive_frame_bare.h"
+#include "hive_hpack.h"
 #include "hive_internal.h"
 #include "hive_send.h"
 
@@ -84,6 +85,38 @@ flow_control_error(hive_session_t *s)
 {
 	return session_error(
 	    s, HIVE_ERR_FLOW_CONTROL, HIVE_H2_FLOW_CONTROL_ERROR);
+}
+
+static int
+headers_callbacks_enabled(const hive_session_t *s)
+{
+	return (s->callbacks.on_begin_headers != NULL ||
+	        s->callbacks.on_header != NULL ||
+	        s->callbacks.on_headers_complete != NULL);
+}
+
+static int
+headers_decode_complete(hive_session_t *s,
+                        uint32_t stream_id,
+                        uint8_t end_stream)
+{
+	int ret;
+
+	if (!headers_callbacks_enabled(s))
+		return 0;
+
+	s->reassembly_stream_id = stream_id;
+	s->reassembly_end_stream = end_stream;
+	ret = hpack_decode_block(
+	    s, s->reassembly_buf, s->reassembly_len, 0, stream_id);
+	if (ret == HIVE_OK) {
+		s->reassembly_len = 0;
+		return 0;
+	}
+	if (ret == HIVE_ERR_COMPRESSION)
+		return session_error(
+		    s, HIVE_ERR_COMPRESSION, HIVE_H2_COMPRESSION_ERROR);
+	return protocol_error(s);
 }
 
 static int
@@ -667,6 +700,13 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				if ((s->cur_frame.flags &
 				     HIVE_FLAG_END_HEADERS) != 0) {
 					s->reassembly_active = 0;
+					if (headers_decode_complete(
+					        s,
+					        s->cur_frame.stream_id,
+					        (uint8_t)((s->cur_frame.flags &
+					                   HIVE_FLAG_END_STREAM) !=
+					                  0)) != 0)
+						return -1;
 					if (s->pad_remaining > 0) {
 						s->recv_state =
 						    RECV_HEADERS_PAD;
@@ -729,6 +769,12 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				if ((s->cur_frame.flags &
 				     HIVE_FLAG_END_HEADERS) != 0) {
 					s->reassembly_active = 0;
+					if (s->reassembly_type == 0 &&
+					    headers_decode_complete(
+					        s,
+					        s->reassembly_stream_id,
+					        s->reassembly_end_stream) != 0)
+						return -1;
 				}
 				s->recv_state = RECV_FRAME_HEADER;
 			}

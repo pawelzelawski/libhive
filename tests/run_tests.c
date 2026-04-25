@@ -134,6 +134,7 @@ int test_stream_hash_collision(void);
 int test_stream_free_stack(void);
 int test_stream_compaction(void);
 int test_recv_headers_opens_new_stream(void);
+int test_recv_get_request_headers(void);
 int test_stream_id_monotonicity(void);
 int test_settings_recv_and_ack(void);
 int test_settings_recv_ack(void);
@@ -174,6 +175,7 @@ main(void)
 	RUN(stream_free_stack);
 	RUN(stream_compaction);
 	RUN(recv_headers_opens_new_stream);
+	RUN(recv_get_request_headers);
 	RUN(stream_id_monotonicity);
 	RUN(settings_recv_and_ack);
 	RUN(settings_recv_ack);

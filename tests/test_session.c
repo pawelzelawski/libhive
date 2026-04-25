@@ -55,6 +55,7 @@ int test_stream_hash_collision(void);
 int test_stream_free_stack(void);
 int test_stream_compaction(void);
 int test_recv_headers_opens_new_stream(void);
+int test_recv_get_request_headers(void);
 int test_stream_id_monotonicity(void);
 int test_settings_recv_and_ack(void);
 int test_settings_recv_ack(void);
@@ -162,6 +163,23 @@ typedef struct {
 	int settings_ack_count;
 } settings_capture_t;
 
+typedef struct {
+	int begin_count;
+	int header_count;
+	int complete_count;
+	int seq;
+	int begin_seq;
+	int first_header_seq;
+	int last_header_seq;
+	int complete_seq;
+	uint32_t stream_id;
+	uint8_t headers_complete_flags;
+	int saw_method;
+	int saw_scheme;
+	int saw_path;
+	int saw_authority;
+} headers_capture_t;
+
 static int
 alloc_should_fail(alloc_track_t *st)
 {
@@ -264,6 +282,79 @@ on_settings_ack_capture(hive_session_t *session, void *user_data)
 	(void)session;
 	cap = user_data;
 	cap->settings_ack_count++;
+	return HIVE_OK;
+}
+
+static int
+on_begin_headers_capture(hive_session_t *session,
+    uint32_t stream_id,
+    void *user_data)
+{
+	headers_capture_t *cap;
+
+	(void)session;
+	cap = user_data;
+	cap->begin_count++;
+	cap->stream_id = stream_id;
+	cap->begin_seq = ++cap->seq;
+	return HIVE_OK;
+}
+
+static int
+on_header_capture(hive_session_t *session,
+    uint32_t stream_id,
+    hive_buf_t *name,
+    hive_buf_t *value,
+    uint8_t flags,
+    void *user_data)
+{
+	headers_capture_t *cap;
+
+	(void)session;
+	(void)flags;
+	cap = user_data;
+	ASSERT(name != NULL);
+	ASSERT(value != NULL);
+	ASSERT((name->flags & HIVE_BUF_VALID) != 0u);
+	ASSERT((value->flags & HIVE_BUF_VALID) != 0u);
+
+	if (cap->first_header_seq == 0)
+		cap->first_header_seq = cap->seq + 1;
+	cap->last_header_seq = ++cap->seq;
+	cap->header_count++;
+	cap->stream_id = stream_id;
+
+	if (name->len == 7u && memcmp(name->data, ":method", 7u) == 0 &&
+	    value->len == 3u && memcmp(value->data, "GET", 3u) == 0)
+		cap->saw_method = 1;
+	if (name->len == 7u && memcmp(name->data, ":scheme", 7u) == 0 &&
+	    value->len == 4u && memcmp(value->data, "http", 4u) == 0)
+		cap->saw_scheme = 1;
+	if (name->len == 5u && memcmp(name->data, ":path", 5u) == 0 &&
+	    value->len == 1u && memcmp(value->data, "/", 1u) == 0)
+		cap->saw_path = 1;
+	if (name->len == 10u && memcmp(name->data, ":authority", 10u) == 0 &&
+	    value->len == 15u &&
+	    memcmp(value->data, "www.example.com", 15u) == 0)
+		cap->saw_authority = 1;
+
+	return HIVE_OK;
+}
+
+static int
+on_headers_complete_capture(hive_session_t *session,
+    uint32_t stream_id,
+    uint8_t flags,
+    void *user_data)
+{
+	headers_capture_t *cap;
+
+	(void)session;
+	cap = user_data;
+	cap->complete_count++;
+	cap->stream_id = stream_id;
+	cap->headers_complete_flags = flags;
+	cap->complete_seq = ++cap->seq;
 	return HIVE_OK;
 }
 
@@ -1131,6 +1222,63 @@ test_recv_headers_opens_new_stream(void)
 	ASSERT(s->stream_open_count == 1u);
 	ASSERT(s->peer_stream_open_count == 1u);
 	ASSERT(s->last_stream_id_remote == 1u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_recv_get_request_headers(void)
+{
+	hive_callbacks_t cb;
+	headers_capture_t cap;
+	hive_session_t *s;
+	uint8_t frame[29];
+	uint8_t hpack_get[20];
+
+	memset(&cb, 0, sizeof(cb));
+	memset(&cap, 0, sizeof(cap));
+	cb.send = send_cb_full;
+	cb.on_begin_headers = on_begin_headers_capture;
+	cb.on_header = on_header_capture;
+	cb.on_headers_complete = on_headers_complete_capture;
+
+	s = hive_session_server_new(NULL, NULL, &cb, &cap);
+	ASSERT(s != NULL);
+
+	/* Test only HEADERS processing path; skip client preface setup. */
+	s->recv_state = RECV_FRAME_HEADER;
+	s->preface_count = 0;
+
+	/* RFC 7541 C.3 request block: :method GET, :scheme http,
+	 * :path /, :authority www.example.com. */
+	hpack_get[0] = 0x82;
+	hpack_get[1] = 0x86;
+	hpack_get[2] = 0x84;
+	hpack_get[3] = 0x41;
+	hpack_get[4] = 0x0f;
+	memcpy(hpack_get + 5, "www.example.com", 15u);
+
+	frame_hdr_write_at(frame,
+	                  sizeof(hpack_get),
+	                  HIVE_FRAME_HEADERS,
+	                  HIVE_FLAG_END_HEADERS | HIVE_FLAG_END_STREAM,
+	                  1u);
+	memcpy(frame + 9, hpack_get, sizeof(hpack_get));
+
+	ASSERT(hive_session_recv(s, frame, sizeof(frame)) == (ssize_t)sizeof(frame));
+	ASSERT(stream_lookup(s, 1u) != NULL);
+	ASSERT(cap.begin_count == 1);
+	ASSERT(cap.header_count == 4);
+	ASSERT(cap.complete_count == 1);
+	ASSERT(cap.begin_seq < cap.first_header_seq);
+	ASSERT(cap.last_header_seq < cap.complete_seq);
+	ASSERT(cap.stream_id == 1u);
+	ASSERT(cap.headers_complete_flags == 1u);
+	ASSERT(cap.saw_method == 1);
+	ASSERT(cap.saw_scheme == 1);
+	ASSERT(cap.saw_path == 1);
+	ASSERT(cap.saw_authority == 1);
 
 	hive_session_free(s);
 	return 1;
