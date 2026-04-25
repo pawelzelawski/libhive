@@ -83,6 +83,31 @@ flow_control_error(hive_session_t *s)
 	    s, HIVE_ERR_FLOW_CONTROL, HIVE_H2_FLOW_CONTROL_ERROR);
 }
 
+static void
+u32be_write(uint8_t *p, uint32_t v)
+{
+	p[0] = (uint8_t)((v >> 24) & 0xffu);
+	p[1] = (uint8_t)((v >> 16) & 0xffu);
+	p[2] = (uint8_t)((v >> 8) & 0xffu);
+	p[3] = (uint8_t)(v & 0xffu);
+}
+
+static int
+stream_error(hive_session_t *s,
+             uint32_t stream_id,
+             int hive_err,
+             uint32_t h2_err)
+{
+	uint8_t payload[4];
+
+	u32be_write(payload, h2_err);
+	send_queue_append_ctrl(
+	    s, HIVE_FRAME_RST_STREAM, 0u, stream_id, payload, 4u);
+	s->last_err = hive_err;
+	s->last_h2_err = h2_err;
+	return 0;
+}
+
 static int
 headers_callbacks_enabled(const hive_session_t *s)
 {
@@ -925,7 +950,6 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			break;
 
 		case RECV_RST_STREAM_PAYLOAD:
-		case RECV_WINDOW_UPDATE_PAYLOAD:
 			while (s->payload_remaining > 0 && consumed < len &&
 			       s->ctrl_staging_count < 4) {
 				s->ctrl_staging[s->ctrl_staging_count++] =
@@ -934,6 +958,78 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			}
 			if (s->payload_remaining == 0) {
 				s->ctrl_staging_count = 0;
+				s->recv_state = RECV_FRAME_HEADER;
+			}
+			break;
+
+		case RECV_WINDOW_UPDATE_PAYLOAD:
+			while (s->payload_remaining > 0 && consumed < len &&
+			       s->ctrl_staging_count < 4) {
+				s->ctrl_staging[s->ctrl_staging_count++] =
+				    data[consumed++];
+				s->payload_remaining--;
+			}
+			if (s->payload_remaining == 0) {
+				hive_stream_t *st;
+				uint32_t increment;
+				int64_t new_window;
+
+				increment =
+				    u32be(s->ctrl_staging) & 0x7fffffffU;
+				s->ctrl_staging_count = 0;
+
+				if (increment == 0) {
+					if (s->cur_frame.stream_id == 0)
+						return protocol_error(s);
+					(void)stream_error(
+					    s,
+					    s->cur_frame.stream_id,
+					    HIVE_ERR_PROTOCOL,
+					    HIVE_H2_PROTOCOL_ERROR);
+					s->recv_state = RECV_FRAME_HEADER;
+					break;
+				}
+
+				if (s->cur_frame.stream_id == 0) {
+					/* SECURITY: Connection-level send
+					 * window is bounded to signed 31-bit
+					 * range. Overflow is
+					 * FLOW_CONTROL_ERROR. */
+					new_window = (int64_t)s->send_window +
+					             (int64_t)increment;
+					if (new_window > 0x7fffffffLL)
+						return flow_control_error(s);
+					s->send_window = (int32_t)new_window;
+					s->recv_state = RECV_FRAME_HEADER;
+					break;
+				}
+
+				st = NULL;
+				if (s->stream_hash != NULL &&
+				    s->stream_slots != NULL)
+					st = stream_lookup(
+					    s, s->cur_frame.stream_id);
+				if (st != NULL) {
+					/* SECURITY: Stream-level send window is
+					 * bounded to signed 31-bit range.
+					 * Overflow is FLOW_CONTROL_ERROR and
+					 * must stay stream-scoped (RST_STREAM).
+					 */
+					new_window = (int64_t)st->send_window +
+					             (int64_t)increment;
+					if (new_window > 0x7fffffffLL) {
+						(void)stream_error(
+						    s,
+						    s->cur_frame.stream_id,
+						    HIVE_ERR_FLOW_CONTROL,
+						    HIVE_H2_FLOW_CONTROL_ERROR);
+						s->recv_state =
+						    RECV_FRAME_HEADER;
+						break;
+					}
+					st->send_window = (int32_t)new_window;
+				}
+
 				s->recv_state = RECV_FRAME_HEADER;
 			}
 			break;

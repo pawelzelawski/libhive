@@ -93,7 +93,8 @@ TEST_SRC = tests/run_tests.c \
 	   tests/test_frame.c \
 	   tests/test_hpack.c \
            tests/test_compat.c \
-           tests/test_session.c
+	   tests/test_session.c \
+	   tests/test_flow.c
 # --- Install paths ----------------------------------------------------------
 PREFIX     ?= /usr/local
 LIBDIR     ?= $(PREFIX)/lib

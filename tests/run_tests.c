@@ -150,6 +150,13 @@ int test_server_preface_invalid(void);
 int test_client_preface_first_frame_not_settings(void);
 int test_client_preface_settings_with_ack(void);
 
+/* --- test_flow.c ---------------------------------------------------------- */
+int test_window_update_connection(void);
+int test_window_update_stream(void);
+int test_window_update_zero_increment_connection(void);
+int test_window_update_zero_increment_stream(void);
+int test_window_update_overflow(void);
+
 int
 main(void)
 {
@@ -190,6 +197,13 @@ main(void)
 	RUN(server_preface_invalid);
 	RUN(client_preface_first_frame_not_settings);
 	RUN(client_preface_settings_with_ack);
+
+	/* Phase 5.1 — WINDOW_UPDATE receive */
+	RUN(window_update_connection);
+	RUN(window_update_stream);
+	RUN(window_update_zero_increment_connection);
+	RUN(window_update_zero_increment_stream);
+	RUN(window_update_overflow);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);
