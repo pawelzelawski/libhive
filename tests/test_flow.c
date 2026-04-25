@@ -24,6 +24,10 @@ int test_send_window_blocks_data(void);
 int test_send_max_len_respects_remote_max_frame_size(void);
 int test_want_write_pending_data_source(void);
 int test_want_write_blocked_by_connection_window(void);
+int test_data_recv_idle_stream_connection_error(void);
+int test_window_update_idle_stream_connection_error(void);
+int test_window_update_closed_stream_ignored(void);
+int test_window_update_coalescing_overflow_no_queue(void);
 
 typedef struct {
 	const uint8_t *buf_start;
@@ -627,6 +631,104 @@ test_want_write_blocked_by_connection_window(void)
 	ASSERT(s->send_partial == 0);
 
 	ASSERT(hive_session_want_write(s) == 0);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_data_recv_idle_stream_connection_error(void)
+{
+	hive_session_t *s;
+	uint8_t frame[32];
+	const uint8_t payload[] = {0x41};
+	size_t n;
+
+	s = new_server_recv_session();
+
+	n = build_data_frame(frame, 1u, 0u, payload, 1u);
+	ASSERT(hive_session_recv(s, frame, n) == -1);
+	ASSERT(s->closed == 1);
+	ASSERT(s->last_err == HIVE_ERR_PROTOCOL);
+	ASSERT(s->last_h2_err == HIVE_H2_PROTOCOL_ERROR);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_window_update_idle_stream_connection_error(void)
+{
+	hive_session_t *s;
+	uint8_t frame[13];
+	size_t n;
+
+	s = new_server_recv_session();
+
+	n = build_window_update_frame(frame, 1u, 1u);
+	ASSERT(hive_session_recv(s, frame, n) == -1);
+	ASSERT(s->closed == 1);
+	ASSERT(s->last_err == HIVE_ERR_PROTOCOL);
+	ASSERT(s->last_h2_err == HIVE_H2_PROTOCOL_ERROR);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_window_update_closed_stream_ignored(void)
+{
+	hive_session_t *s;
+	hive_stream_t *st;
+	uint8_t frame[13];
+	size_t n;
+	int32_t before;
+
+	s = new_server_recv_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+
+	/* Mark stream 1 as previously peer-opened and now closed. */
+	s->last_stream_id_remote = 1u;
+	stream_close(s, st);
+	ASSERT(stream_lookup(s, 1u) == NULL);
+
+	before = s->send_window;
+	n = build_window_update_frame(frame, 1u, 1024u);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(s->closed == 0);
+	ASSERT(s->send_window == before);
+	ASSERT(s->send_iov_count == 0);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_window_update_coalescing_overflow_no_queue(void)
+{
+	hive_session_t *s;
+	hive_stream_t *st;
+	uint8_t frame[32];
+	const uint8_t payload[] = {0x42};
+	size_t n;
+
+	s = new_server_recv_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+
+	/* Force stream-level coalescing overflow on restore path. */
+	st->recv_window = 1500000000;
+	st->recv_consumed = 800000000u;
+
+	n = build_data_frame(frame, 1u, 0u, payload, 1u);
+	ASSERT(hive_session_recv(s, frame, n) == -1);
+	ASSERT(s->closed == 1);
+	ASSERT(s->last_err == HIVE_ERR_FLOW_CONTROL);
+	ASSERT(s->last_h2_err == HIVE_H2_FLOW_CONTROL_ERROR);
+	ASSERT(s->send_iov_count == 0);
 
 	hive_session_free(s);
 	return 1;

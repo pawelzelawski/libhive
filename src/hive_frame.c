@@ -83,6 +83,22 @@ flow_control_error(hive_session_t *s)
 	    s, HIVE_ERR_FLOW_CONTROL, HIVE_H2_FLOW_CONTROL_ERROR);
 }
 
+static int
+stream_is_locally_initiated(const hive_session_t *s, uint32_t stream_id)
+{
+	if (s->role == HIVE_ROLE_SERVER)
+		return ((stream_id & 1u) == 0u);
+	return ((stream_id & 1u) != 0u);
+}
+
+static int
+stream_was_idle(const hive_session_t *s, uint32_t stream_id)
+{
+	if (stream_is_locally_initiated(s, stream_id))
+		return (stream_id > s->last_stream_id_local);
+	return (stream_id > s->last_stream_id_remote);
+}
+
 static void
 u32be_write(uint8_t *p, uint32_t v)
 {
@@ -607,13 +623,109 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 
 		case RECV_DATA_PAYLOAD: {
 			hive_stream_t *st;
+			int have_stream_state;
 			uint32_t increment;
 			int64_t restored;
 			uint8_t wu_payload[4];
 
 			st = NULL;
-			if (s->stream_hash != NULL && s->stream_slots != NULL)
+			have_stream_state =
+			    (s->stream_hash != NULL && s->stream_slots != NULL);
+			if (have_stream_state)
 				st = stream_lookup(s, s->cur_frame.stream_id);
+
+			if (have_stream_state && st == NULL) {
+				if (stream_was_idle(s, s->cur_frame.stream_id))
+					return protocol_error(s);
+				if (s->fc_accounted == 0) {
+					if ((int64_t)s->cur_frame.length >
+					    (int64_t)s->recv_window)
+						return flow_control_error(s);
+					s->recv_window -=
+					    (int32_t)s->cur_frame.length;
+					s->recv_consumed += s->cur_frame.length;
+					s->fc_accounted = 1;
+					if (s->recv_consumed >
+					    ((uint32_t)s->recv_window / 2u)) {
+						increment = s->recv_consumed;
+						restored =
+						    (int64_t)s->recv_window +
+						    (int64_t)increment;
+						if (restored > 0x7fffffffLL)
+							return flow_control_error(
+							    s);
+						u32be_write(wu_payload,
+						            increment);
+						send_queue_append_ctrl(
+						    s,
+						    HIVE_FRAME_WINDOW_UPDATE,
+						    0u,
+						    0u,
+						    wu_payload,
+						    4u);
+						s->recv_window =
+						    (int32_t)restored;
+						s->recv_consumed = 0;
+					}
+					(void)stream_error(
+					    s,
+					    s->cur_frame.stream_id,
+					    HIVE_ERR_PROTOCOL,
+					    HIVE_H2_STREAM_CLOSED);
+				}
+				s->recv_state = RECV_SKIP_PAYLOAD;
+				break;
+			}
+
+			if (have_stream_state &&
+			    st->state != HIVE_STREAM_OPEN &&
+			    st->state != HIVE_STREAM_HALF_CLOSED_LOCAL) {
+				uint32_t h2_err;
+
+				h2_err =
+				    (st->state == HIVE_STREAM_RESERVED_LOCAL ||
+				     st->state == HIVE_STREAM_RESERVED_REMOTE)
+				        ? HIVE_H2_PROTOCOL_ERROR
+				        : HIVE_H2_STREAM_CLOSED;
+				if (s->fc_accounted == 0) {
+					if ((int64_t)s->cur_frame.length >
+					    (int64_t)s->recv_window)
+						return flow_control_error(s);
+					s->recv_window -=
+					    (int32_t)s->cur_frame.length;
+					s->recv_consumed += s->cur_frame.length;
+					s->fc_accounted = 1;
+					if (s->recv_consumed >
+					    ((uint32_t)s->recv_window / 2u)) {
+						increment = s->recv_consumed;
+						restored =
+						    (int64_t)s->recv_window +
+						    (int64_t)increment;
+						if (restored > 0x7fffffffLL)
+							return flow_control_error(
+							    s);
+						u32be_write(wu_payload,
+						            increment);
+						send_queue_append_ctrl(
+						    s,
+						    HIVE_FRAME_WINDOW_UPDATE,
+						    0u,
+						    0u,
+						    wu_payload,
+						    4u);
+						s->recv_window =
+						    (int32_t)restored;
+						s->recv_consumed = 0;
+					}
+					(void)stream_error(
+					    s,
+					    s->cur_frame.stream_id,
+					    HIVE_ERR_PROTOCOL,
+					    h2_err);
+				}
+				s->recv_state = RECV_SKIP_PAYLOAD;
+				break;
+			}
 
 			if (s->fc_accounted == 0) {
 				/* SECURITY: receive-side flow control
@@ -621,7 +733,7 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				 * against the full frame payload length
 				 * (including padding), not per recv() chunk;
 				 * see ARCHITECTURE.md §3.3 and §8.7. */
-				if (st != NULL &&
+				if (have_stream_state &&
 				    (int64_t)s->cur_frame.length >
 				        (int64_t)st->recv_window) {
 					(void)stream_error(
@@ -638,7 +750,7 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 					return flow_control_error(s);
 				}
 
-				if (st != NULL) {
+				if (have_stream_state) {
 					st->recv_window -=
 					    (int32_t)s->cur_frame.length;
 					st->recv_consumed +=
@@ -648,10 +760,14 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				s->recv_consumed += s->cur_frame.length;
 				s->fc_accounted = 1;
 
-				if (st != NULL && st->recv_window > 0 &&
+				if (have_stream_state &&
 				    st->recv_consumed >
 				        ((uint32_t)st->recv_window / 2u)) {
 					increment = st->recv_consumed;
+					restored = (int64_t)st->recv_window +
+					           (int64_t)increment;
+					if (restored > 0x7fffffffLL)
+						return flow_control_error(s);
 					u32be_write(wu_payload, increment);
 					send_queue_append_ctrl(
 					    s,
@@ -660,18 +776,17 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 					    s->cur_frame.stream_id,
 					    wu_payload,
 					    4u);
-					restored = (int64_t)st->recv_window +
-					           (int64_t)increment;
-					if (restored > 0x7fffffffLL)
-						return flow_control_error(s);
 					st->recv_window = (int32_t)restored;
 					st->recv_consumed = 0;
 				}
 
-				if (s->recv_window > 0 &&
-				    s->recv_consumed >
-				        ((uint32_t)s->recv_window / 2u)) {
+				if (s->recv_consumed >
+				    ((uint32_t)s->recv_window / 2u)) {
 					increment = s->recv_consumed;
+					restored = (int64_t)s->recv_window +
+					           (int64_t)increment;
+					if (restored > 0x7fffffffLL)
+						return flow_control_error(s);
 					u32be_write(wu_payload, increment);
 					send_queue_append_ctrl(
 					    s,
@@ -680,10 +795,6 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 					    0u,
 					    wu_payload,
 					    4u);
-					restored = (int64_t)s->recv_window +
-					           (int64_t)increment;
-					if (restored > 0x7fffffffLL)
-						return flow_control_error(s);
 					s->recv_window = (int32_t)restored;
 					s->recv_consumed = 0;
 				}
@@ -1081,7 +1192,7 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 					    HIVE_ERR_PROTOCOL,
 					    HIVE_H2_PROTOCOL_ERROR);
 					s->recv_state = RECV_FRAME_HEADER;
-					break;
+					return (ssize_t)consumed;
 				}
 
 				if (s->cur_frame.stream_id == 0) {
@@ -1103,26 +1214,35 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				    s->stream_slots != NULL)
 					st = stream_lookup(
 					    s, s->cur_frame.stream_id);
-				if (st != NULL) {
-					/* SECURITY: Stream-level send window is
-					 * bounded to signed 31-bit range.
-					 * Overflow is FLOW_CONTROL_ERROR and
-					 * must stay stream-scoped (RST_STREAM).
-					 */
-					new_window = (int64_t)st->send_window +
-					             (int64_t)increment;
-					if (new_window > 0x7fffffffLL) {
-						(void)stream_error(
-						    s,
-						    s->cur_frame.stream_id,
-						    HIVE_ERR_FLOW_CONTROL,
-						    HIVE_H2_FLOW_CONTROL_ERROR);
-						s->recv_state =
-						    RECV_FRAME_HEADER;
-						break;
-					}
-					st->send_window = (int32_t)new_window;
+				if (s->stream_hash == NULL ||
+				    s->stream_slots == NULL) {
+					s->recv_state = RECV_FRAME_HEADER;
+					break;
 				}
+				if (st == NULL) {
+					if (stream_was_idle(
+					        s, s->cur_frame.stream_id))
+						return protocol_error(s);
+					s->recv_state = RECV_FRAME_HEADER;
+					break;
+				}
+				/* SECURITY: Stream-level send window is
+				 * bounded to signed 31-bit range.
+				 * Overflow is FLOW_CONTROL_ERROR and
+				 * must stay stream-scoped (RST_STREAM).
+				 */
+				new_window = (int64_t)st->send_window +
+				             (int64_t)increment;
+				if (new_window > 0x7fffffffLL) {
+					(void)stream_error(
+					    s,
+					    s->cur_frame.stream_id,
+					    HIVE_ERR_FLOW_CONTROL,
+					    HIVE_H2_FLOW_CONTROL_ERROR);
+					s->recv_state = RECV_FRAME_HEADER;
+					break;
+				}
+				st->send_window = (int32_t)new_window;
 
 				s->recv_state = RECV_FRAME_HEADER;
 			}
