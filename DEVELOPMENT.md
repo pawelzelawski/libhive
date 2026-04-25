@@ -855,7 +855,7 @@ task 4.0 is required for WINDOW_UPDATE queuing.)
   (outbound frame sizing uses `remote_settings.max_frame_size` — what peer advertised)
 - If `read_callback` returns 0 bytes: skip this stream, move to next
 
-**5.4 — `hive_session_want_write()` update**
+**5.4 — `hive_session_want_write()` update** ✓ DONE
 - Extends the Phase 4 implementation: also returns 1 when there are open
   streams with pending data_sources and `session->send_window > 0`
 
@@ -893,13 +893,13 @@ File: `tests/test_flow.c`
 
 ### Phase 5 Completion Criteria
 
-- [ ] Zero-copy DATA test passes (pointer is in caller's buffer)
-- [ ] Receive-side flow control enforcement tests pass (stream and connection)
-- [ ] WINDOW_UPDATE coalescing test passes; recv_window correctly restored
-- [ ] Flow control blocking test passes
-- [ ] Outbound frame sizing respects `remote_settings.max_frame_size`
-- [ ] All Phase 5 tests pass on Linux and OpenBSD
-- [ ] Valgrind clean; ASan/UBSan clean on both platforms
+- [x] Zero-copy DATA test passes (pointer is in caller's buffer)
+- [x] Receive-side flow control enforcement tests pass (stream and connection)
+- [x] WINDOW_UPDATE coalescing test passes; recv_window correctly restored
+- [x] Flow control blocking test passes
+- [x] Outbound frame sizing respects `remote_settings.max_frame_size`
+- [x] All Phase 5 tests pass on Linux and OpenBSD
+- [x] Valgrind clean; ASan/UBSan clean on both platforms
 
 ---
 
@@ -1062,8 +1062,9 @@ File: `tests/test_session.c` (extended)
 
 **Two-phase GOAWAY**:
 - `test_goaway_prepare`: call `hive_submit_goaway_prepare()`; verify GOAWAY
-  with last_stream_id=0x7FFFFFFF queued; verify new streams still accepted
-  (prepare phase doesn't close session)
+  with last_stream_id=0x7FFFFFFF queued and session still OPEN; call
+  `hive_submit_goaway_final()`; verify GOAWAY with `last_stream_id_remote`
+  queued and session GOAWAY_SENT; verify no new streams accepted
 - `test_goaway_final`: call `hive_submit_goaway_final()`; verify GOAWAY with
   `last_stream_id_remote` queued; verify no new streams accepted
 
@@ -1519,4 +1520,3 @@ for embedder use.
 | Frame decoder tool | TECH_STACK.md §7.8 | — |
 | Source file purposes | REPOSITORY_STRUCTURE.md §3 | — |
 
-REPOSITORY_STRUCTURE.md, TESTING.md

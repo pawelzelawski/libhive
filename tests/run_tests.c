@@ -163,6 +163,8 @@ int test_data_recv_exceeds_connection_window(void);
 int test_window_update_coalescing(void);
 int test_send_window_blocks_data(void);
 int test_send_max_len_respects_remote_max_frame_size(void);
+int test_want_write_pending_data_source(void);
+int test_want_write_blocked_by_connection_window(void);
 
 int
 main(void)
@@ -222,6 +224,10 @@ main(void)
 	/* Phase 5.3 — DATA send flow-control enforcement */
 	RUN(send_window_blocks_data);
 	RUN(send_max_len_respects_remote_max_frame_size);
+
+	/* Phase 5.4 — want_write with pending data sources */
+	RUN(want_write_pending_data_source);
+	RUN(want_write_blocked_by_connection_window);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);

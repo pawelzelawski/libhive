@@ -1097,10 +1097,28 @@ hive_session_want_read(hive_session_t *session)
 int
 hive_session_want_write(hive_session_t *session)
 {
+	uint32_t i;
+
 	if (session == NULL)
 		return 0;
-	return (session->send_iov_count > 0 || session->send_partial != 0) ? 1
-	                                                                   : 0;
+
+	if (session->send_iov_count > 0 || session->send_partial != 0)
+		return 1;
+
+	if (session->send_window <= 0 || session->stream_slots == NULL)
+		return 0;
+
+	for (i = 0; i < session->opt_max_concurrent_streams; i++) {
+		const hive_stream_t *st;
+
+		st = &session->stream_slots[i];
+		if (st->stream_id == 0)
+			continue;
+		if (st->data_source.read_callback != NULL)
+			return 1;
+	}
+
+	return 0;
 }
 
 int

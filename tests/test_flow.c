@@ -22,6 +22,8 @@ int test_data_recv_exceeds_connection_window(void);
 int test_window_update_coalescing(void);
 int test_send_window_blocks_data(void);
 int test_send_max_len_respects_remote_max_frame_size(void);
+int test_want_write_pending_data_source(void);
+int test_want_write_blocked_by_connection_window(void);
 
 typedef struct {
 	const uint8_t *buf_start;
@@ -577,3 +579,56 @@ test_send_max_len_respects_remote_max_frame_size(void)
 	hive_session_free(s);
 	return 1;
 }
+
+int
+test_want_write_pending_data_source(void)
+{
+	hive_session_t *s;
+	hive_stream_t *st;
+	send_read_cap_t cap;
+
+	memset(&cap, 0, sizeof(cap));
+
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+
+	st->data_source.read_callback = send_read_capture_cb;
+	st->data_source.user_data = &cap;
+	ASSERT(s->send_iov_count == 0);
+	ASSERT(s->send_partial == 0);
+	ASSERT(s->send_window > 0);
+
+	ASSERT(hive_session_want_write(s) == 1);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_want_write_blocked_by_connection_window(void)
+{
+	hive_session_t *s;
+	hive_stream_t *st;
+	send_read_cap_t cap;
+
+	memset(&cap, 0, sizeof(cap));
+
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+
+	st->data_source.read_callback = send_read_capture_cb;
+	st->data_source.user_data = &cap;
+	s->send_window = 0;
+	ASSERT(s->send_iov_count == 0);
+	ASSERT(s->send_partial == 0);
+
+	ASSERT(hive_session_want_write(s) == 0);
+
+	hive_session_free(s);
+	return 1;
+}
+
