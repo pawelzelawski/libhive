@@ -148,6 +148,7 @@ lint:
 	         --suppress=staticFunction \
 	         --suppress=variableScope \
 	         --suppress=normalCheckLevelMaxBranches \
+	         --suppress=checkLevelNormal \
 	         --suppress=unmatchedSuppression \
 	         --suppress=checkersReport \
 	         --suppress=constParameterPointer \

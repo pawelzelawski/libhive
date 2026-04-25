@@ -432,7 +432,11 @@ frame_recv_init(hive_session_t *s, hive_role_t role)
 	s->role = (uint8_t)role;
 	s->opt_max_frame_size = 16384;
 	s->opt_max_continuation_size = 65536;
+	s->local_settings.initial_window_size = 65535;
 	s->local_settings.max_frame_size = 16384;
+	s->remote_settings.initial_window_size = 65535;
+	s->send_window = 65535;
+	s->recv_window = 65535;
 	s->recv_state = RECV_FRAME_HEADER;
 }
 
@@ -507,6 +511,7 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			s->pad_remaining = 0;
 			s->pad_length_received = 0;
 			s->pad_validated = 0;
+			s->fc_accounted = 0;
 			s->ctrl_staging_count = 0;
 			s->priority_payload_len = 0;
 			if (s->reassembly_active == 0) {
@@ -600,7 +605,90 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			}
 			break;
 
-		case RECV_DATA_PAYLOAD:
+		case RECV_DATA_PAYLOAD: {
+			hive_stream_t *st;
+			uint32_t increment;
+			int64_t restored;
+			uint8_t wu_payload[4];
+
+			st = NULL;
+			if (s->stream_hash != NULL && s->stream_slots != NULL)
+				st = stream_lookup(s, s->cur_frame.stream_id);
+
+			if (s->fc_accounted == 0) {
+				/* SECURITY: receive-side flow control
+				 * enforcement is accounted once per DATA frame
+				 * against the full frame payload length
+				 * (including padding), not per recv() chunk;
+				 * see ARCHITECTURE.md §3.3 and §8.7. */
+				if (st != NULL &&
+				    (int64_t)s->cur_frame.length >
+				        (int64_t)st->recv_window) {
+					(void)stream_error(
+					    s,
+					    s->cur_frame.stream_id,
+					    HIVE_ERR_FLOW_CONTROL,
+					    HIVE_H2_FLOW_CONTROL_ERROR);
+					s->fc_accounted = 1;
+					s->recv_state = RECV_SKIP_PAYLOAD;
+					break;
+				}
+				if ((int64_t)s->cur_frame.length >
+				    (int64_t)s->recv_window) {
+					return flow_control_error(s);
+				}
+
+				if (st != NULL) {
+					st->recv_window -=
+					    (int32_t)s->cur_frame.length;
+					st->recv_consumed +=
+					    s->cur_frame.length;
+				}
+				s->recv_window -= (int32_t)s->cur_frame.length;
+				s->recv_consumed += s->cur_frame.length;
+				s->fc_accounted = 1;
+
+				if (st != NULL && st->recv_window > 0 &&
+				    st->recv_consumed >
+				        ((uint32_t)st->recv_window / 2u)) {
+					increment = st->recv_consumed;
+					u32be_write(wu_payload, increment);
+					send_queue_append_ctrl(
+					    s,
+					    HIVE_FRAME_WINDOW_UPDATE,
+					    0u,
+					    s->cur_frame.stream_id,
+					    wu_payload,
+					    4u);
+					restored = (int64_t)st->recv_window +
+					           (int64_t)increment;
+					if (restored > 0x7fffffffLL)
+						return flow_control_error(s);
+					st->recv_window = (int32_t)restored;
+					st->recv_consumed = 0;
+				}
+
+				if (s->recv_window > 0 &&
+				    s->recv_consumed >
+				        ((uint32_t)s->recv_window / 2u)) {
+					increment = s->recv_consumed;
+					u32be_write(wu_payload, increment);
+					send_queue_append_ctrl(
+					    s,
+					    HIVE_FRAME_WINDOW_UPDATE,
+					    0u,
+					    0u,
+					    wu_payload,
+					    4u);
+					restored = (int64_t)s->recv_window +
+					           (int64_t)increment;
+					if (restored > 0x7fffffffLL)
+						return flow_control_error(s);
+					s->recv_window = (int32_t)restored;
+					s->recv_consumed = 0;
+				}
+			}
+
 			if ((s->cur_frame.flags & HIVE_FLAG_PADDED) != 0 &&
 			    s->pad_length_received == 0) {
 				if (avail == 0) {
@@ -624,6 +712,11 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				n = avail;
 			}
 			if (n > 0 && s->callbacks.on_data_chunk != NULL) {
+				/* SECURITY: on_data_chunk receives a zero-copy
+				 * pointer into caller-owned input memory. Its
+				 * lifetime is only for the callback duration;
+				 * the library cannot poison caller-owned input
+				 * after return. */
 				(void)s->callbacks.on_data_chunk(
 				    s,
 				    s->cur_frame.stream_id,
@@ -642,6 +735,7 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				}
 			}
 			break;
+		}
 
 		case RECV_DATA_PAD:
 			n = s->pad_remaining;

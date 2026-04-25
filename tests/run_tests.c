@@ -156,6 +156,11 @@ int test_window_update_stream(void);
 int test_window_update_zero_increment_connection(void);
 int test_window_update_zero_increment_stream(void);
 int test_window_update_overflow(void);
+int test_data_recv_zero_copy(void);
+int test_data_recv_partial(void);
+int test_data_recv_exceeds_stream_window(void);
+int test_data_recv_exceeds_connection_window(void);
+int test_window_update_coalescing(void);
 
 int
 main(void)
@@ -204,6 +209,13 @@ main(void)
 	RUN(window_update_zero_increment_connection);
 	RUN(window_update_zero_increment_stream);
 	RUN(window_update_overflow);
+
+	/* Phase 5.2 — DATA recv-side flow control enforcement */
+	RUN(data_recv_zero_copy);
+	RUN(data_recv_partial);
+	RUN(data_recv_exceeds_stream_window);
+	RUN(data_recv_exceeds_connection_window);
+	RUN(window_update_coalescing);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);

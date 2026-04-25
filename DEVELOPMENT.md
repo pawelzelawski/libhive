@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-25
 **Current Phase**: Phase 5 — Flow Control and DATA
-**Next Task**: 5.1 — WINDOW_UPDATE receive
+**Next Task**: 5.3 — DATA send (flow control enforcement)
 
 ### Phase Summary
 
@@ -816,7 +816,7 @@ task 4.0 is required for WINDOW_UPDATE queuing.)
 
 ### Tasks
 
-**5.1 — WINDOW_UPDATE receive**
+**5.1 — WINDOW_UPDATE receive** ✓ DONE
 - In RECV_WINDOW_UPDATE_PAYLOAD: accumulate 4 bytes via `ctrl_staging`, apply to
   `session->send_window` (stream_id == 0) or `stream->send_window`
 - Validate increment > 0:
@@ -827,7 +827,7 @@ task 4.0 is required for WINDOW_UPDATE queuing.)
   - stream_id != 0: RST_STREAM FLOW_CONTROL_ERROR
 - See ARCHITECTURE.md §3.3 for exact pseudocode
 
-**5.2 — DATA receive with recv-side flow control enforcement**
+**5.2 — DATA receive with recv-side flow control enforcement** ✓ DONE
 - In RECV_DATA_PAYLOAD, before firing `on_data_chunk`:
   ```
   SECURITY: receive-side flow control enforcement
