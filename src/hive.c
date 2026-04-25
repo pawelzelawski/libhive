@@ -738,7 +738,7 @@ session_prealloc(hive_session_t *s)
 
 	s->enc_table.ring = (hpack_entry_t **)s->mem.calloc(
 	    hpack_ring_cap_for(s->remote_settings.header_table_size),
-	    sizeof(*s->enc_table.ring),
+	    sizeof(hpack_entry_t *),
 	    s->mem.ctx);
 	if (s->enc_table.ring == NULL)
 		goto cleanup;
@@ -750,7 +750,7 @@ session_prealloc(hive_session_t *s)
 
 	s->dec_table.ring = (hpack_entry_t **)s->mem.calloc(
 	    hpack_ring_cap_for(s->local_settings.header_table_size),
-	    sizeof(*s->dec_table.ring),
+	    sizeof(hpack_entry_t *),
 	    s->mem.ctx);
 	if (s->dec_table.ring == NULL)
 		goto cleanup;
