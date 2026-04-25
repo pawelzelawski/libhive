@@ -50,6 +50,12 @@ int test_session_new_custom_alloc(void);
 int test_session_free_all_allocations(void);
 int test_session_new_alloc_failure(void);
 int test_options_set_max_concurrent(void);
+int test_stream_open_lookup_close(void);
+int test_stream_hash_collision(void);
+int test_stream_free_stack(void);
+int test_stream_compaction(void);
+int test_recv_headers_opens_new_stream(void);
+int test_stream_id_monotonicity(void);
 
 /* ------------------------------------------------------------------ */
 /* Shared test infrastructure                                          */
@@ -869,6 +875,208 @@ test_options_set_max_concurrent(void)
 
 	hive_session_free(s);
 	hive_options_free(opt);
+	return 1;
+}
+
+int
+test_stream_open_lookup_close(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	hive_stream_t *st;
+	int ret;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+
+	s = hive_session_server_new(NULL, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+
+	ret = stream_open(s, 1u, HIVE_STREAM_OPEN);
+	ASSERT(ret == HIVE_OK);
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+	ASSERT(st->stream_id == 1u);
+	ASSERT(st->state == HIVE_STREAM_OPEN);
+
+	stream_close(s, st);
+	ASSERT(stream_lookup(s, 1u) == NULL);
+	ASSERT(s->stream_open_count == 0u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_stream_hash_collision(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	hive_stream_t *a;
+	hive_stream_t *b;
+	uint32_t id1;
+	uint32_t id2;
+	uint32_t x;
+	uint32_t y;
+	int found;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+	s = hive_session_server_new(NULL, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+
+	found = 0;
+	id1 = 1u;
+	id2 = 3u;
+	for (x = 1u; x < 4096u && !found; x += 2u) {
+		for (y = x + 2u; y < 4096u; y += 2u) {
+			if (stream_hash_fn(x, s->stream_hash_mask) ==
+			    stream_hash_fn(y, s->stream_hash_mask)) {
+				id1 = x;
+				id2 = y;
+				found = 1;
+				break;
+			}
+		}
+	}
+	ASSERT(found == 1);
+
+	ASSERT(stream_open(s, id1, HIVE_STREAM_OPEN) == HIVE_OK);
+	ASSERT(stream_open(s, id2, HIVE_STREAM_OPEN) == HIVE_OK);
+	a = stream_lookup(s, id1);
+	b = stream_lookup(s, id2);
+	ASSERT(a != NULL);
+	ASSERT(b != NULL);
+	ASSERT(a->stream_id == id1);
+	ASSERT(b->stream_id == id2);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_stream_free_stack(void)
+{
+	hive_callbacks_t cb;
+	hive_options_t *opt;
+	hive_session_t *s;
+	hive_stream_t *st;
+	int ret;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+	opt = hive_options_new();
+	ASSERT(opt != NULL);
+	ASSERT(hive_options_set_max_concurrent_streams(opt, 2u) == HIVE_OK);
+
+	s = hive_session_server_new(NULL, opt, &cb, NULL);
+	ASSERT(s != NULL);
+
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+	ASSERT(stream_open(s, 3u, HIVE_STREAM_OPEN) == HIVE_OK);
+	ASSERT(s->stream_open_count == 2u);
+	ASSERT(s->stream_free_top == 0u);
+
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+	stream_close(s, st);
+	ASSERT(s->stream_open_count == 1u);
+	ASSERT(s->stream_free_top == 1u);
+
+	ret = stream_open(s, 5u, HIVE_STREAM_OPEN);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(s->stream_open_count == 2u);
+	ASSERT(stream_lookup(s, 5u) != NULL);
+
+	hive_session_free(s);
+	hive_options_free(opt);
+	return 1;
+}
+
+int
+test_stream_compaction(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	hive_stream_t *st;
+	uint32_t sid;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+	s = hive_session_server_new(NULL, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+
+	for (sid = 1u; sid <= 129u; sid += 2u)
+		ASSERT(stream_open(s, sid, HIVE_STREAM_OPEN) == HIVE_OK);
+
+	for (sid = 1u; sid <= 129u; sid += 2u) {
+		st = stream_lookup(s, sid);
+		ASSERT(st != NULL);
+		stream_close(s, st);
+	}
+
+	ASSERT(s->stream_open_count == 0u);
+	ASSERT(s->tombstone_count == 0u);
+	ASSERT(s->closes_since_compact == 0u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_recv_headers_opens_new_stream(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	uint8_t frame[9];
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+	s = hive_session_server_new(NULL, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+
+	s->recv_state = RECV_FRAME_HEADER;
+	s->preface_count = 0;
+
+	frame_hdr_write_at(frame, 0u, HIVE_FRAME_HEADERS, HIVE_FLAG_END_HEADERS,
+	    1u);
+	ASSERT(hive_session_recv(s, frame, sizeof(frame)) == (ssize_t)sizeof(frame));
+	ASSERT(stream_lookup(s, 1u) != NULL);
+	ASSERT(s->stream_open_count == 1u);
+	ASSERT(s->peer_stream_open_count == 1u);
+	ASSERT(s->last_stream_id_remote == 1u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_stream_id_monotonicity(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	uint8_t frame[9];
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+	s = hive_session_server_new(NULL, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+
+	s->recv_state = RECV_FRAME_HEADER;
+	s->preface_count = 0;
+
+	frame_hdr_write_at(frame, 0u, HIVE_FRAME_HEADERS, HIVE_FLAG_END_HEADERS,
+	    5u);
+	ASSERT(hive_session_recv(s, frame, sizeof(frame)) == (ssize_t)sizeof(frame));
+	ASSERT(stream_lookup(s, 5u) != NULL);
+
+	frame_hdr_write_at(frame, 0u, HIVE_FRAME_HEADERS, HIVE_FLAG_END_HEADERS,
+	    3u);
+	ASSERT(hive_session_recv(s, frame, sizeof(frame)) == -1);
+	ASSERT(s->last_err == HIVE_ERR_PROTOCOL);
+	ASSERT(s->last_h2_err == HIVE_H2_PROTOCOL_ERROR);
+
+	hive_session_free(s);
 	return 1;
 }
 

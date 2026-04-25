@@ -79,6 +79,39 @@ protocol_error(hive_session_t *s)
 }
 
 static int
+headers_open_new_stream(hive_session_t *s, uint32_t stream_id)
+{
+	int expect_peer_odd;
+	int ret;
+
+	if (s->stream_hash == NULL || s->stream_slots == NULL ||
+	    s->stream_free_stack == NULL)
+		return 0;
+
+	if (stream_lookup(s, stream_id) != NULL)
+		return 0;
+
+	expect_peer_odd = (s->role == HIVE_ROLE_SERVER) ? 1 : 0;
+	/* SECURITY: New peer-initiated streams must match role parity and be
+	 * strictly monotonic. See ARCHITECTURE.md §3.4. */
+	if (((stream_id & 1u) != 0u) != expect_peer_odd)
+		return protocol_error(s);
+	if (stream_id <= s->last_stream_id_remote)
+		return protocol_error(s);
+
+	if (s->peer_stream_open_count >= s->opt_max_concurrent_streams)
+		return protocol_error(s);
+	if (s->stream_open_count >= s->opt_max_concurrent_streams)
+		return protocol_error(s);
+
+	ret = stream_open(s, stream_id, HIVE_STREAM_OPEN);
+	if (ret != HIVE_OK)
+		return protocol_error(s);
+	s->last_stream_id_remote = stream_id;
+	return 0;
+}
+
+static int
 frame_header_validate(hive_session_t *s)
 {
 	const frame_hdr_t *f = &s->cur_frame;
@@ -333,6 +366,12 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 
 			if (frame_header_validate(s) != 0) {
 				return -1;
+			}
+
+			if (s->cur_frame.type == HIVE_FRAME_HEADERS) {
+				if (headers_open_new_stream(
+				        s, s->cur_frame.stream_id) != 0)
+					return -1;
 			}
 
 			if (s->cur_frame.type == HIVE_FRAME_HEADERS &&

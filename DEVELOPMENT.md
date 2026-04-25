@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-25
 **Current Phase**: Phase 4 — Session Core
-**Next Task**: 4.4 — Stream table
+**Next Task**: 4.5 — SETTINGS receive and apply
 
 ### Phase Summary
 
@@ -13,7 +13,7 @@
 | 1 | Foundation | DONE | 16/16 (Phase 1 slice) | Tasks 1.1–1.5 done on Linux + OpenBSD |
 | 2 | Frame Parser | DONE | 54/54 (Phase 2 slice) | Tasks 2.1–2.5 done on Linux + OpenBSD; completion criteria confirmed; audit fixes applied 2026-04-23 |
 | 3 | HPACK | DONE | 34/34 (Phase 3 slice) | Tasks 3.1-3.7 done on Linux + OpenBSD; Phase 3 completion criteria confirmed 2026-04-23 |
-| 4 | Session Core | IN PROGRESS | 12/? (Phase 4 slice so far) | Tasks 4.0–4.3 done on Linux + OpenBSD; next: 4.4 Stream table |
+| 4 | Session Core | IN PROGRESS | 18/? (Phase 4 slice so far) | Tasks 4.0–4.4 and 4.7 done on Linux + OpenBSD; next: 4.5 SETTINGS receive and apply |
 | 5 | Flow Control and DATA | NOT STARTED | — | Windows, recv-side enforcement, WINDOW_UPDATE, DATA delivery |
 | 6 | Submit and Send | NOT STARTED | — | Full send queue, partial-send, response/request submit, new callbacks |
 | 7 | Security Hardening | NOT STARTED | — | Flood protection, exhaustion, limits, Content-Length, clock abstraction |
@@ -652,7 +652,7 @@ without DATA frames (those come in Phase 5).
 - `hive_session_free()`: free all sub-buffers via session allocator in
   reverse allocation order, then free the session struct itself
 
-**4.4 — Stream table**
+**4.4 — Stream table** ✓ DONE
 - Implement `stream_open()`, `stream_lookup()`, `stream_close()` per
   ARCHITECTURE.md §5.5 — `stream_close()` increments both `tombstone_count`
   and `closes_since_compact`
@@ -686,7 +686,7 @@ without DATA frames (those come in Phase 5).
 - Client role: state = RECV_SERVER_PREFACE; first frame must be a SETTINGS
   frame with ACK flag clear; anything else → `session_error()` PROTOCOL_ERROR
 
-**4.7 — New stream creation from HEADERS**
+**4.7 — New stream creation from HEADERS** ✓ DONE
 - In RECV_FRAME_HEADER, when a HEADERS frame opens a new stream:
   validate ID parity, monotonicity, open count per ARCHITECTURE.md §3.4;
   call `stream_open()` with initial state OPEN

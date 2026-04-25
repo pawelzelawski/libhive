@@ -439,6 +439,203 @@ session_send_buf_cap(uint32_t opt_max_continuation_size)
 	return (size_t)opt_max_continuation_size + (size_t)frames * 9u + 2048u;
 }
 
+static int
+stream_is_peer_initiated(const hive_session_t *s, uint32_t stream_id)
+{
+	if (s->role == HIVE_ROLE_SERVER)
+		return (stream_id & 1u) != 0u;
+	return (stream_id & 1u) == 0u;
+}
+
+uint32_t
+stream_hash_fn(uint32_t stream_id, uint32_t hash_mask)
+{
+	uint32_t bits;
+
+	bits = (uint32_t)__builtin_popcount(hash_mask);
+	return (stream_id * 2654435761u) >> (32u - bits);
+}
+
+static uint32_t
+stream_free_pop(hive_session_t *s)
+{
+	if (s->stream_free_top == 0)
+		return STREAM_HASH_EMPTY;
+	s->stream_free_top--;
+	return s->stream_free_stack[s->stream_free_top];
+}
+
+static void
+stream_free_push(hive_session_t *s, uint32_t slot_index)
+{
+	s->stream_free_stack[s->stream_free_top] = slot_index;
+	s->stream_free_top++;
+}
+
+static void
+stream_hash_compact(hive_session_t *s)
+{
+	uint32_t i;
+	uint32_t hash_table_size;
+
+	hash_table_size = s->stream_hash_mask + 1u;
+	for (i = 0; i < hash_table_size; i++) {
+		s->stream_hash[i].stream_id = STREAM_HASH_EMPTY;
+		s->stream_hash[i].slot_index = 0u;
+	}
+
+	for (i = 0; i < s->opt_max_concurrent_streams; i++) {
+		const hive_stream_t *st;
+		uint32_t h;
+
+		st = &s->stream_slots[i];
+		if (st->stream_id == 0)
+			continue;
+
+		h = stream_hash_fn(st->stream_id, s->stream_hash_mask);
+		for (;;) {
+			if (s->stream_hash[h].stream_id == STREAM_HASH_EMPTY) {
+				s->stream_hash[h].stream_id = st->stream_id;
+				s->stream_hash[h].slot_index = i;
+				break;
+			}
+			h = (h + 1u) & s->stream_hash_mask;
+		}
+	}
+
+	s->tombstone_count = 0u;
+	s->closes_since_compact = 0u;
+}
+
+hive_stream_t *
+stream_lookup(hive_session_t *s, uint32_t stream_id)
+{
+	uint32_t h;
+
+	if (s == NULL || s->stream_hash == NULL || s->stream_slots == NULL)
+		return NULL;
+
+	h = stream_hash_fn(stream_id, s->stream_hash_mask);
+	for (;;) {
+		uint32_t id;
+
+		id = s->stream_hash[h].stream_id;
+		if (id == stream_id)
+			return &s->stream_slots[s->stream_hash[h].slot_index];
+		if (id == STREAM_HASH_EMPTY)
+			return NULL;
+		h = (h + 1u) & s->stream_hash_mask;
+	}
+}
+
+int
+stream_open(hive_session_t *s, uint32_t stream_id, uint8_t state)
+{
+	hive_stream_t *st;
+	uint32_t slot_index;
+	uint32_t h;
+	uint32_t insert_h;
+
+	if (s == NULL || s->stream_hash == NULL || s->stream_slots == NULL ||
+	    s->stream_free_stack == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (stream_lookup(s, stream_id) != NULL)
+		return HIVE_ERR_PROTOCOL;
+
+	slot_index = stream_free_pop(s);
+	if (slot_index == STREAM_HASH_EMPTY)
+		return HIVE_ERR_REFUSED_STREAM;
+
+	st = &s->stream_slots[slot_index];
+	memset(st, 0, sizeof(*st));
+	st->stream_id = stream_id;
+	st->state = state;
+	st->send_window = (int32_t)s->remote_settings.initial_window_size;
+	st->recv_window = (int32_t)s->local_settings.initial_window_size;
+	st->content_length_expected = -1;
+
+	h = stream_hash_fn(stream_id, s->stream_hash_mask);
+	insert_h = STREAM_HASH_EMPTY;
+	for (;;) {
+		uint32_t id;
+
+		id = s->stream_hash[h].stream_id;
+		if (id == STREAM_HASH_EMPTY) {
+			if (insert_h == STREAM_HASH_EMPTY)
+				insert_h = h;
+			break;
+		}
+		if (id == STREAM_HASH_TOMBSTONE &&
+		    insert_h == STREAM_HASH_EMPTY)
+			insert_h = h;
+		h = (h + 1u) & s->stream_hash_mask;
+	}
+
+	if (insert_h == STREAM_HASH_EMPTY) {
+		stream_free_push(s, slot_index);
+		memset(st, 0, sizeof(*st));
+		return HIVE_ERR_REFUSED_STREAM;
+	}
+
+	if (s->stream_hash[insert_h].stream_id == STREAM_HASH_TOMBSTONE &&
+	    s->tombstone_count > 0u)
+		s->tombstone_count--;
+
+	s->stream_hash[insert_h].stream_id = stream_id;
+	s->stream_hash[insert_h].slot_index = slot_index;
+	s->stream_open_count++;
+	if (stream_is_peer_initiated(s, stream_id))
+		s->peer_stream_open_count++;
+
+	return HIVE_OK;
+}
+
+void
+stream_close(hive_session_t *s, hive_stream_t *stream)
+{
+	uint32_t stream_id;
+	uint32_t h;
+	uint32_t slot_index;
+	uint32_t hash_table_size;
+
+	if (s == NULL || stream == NULL || stream->stream_id == 0 ||
+	    s->stream_hash == NULL || s->stream_slots == NULL ||
+	    s->stream_free_stack == NULL)
+		return;
+
+	stream_id = stream->stream_id;
+	h = stream_hash_fn(stream_id, s->stream_hash_mask);
+	for (;;) {
+		if (s->stream_hash[h].stream_id == stream_id)
+			break;
+		if (s->stream_hash[h].stream_id == STREAM_HASH_EMPTY)
+			return;
+		h = (h + 1u) & s->stream_hash_mask;
+	}
+
+	slot_index = s->stream_hash[h].slot_index;
+	s->stream_hash[h].stream_id = STREAM_HASH_TOMBSTONE;
+	s->stream_hash[h].slot_index = 0u;
+	memset(&s->stream_slots[slot_index],
+	       0,
+	       sizeof(s->stream_slots[slot_index]));
+	stream_free_push(s, slot_index);
+
+	if (s->stream_open_count > 0u)
+		s->stream_open_count--;
+	if (stream_is_peer_initiated(s, stream_id) &&
+	    s->peer_stream_open_count > 0u)
+		s->peer_stream_open_count--;
+
+	s->tombstone_count++;
+	s->closes_since_compact++;
+
+	hash_table_size = s->stream_hash_mask + 1u;
+	if (s->tombstone_count > hash_table_size / 4u &&
+	    s->closes_since_compact >= 64u)
+		stream_hash_compact(s);
+}
+
 static void
 session_prealloc_free(hive_session_t *s)
 {

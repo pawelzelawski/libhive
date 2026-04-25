@@ -129,6 +129,12 @@ int test_session_new_custom_alloc(void);
 int test_session_free_all_allocations(void);
 int test_session_new_alloc_failure(void);
 int test_options_set_max_concurrent(void);
+int test_stream_open_lookup_close(void);
+int test_stream_hash_collision(void);
+int test_stream_free_stack(void);
+int test_stream_compaction(void);
+int test_recv_headers_opens_new_stream(void);
+int test_stream_id_monotonicity(void);
 
 int
 main(void)
@@ -150,6 +156,12 @@ main(void)
 	RUN(session_free_all_allocations);
 	RUN(session_new_alloc_failure);
 	RUN(options_set_max_concurrent);
+	RUN(stream_open_lookup_close);
+	RUN(stream_hash_collision);
+	RUN(stream_free_stack);
+	RUN(stream_compaction);
+	RUN(recv_headers_opens_new_stream);
+	RUN(stream_id_monotonicity);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);

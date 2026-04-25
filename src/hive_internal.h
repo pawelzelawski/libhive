@@ -322,4 +322,13 @@ struct hive_session {
 	uint8_t closed;
 };
 
+/*
+ * Stream table helpers (ARCHITECTURE.md §5.4–§5.6).
+ * Internal-only API used by frame receive and unit tests.
+ */
+uint32_t stream_hash_fn(uint32_t stream_id, uint32_t hash_mask);
+int stream_open(hive_session_t *s, uint32_t stream_id, uint8_t state);
+hive_stream_t *stream_lookup(hive_session_t *s, uint32_t stream_id);
+void stream_close(hive_session_t *s, hive_stream_t *stream);
+
 #endif /* HIVE_INTERNAL_H */
