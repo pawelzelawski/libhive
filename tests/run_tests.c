@@ -164,7 +164,6 @@ int test_recv_get_request_headers(void);
 int test_stream_id_monotonicity(void);
 int test_settings_recv_and_ack(void);
 int test_settings_recv_ack(void);
-int test_settings_unsolicited_ack(void);
 int test_settings_invalid_window_size(void);
 int test_settings_invalid_frame_size(void);
 int test_settings_header_table_size_updates_encoder(void);
@@ -204,6 +203,10 @@ int test_data_send_copy_frame_queued(void);
 int test_data_send_no_copy_frame_queued(void);
 int test_data_send_zero_no_eof_clears_source(void);
 int test_data_send_eof_closes_half_closed_remote(void);
+
+/* --- test_security.c ------------------------------------------------------ */
+int test_settings_flood_uses_inbound_counter(void);
+int test_settings_unsolicited_ack(void);
 
 int
 main(void)
@@ -269,7 +272,6 @@ main(void)
 	RUN(stream_id_monotonicity);
 	RUN(settings_recv_and_ack);
 	RUN(settings_recv_ack);
-	RUN(settings_unsolicited_ack);
 	RUN(settings_invalid_window_size);
 	RUN(settings_invalid_frame_size);
 	RUN(settings_header_table_size_updates_encoder);
@@ -312,6 +314,10 @@ main(void)
 	RUN(data_send_no_copy_frame_queued);
 	RUN(data_send_zero_no_eof_clears_source);
 	RUN(data_send_eof_closes_half_closed_remote);
+
+	/* Phase 7.2 -- SETTINGS flood protection */
+	RUN(settings_flood_uses_inbound_counter);
+	RUN(settings_unsolicited_ack);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);

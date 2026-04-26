@@ -83,7 +83,6 @@ int test_recv_get_request_headers(void);
 int test_stream_id_monotonicity(void);
 int test_settings_recv_and_ack(void);
 int test_settings_recv_ack(void);
-int test_settings_unsolicited_ack(void);
 int test_settings_invalid_window_size(void);
 int test_settings_invalid_frame_size(void);
 int test_settings_header_table_size_updates_encoder(void);
@@ -2918,25 +2917,6 @@ test_settings_recv_ack(void)
 	ASSERT(s->pending_head == 1u);
 	ASSERT(cap.settings_ack_count == 1);
 
-	hive_session_free(s);
-	return 1;
-}
-
-int
-test_settings_unsolicited_ack(void)
-{
-	settings_capture_t cap;
-	hive_session_t *s;
-	uint8_t frame[9];
-	size_t n;
-
-	memset(&cap, 0, sizeof(cap));
-	s = new_server_recv_session(&cap);
-
-	n = build_settings_frame(frame, HIVE_FLAG_ACK, NULL, 0u);
-	ASSERT(hive_session_recv(s, frame, n) == -1);
-	ASSERT(s->last_err == HIVE_ERR_PROTOCOL);
-	ASSERT(s->last_h2_err == HIVE_H2_PROTOCOL_ERROR);
 
 	hive_session_free(s);
 	return 1;
