@@ -235,18 +235,6 @@ send_queue_append_headers(hive_session_t *s,
 	return HIVE_OK;
 }
 
-/*
- * Phase 5.3 — flow-control-gated DATA source scan.
- *
- * For each open stream with a pending data_source callback:
- * - require both connection and stream send windows to be positive,
- * - cap callback request length to min(remote max frame size,
- *   connection send window, stream send window),
- * - if callback returns 0 bytes, skip to the next stream.
- *
- * Phase 6 adds actual DATA frame queueing and window decrement on emitted
- * frames; this Phase 5 step is gating-only enforcement.
- */
 void
 send_queue_flush_data(hive_session_t *s)
 {
@@ -259,6 +247,12 @@ send_queue_flush_data(hive_session_t *s)
 		hive_stream_t *st;
 		hive_read_callback_t cb;
 		uint32_t max_len;
+		uint32_t stream_id;
+		uint32_t data_flags;
+		uint8_t hdr_flags;
+		size_t hdr_offset;
+		size_t avail;
+		size_t nbytes;
 		uint8_t *body_ptr;
 		ssize_t nread;
 
@@ -269,8 +263,11 @@ send_queue_flush_data(hive_session_t *s)
 		cb = st->data_source.read_callback;
 		if (cb == NULL)
 			continue;
+		stream_id = st->stream_id;
 
 		if (s->send_window <= 0 || st->send_window <= 0)
+			continue;
+		if (s->send_iov_count + 2 > (int)s->opt_max_send_iov)
 			continue;
 
 		max_len = s->remote_settings.max_frame_size;
@@ -278,16 +275,96 @@ send_queue_flush_data(hive_session_t *s)
 			max_len = (uint32_t)s->send_window;
 		if ((uint32_t)st->send_window < max_len)
 			max_len = (uint32_t)st->send_window;
+
+		avail = s->send_buf_cap - s->send_buf_used;
+		if (avail <= 9u)
+			continue;
+		if ((size_t)max_len > avail - 9u)
+			max_len = (uint32_t)(avail - 9u);
 		if (max_len == 0)
 			continue;
 
+		hdr_offset = s->send_buf_used;
+		s->send_buf_used += 9u;
+		s->send_iov[s->send_iov_count].iov_base =
+		    s->send_buf + hdr_offset;
+		s->send_iov[s->send_iov_count].iov_len = 9u;
+		s->send_iov_count++;
+
 		body_ptr = s->send_buf + s->send_buf_used;
+		data_flags = 0u;
 		nread = cb(s,
-		           st->stream_id,
+		           stream_id,
 		           &body_ptr,
 		           max_len,
-		           st->data_source.user_data);
-		if (nread <= 0)
+		           &data_flags,
+		           &st->data_source,
+		           s->user_data);
+		if (nread < 0) {
+			s->send_iov_count--;
+			s->send_buf_used -= 9u;
 			continue;
+		}
+
+		nbytes = (size_t)nread;
+		if (nbytes > (size_t)max_len) {
+			s->send_iov_count--;
+			s->send_buf_used -= 9u;
+			continue;
+		}
+
+		if (nbytes == 0u && (data_flags & HIVE_DATA_FLAG_EOF) == 0u) {
+			s->send_iov_count--;
+			s->send_buf_used -= 9u;
+			st->data_source.read_callback = NULL;
+			continue;
+		}
+
+		if ((data_flags & HIVE_DATA_FLAG_NO_COPY) != 0u) {
+			/* SECURITY: NO_COPY iovec points at caller-owned
+			 * memory. */
+			s->send_iov[s->send_iov_count].iov_base = body_ptr;
+			s->send_iov[s->send_iov_count].iov_len = nbytes;
+			s->send_iov_count++;
+		} else {
+			s->send_iov[s->send_iov_count].iov_base =
+			    s->send_buf + s->send_buf_used;
+			s->send_iov[s->send_iov_count].iov_len = nbytes;
+			s->send_iov_count++;
+			s->send_buf_used += nbytes;
+		}
+
+		hdr_flags = 0u;
+		if ((data_flags & HIVE_DATA_FLAG_EOF) != 0u) {
+			hdr_flags |= HIVE_FLAG_END_STREAM;
+			st->data_source.read_callback = NULL;
+			if (st->state == HIVE_STREAM_OPEN) {
+				st->state = HIVE_STREAM_HALF_CLOSED_LOCAL;
+			} else if (st->state ==
+			           HIVE_STREAM_HALF_CLOSED_REMOTE) {
+				st->state = HIVE_STREAM_CLOSED;
+				s->send_window -= (int32_t)nbytes;
+				st->send_window -= (int32_t)nbytes;
+				if (s->callbacks.on_stream_close != NULL)
+					(void)s->callbacks.on_stream_close(
+					    s,
+					    stream_id,
+					    HIVE_H2_NO_ERROR,
+					    s->user_data);
+				stream_close(s, st);
+				st = NULL;
+			}
+		}
+
+		frame_hdr_write_at(s->send_buf + hdr_offset,
+		                   (uint32_t)nbytes,
+		                   HIVE_FRAME_DATA,
+		                   hdr_flags,
+		                   stream_id);
+
+		if (st != NULL) {
+			s->send_window -= (int32_t)nbytes;
+			st->send_window -= (int32_t)nbytes;
+		}
 	}
 }

@@ -28,6 +28,10 @@ int test_data_recv_idle_stream_connection_error(void);
 int test_window_update_idle_stream_connection_error(void);
 int test_window_update_closed_stream_ignored(void);
 int test_window_update_coalescing_overflow_no_queue(void);
+int test_data_send_copy_frame_queued(void);
+int test_data_send_no_copy_frame_queued(void);
+int test_data_send_zero_no_eof_clears_source(void);
+int test_data_send_eof_closes_half_closed_remote(void);
 
 typedef struct {
 	const uint8_t *buf_start;
@@ -161,7 +165,9 @@ static ssize_t
 send_read_capture_cb(hive_session_t *session,
                      uint32_t stream_id,
                      uint8_t **buf,
-                     uint32_t flags,
+                     size_t length,
+                     uint32_t *data_flags,
+                     hive_data_source_t *source,
                      void *user_data)
 {
 	send_read_cap_t *cap;
@@ -169,12 +175,140 @@ send_read_capture_cb(hive_session_t *session,
 	(void)session;
 	(void)stream_id;
 	(void)buf;
+	(void)data_flags;
 
-	cap = user_data;
+	cap = source->ptr;
+	if (cap == NULL)
+		cap = user_data;
+	if (cap == NULL)
+		return 0;
 	cap->calls++;
-	cap->last_max_len = flags;
+	cap->last_max_len = (uint32_t)length;
 
 	/* Phase 5.3: callback returning 0 means skip this stream. */
+	return 0;
+}
+
+typedef struct {
+	int calls;
+	int iovcnt;
+	struct iovec iov[8];
+	ssize_t total;
+} send_capture_t;
+
+typedef struct {
+	int close_calls;
+	uint32_t last_stream_id;
+	uint32_t last_error_code;
+} close_capture_t;
+
+typedef struct {
+	const uint8_t *data;
+	size_t len;
+} no_copy_src_t;
+
+static ssize_t
+send_cb_capture(hive_session_t *session,
+                const struct iovec *iov,
+                int iovcnt,
+                void *user_data)
+{
+	send_capture_t *cap;
+	ssize_t total;
+	int i;
+
+	(void)session;
+
+	cap = user_data;
+	total = 0;
+	cap->calls++;
+	cap->iovcnt = iovcnt;
+	for (i = 0; i < iovcnt && i < 8; i++) {
+		cap->iov[i] = iov[i];
+		total += (ssize_t)iov[i].iov_len;
+	}
+	cap->total = total;
+	return total;
+}
+
+static int
+on_stream_close_capture(hive_session_t *session,
+                        uint32_t stream_id,
+                        uint32_t error_code,
+                        void *user_data)
+{
+	close_capture_t *cap;
+
+	(void)session;
+	cap = user_data;
+	cap->close_calls++;
+	cap->last_stream_id = stream_id;
+	cap->last_error_code = error_code;
+	return HIVE_OK;
+}
+
+static ssize_t
+send_read_copy_eof_cb(hive_session_t *session,
+                      uint32_t stream_id,
+                      uint8_t **buf,
+                      size_t length,
+                      uint32_t *data_flags,
+                      hive_data_source_t *source,
+                      void *user_data)
+{
+	(void)session;
+	(void)stream_id;
+	(void)length;
+	(void)source;
+	(void)user_data;
+
+	(*buf)[0] = 'b';
+	(*buf)[1] = 'o';
+	(*buf)[2] = 'd';
+	(*buf)[3] = 'y';
+	*data_flags = HIVE_DATA_FLAG_EOF;
+	return 4;
+}
+
+static ssize_t
+send_read_no_copy_eof_cb(hive_session_t *session,
+                         uint32_t stream_id,
+                         uint8_t **buf,
+                         size_t length,
+                         uint32_t *data_flags,
+                         hive_data_source_t *source,
+                         void *user_data)
+{
+	no_copy_src_t *src;
+
+	(void)session;
+	(void)stream_id;
+	(void)length;
+	(void)user_data;
+
+	src = source->ptr;
+	*buf = (uint8_t *)src->data;
+	*data_flags = HIVE_DATA_FLAG_EOF | HIVE_DATA_FLAG_NO_COPY;
+	return (ssize_t)src->len;
+}
+
+static ssize_t
+send_read_zero_no_eof_cb(hive_session_t *session,
+                         uint32_t stream_id,
+                         uint8_t **buf,
+                         size_t length,
+                         uint32_t *data_flags,
+                         hive_data_source_t *source,
+                         void *user_data)
+{
+	(void)session;
+	(void)stream_id;
+	(void)buf;
+	(void)length;
+	(void)source;
+	(void)user_data;
+
+	*data_flags = 0u;
 	return 0;
 }
 
@@ -532,7 +666,7 @@ test_send_window_blocks_data(void)
 	ASSERT(st != NULL);
 
 	st->data_source.read_callback = send_read_capture_cb;
-	st->data_source.user_data = &cap;
+	st->data_source.ptr = &cap;
 	st->send_window = 0;
 
 	ASSERT(hive_session_send(s) == HIVE_OK);
@@ -574,7 +708,7 @@ test_send_max_len_respects_remote_max_frame_size(void)
 	s->send_window = 1000;
 	st->send_window = 500;
 	st->data_source.read_callback = send_read_capture_cb;
-	st->data_source.user_data = &cap;
+	st->data_source.ptr = &cap;
 
 	ASSERT(hive_session_send(s) == HIVE_OK);
 	ASSERT(cap.calls == 1);
@@ -599,7 +733,7 @@ test_want_write_pending_data_source(void)
 	ASSERT(st != NULL);
 
 	st->data_source.read_callback = send_read_capture_cb;
-	st->data_source.user_data = &cap;
+	st->data_source.ptr = &cap;
 	ASSERT(s->send_iov_count == 0);
 	ASSERT(s->send_partial == 0);
 	ASSERT(s->send_window > 0);
@@ -625,7 +759,7 @@ test_want_write_blocked_by_connection_window(void)
 	ASSERT(st != NULL);
 
 	st->data_source.read_callback = send_read_capture_cb;
-	st->data_source.user_data = &cap;
+	st->data_source.ptr = &cap;
 	s->send_window = 0;
 	ASSERT(s->send_iov_count == 0);
 	ASSERT(s->send_partial == 0);
@@ -729,6 +863,145 @@ test_window_update_coalescing_overflow_no_queue(void)
 	ASSERT(s->last_err == HIVE_ERR_FLOW_CONTROL);
 	ASSERT(s->last_h2_err == HIVE_H2_FLOW_CONTROL_ERROR);
 	ASSERT(s->send_iov_count == 0);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_data_send_copy_frame_queued(void)
+{
+	hive_session_t *s;
+	hive_stream_t *st;
+	send_capture_t cap;
+	frame_hdr_t hdr;
+	int32_t before_conn;
+	int32_t before_stream;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+
+	before_conn = s->send_window;
+	before_stream = st->send_window;
+	st->data_source.read_callback = send_read_copy_eof_cb;
+	s->callbacks.send = send_cb_capture;
+	s->user_data = &cap;
+
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(cap.calls == 1);
+	ASSERT(cap.iovcnt == 2);
+	ASSERT(cap.iov[0].iov_len == 9u);
+	ASSERT(cap.iov[1].iov_len == 4u);
+	frame_hdr_parse(cap.iov[0].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_DATA);
+	ASSERT(hdr.stream_id == 1u);
+	ASSERT(hdr.length == 4u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) != 0u);
+	ASSERT(memcmp(cap.iov[1].iov_base, "body", 4u) == 0);
+	ASSERT(st->state == HIVE_STREAM_HALF_CLOSED_LOCAL);
+	ASSERT(st->data_source.read_callback == NULL);
+	ASSERT(s->send_window == before_conn - 4);
+	ASSERT(st->send_window == before_stream - 4);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_data_send_no_copy_frame_queued(void)
+{
+	hive_session_t *s;
+	hive_stream_t *st;
+	send_capture_t cap;
+	no_copy_src_t src;
+	frame_hdr_t hdr;
+	const uint8_t payload[] = "zero-copy";
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+
+	src.data = payload;
+	src.len = sizeof(payload) - 1u;
+	st->data_source.read_callback = send_read_no_copy_eof_cb;
+	st->data_source.ptr = &src;
+	s->callbacks.send = send_cb_capture;
+	s->user_data = &cap;
+
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(cap.calls == 1);
+	ASSERT(cap.iovcnt == 2);
+	frame_hdr_parse(cap.iov[0].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_DATA);
+	ASSERT(hdr.stream_id == 1u);
+	ASSERT(hdr.length == src.len);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) != 0u);
+	ASSERT(cap.iov[1].iov_base == payload);
+	ASSERT(cap.iov[1].iov_len == src.len);
+	ASSERT(st->state == HIVE_STREAM_HALF_CLOSED_LOCAL);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_data_send_zero_no_eof_clears_source(void)
+{
+	hive_session_t *s;
+	hive_stream_t *st;
+	send_capture_t cap;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+
+	st->data_source.read_callback = send_read_zero_no_eof_cb;
+	s->callbacks.send = send_cb_capture;
+	s->user_data = &cap;
+
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(cap.calls == 0);
+	ASSERT(st->data_source.read_callback == NULL);
+	ASSERT(s->send_iov_count == 0);
+	ASSERT(s->send_buf_used == 0u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_data_send_eof_closes_half_closed_remote(void)
+{
+	hive_session_t *s;
+	hive_stream_t *st;
+	close_capture_t close_cap;
+	int32_t before_conn;
+
+	memset(&close_cap, 0, sizeof(close_cap));
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_HALF_CLOSED_REMOTE) == HIVE_OK);
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+
+	before_conn = s->send_window;
+	st->data_source.read_callback = send_read_copy_eof_cb;
+	s->callbacks.send = send_cb_full;
+	s->callbacks.on_stream_close = on_stream_close_capture;
+	s->user_data = &close_cap;
+
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(stream_lookup(s, 1u) == NULL);
+	ASSERT(close_cap.close_calls == 1);
+	ASSERT(close_cap.last_stream_id == 1u);
+	ASSERT(close_cap.last_error_code == HIVE_H2_NO_ERROR);
+	ASSERT(s->send_window == before_conn - 4);
 
 	hive_session_free(s);
 	return 1;

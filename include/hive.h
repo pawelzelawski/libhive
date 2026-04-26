@@ -94,12 +94,14 @@ typedef struct hive_data_source hive_data_source_t;
 typedef ssize_t (*hive_read_callback_t)(hive_session_t *session,
                                         uint32_t stream_id,
                                         uint8_t **buf,
-                                        uint32_t flags,
+                                        size_t length,
+                                        uint32_t *data_flags,
+                                        hive_data_source_t *source,
                                         void *user_data);
 
 struct hive_data_source {
 	hive_read_callback_t read_callback;
-	void *user_data;
+	void *ptr;
 };
 
 /* hive_data_source flags (passed to read_callback, returned by it) */

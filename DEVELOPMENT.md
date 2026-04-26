@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-26
 **Current Phase**: Phase 6 — Submit and Send
-**Next Task**: 6.2 — Full send queue: DATA frame queuing (`uint8_t **buf`)
+**Next Task**: 6.3 — Full `hive_session_send()` (extends Phase 4 minimal)
 
 ### Phase Summary
 
@@ -946,7 +946,7 @@ are wired. Two-phase GOAWAY works. Stream introspection functions work.
     payload chunk...) so no bytes are shifted or copied
   - Outbound frame sizing always uses `remote_settings.max_frame_size`
 
-**6.2 — Full send queue: DATA frame queuing (`uint8_t **buf`)**
+**6.2 — Full send queue: DATA frame queuing (`uint8_t **buf`)** ✓ DONE
 - In `send_queue_flush_data()`: full implementation per ARCHITECTURE.md §6.5:
   - `body_ptr = send_buf + send_buf_used` (default: library buffer)
   - Call `data_source.read_callback(session, stream_id, &body_ptr, max_len,

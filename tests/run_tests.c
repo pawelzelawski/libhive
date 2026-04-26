@@ -172,6 +172,10 @@ int test_data_recv_idle_stream_connection_error(void);
 int test_window_update_idle_stream_connection_error(void);
 int test_window_update_closed_stream_ignored(void);
 int test_window_update_coalescing_overflow_no_queue(void);
+int test_data_send_copy_frame_queued(void);
+int test_data_send_no_copy_frame_queued(void);
+int test_data_send_zero_no_eof_clears_source(void);
+int test_data_send_eof_closes_half_closed_remote(void);
 
 int
 main(void)
@@ -244,6 +248,12 @@ main(void)
 	RUN(window_update_idle_stream_connection_error);
 	RUN(window_update_closed_stream_ignored);
 	RUN(window_update_coalescing_overflow_no_queue);
+
+	/* Phase 6.2 — full DATA frame queueing (copy / NO_COPY / EOF) */
+	RUN(data_send_copy_frame_queued);
+	RUN(data_send_no_copy_frame_queued);
+	RUN(data_send_zero_no_eof_clears_source);
+	RUN(data_send_eof_closes_half_closed_remote);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);
