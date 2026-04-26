@@ -1275,7 +1275,7 @@ hive_submit_interim_response(hive_session_t *session,
                              const hive_nv_t *nva,
                              size_t nvlen)
 {
-  const hive_stream_t *stream;
+	const hive_stream_t *stream;
 
 	if (session == NULL)
 		return HIVE_ERR_INVALID_ARG;
@@ -1318,12 +1318,61 @@ hive_submit_request(hive_session_t *session,
                     hive_data_source_t *data_source,
                     uint32_t *stream_id_out)
 {
-	(void)session;
-	(void)nva;
-	(void)nvlen;
-	(void)data_source;
-	(void)stream_id_out;
-	return HIVE_ERR_SESSION_CLOSED;
+	hive_stream_t *stream;
+	uint32_t stream_id;
+	uint8_t end_stream;
+	int ret;
+
+	if (session == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (session->session_state != HIVE_SESSION_OPEN)
+		return HIVE_ERR_SESSION_CLOSED;
+	if (session->role != HIVE_ROLE_CLIENT)
+		return HIVE_ERR_INVALID_ARG;
+	if (nva == NULL || nvlen == 0u || stream_id_out == NULL)
+		return HIVE_ERR_INVALID_ARG;
+
+	if (session->stream_open_count >=
+	    session->remote_settings.max_concurrent_streams)
+		return HIVE_ERR_REFUSED_STREAM;
+
+	stream_id = session->next_stream_id;
+	if (stream_id == 0u || stream_id > 0x7fffffffu - 1u)
+		return HIVE_ERR_REFUSED_STREAM;
+
+	ret = stream_open(session, stream_id, HIVE_STREAM_OPEN);
+	if (ret != HIVE_OK)
+		return ret;
+
+	stream = stream_lookup(session, stream_id);
+	if (stream == NULL)
+		return HIVE_ERR_PROTOCOL;
+
+	end_stream = (data_source == NULL) ? 1u : 0u;
+	ret = send_queue_append_headers(
+	    session, stream_id, nva, nvlen, end_stream);
+	if (ret != HIVE_OK) {
+		stream_close(session, stream);
+		return ret;
+	}
+
+	if (data_source != NULL)
+		stream->data_source = *data_source;
+	else
+		memset(&stream->data_source, 0, sizeof(stream->data_source));
+
+	session->last_stream_id_local = stream_id;
+	session->next_stream_id = stream_id + 2u;
+
+	if (end_stream) {
+		ret = stream_close_local_on_end_stream(
+		    session, stream, stream_id);
+		if (ret != HIVE_OK)
+			return ret;
+	}
+
+	*stream_id_out = stream_id;
+	return HIVE_OK;
 }
 
 int

@@ -138,6 +138,9 @@ int test_submit_goaway_prepare(void);
 int test_submit_goaway_final(void);
 int test_submit_ping(void);
 int test_submit_ping_ack(void);
+int test_submit_request_assigns_stream_id(void);
+int test_submit_request_max_concurrent_honored(void);
+int test_submit_request_with_body(void);
 int test_options_defaults(void);
 int test_options_set_valid(void);
 int test_options_set_invalid(void);
@@ -223,6 +226,9 @@ main(void)
 	RUN(submit_goaway_final);
 	RUN(submit_ping);
 	RUN(submit_ping_ack);
+	RUN(submit_request_assigns_stream_id);
+	RUN(submit_request_max_concurrent_honored);
+	RUN(submit_request_with_body);
 
 	/* Phase 4.2 — options API */
 	RUN(options_defaults);

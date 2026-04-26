@@ -3495,7 +3495,8 @@ int hive_submit_interim_response(hive_session_t *session,
  *
  * promise_nva:  headers of the synthetic push request.
  *               Must include :method, :path, :scheme, :authority.
- * Returns the reserved promised stream ID (even, > 0) on success.
+ * promised_stream_id_out: receives reserved promised stream ID (even, > 0).
+ * Returns HIVE_OK on success.
  * Returns HIVE_ERR_PROTOCOL if SETTINGS_ENABLE_PUSH = 0.
  * Returns HIVE_ERR_STREAM_CLOSED if stream_id is not open.
  * Returns HIVE_ERR_REFUSED_STREAM if the total stream slot pool is
@@ -3503,9 +3504,10 @@ int hive_submit_interim_response(hive_session_t *session,
  *   is independent of the peer's SETTINGS_MAX_CONCURRENT_STREAMS.
  *   See §2.9 for the slot-pool total-cap constraint.
  */
-int32_t hive_submit_push_promise(hive_session_t *session,
+int hive_submit_push_promise(hive_session_t *session,
     uint32_t stream_id,
-    const hive_nv_t *promise_nva, size_t promise_nvlen);
+    const hive_nv_t *promise_nva, size_t promise_nvlen,
+    uint32_t *promised_stream_id_out);
 
 /*
  * Submit RST_STREAM for stream_id.
@@ -3580,15 +3582,17 @@ int hive_submit_ping_ack(hive_session_t *session,
  * exhausted (stream_open_count >= opt_max_concurrent_streams), regardless
  * of the peer's limit. See §2.9 for the slot-pool total-cap constraint.
  *
- * Returns the new stream ID (odd, > 0) on success.
+ * stream_id_out receives the new stream ID (odd, > 0).
+ * Returns HIVE_OK on success.
  * Returns HIVE_ERR_SESSION_CLOSED if session is in GOAWAY state.
  * Returns HIVE_ERR_REFUSED_STREAM if peer's max_concurrent_streams reached
  *   or if the local slot pool is exhausted.
  * Returns HIVE_ERR_NOMEM on allocation failure.
  */
-int32_t hive_submit_request(hive_session_t *session,
+int hive_submit_request(hive_session_t *session,
     const hive_nv_t *nva, size_t nvlen,
-    const hive_data_source_t *data_source);
+    hive_data_source_t *data_source,
+    uint32_t *stream_id_out);
 ```
 
 ### 9.11 Introspection
@@ -3602,12 +3606,10 @@ int32_t hive_session_get_stream_remote_window_size(
     hive_session_t *session, uint32_t stream_id);
 
 /* Local SETTINGS currently in effect (what we advertised). */
-int hive_session_get_local_settings(hive_session_t *session,
-    hive_settings_t *settings_out);
+hive_settings_t hive_session_get_local_settings(hive_session_t *session);
 
 /* Remote SETTINGS currently in effect (what peer advertised). */
-int hive_session_get_remote_settings(hive_session_t *session,
-    hive_settings_t *settings_out);
+hive_settings_t hive_session_get_remote_settings(hive_session_t *session);
 
 /*
  * Get the current state of stream_id.
@@ -3622,7 +3624,7 @@ int hive_session_get_remote_settings(hive_session_t *session,
  * close frame is queued. The stream slot is freed immediately; subsequent
  * calls to hive_stream_get_state() for that stream_id return HIVE_STREAM_IDLE.
  */
-hive_stream_state_t hive_stream_get_state(hive_session_t *session,
+int hive_stream_get_state(hive_session_t *session,
     uint32_t stream_id);
 
 /*

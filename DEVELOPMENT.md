@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-26
 **Current Phase**: Phase 6 — Submit and Send
-**Next Task**: 6.6 — `hive_submit_request()` (client role)
+**Next Task**: 6.7 — New callbacks: wire up all five
 
 ### Phase Summary
 
@@ -996,7 +996,7 @@ are wired. Two-phase GOAWAY works. Stream introspection functions work.
 - `hive_submit_ping()` — PING frame
 - `hive_submit_ping_ack()` — PING ACK (used when `opt_no_auto_ping_ack == 1`)
 
-**6.6 — `hive_submit_request()` (client role)**
+**6.6 — `hive_submit_request()` (client role)** ✓ DONE
 - Allocate new stream ID (odd, incrementing), call `stream_open()`
 - Check `stream_open_count < remote_settings.max_concurrent_streams`
   (peer's limit); return `HIVE_ERR_REFUSED_STREAM` if at limit

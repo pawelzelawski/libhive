@@ -59,6 +59,9 @@ int test_submit_goaway_prepare(void);
 int test_submit_goaway_final(void);
 int test_submit_ping(void);
 int test_submit_ping_ack(void);
+int test_submit_request_assigns_stream_id(void);
+int test_submit_request_max_concurrent_honored(void);
+int test_submit_request_with_body(void);
 int test_options_defaults(void);
 int test_options_set_valid(void);
 int test_options_set_invalid(void);
@@ -586,6 +589,27 @@ new_server_send_session(void)
 	s = hive_session_server_new(NULL, NULL, &cb, NULL);
 	ASSERT(s != NULL);
 
+	s->send_iov_count = 0;
+	s->send_buf_used = 0;
+	s->send_partial = 0;
+	s->send_partial_offset = 0;
+
+	return s;
+}
+
+static hive_session_t *
+new_client_send_session(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+
+	s = hive_session_client_new(NULL, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+
+	/* Ignore queued client preface bytes so queue assertions are isolated. */
 	s->send_iov_count = 0;
 	s->send_buf_used = 0;
 	s->send_partial = 0;
@@ -1466,6 +1490,142 @@ test_submit_ping_ack(void)
 	ASSERT((hdr.flags & HIVE_FLAG_ACK) != 0u);
 	payload = (const uint8_t *)s->send_iov[0].iov_base + 9;
 	ASSERT(memcmp(payload, opaque, 8u) == 0);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_submit_request_assigns_stream_id(void)
+{
+	static const uint8_t n_method[] = ":method";
+	static const uint8_t n_path[] = ":path";
+	static const uint8_t n_scheme[] = ":scheme";
+	static const uint8_t v_get[] = "GET";
+	static const uint8_t v_http[] = "http";
+	static const uint8_t v_path1[] = "/one";
+	static const uint8_t v_path2[] = "/two";
+	hive_nv_t nva1[3];
+	hive_nv_t nva2[3];
+	hive_session_t *s;
+	uint32_t sid1;
+	uint32_t sid2;
+
+	s = new_client_send_session();
+
+	nva1[0] = (hive_nv_t){n_method, v_get,
+	    sizeof(n_method) - 1u, sizeof(v_get) - 1u, 0u};
+	nva1[1] = (hive_nv_t){n_path, v_path1,
+	    sizeof(n_path) - 1u, sizeof(v_path1) - 1u, 0u};
+	nva1[2] = (hive_nv_t){n_scheme, v_http,
+	    sizeof(n_scheme) - 1u, sizeof(v_http) - 1u, 0u};
+
+	nva2[0] = (hive_nv_t){n_method, v_get,
+	    sizeof(n_method) - 1u, sizeof(v_get) - 1u, 0u};
+	nva2[1] = (hive_nv_t){n_path, v_path2,
+	    sizeof(n_path) - 1u, sizeof(v_path2) - 1u, 0u};
+	nva2[2] = (hive_nv_t){n_scheme, v_http,
+	    sizeof(n_scheme) - 1u, sizeof(v_http) - 1u, 0u};
+
+	ASSERT(hive_submit_request(s, nva1, 3u, NULL, &sid1) == HIVE_OK);
+	ASSERT(hive_submit_request(s, nva2, 3u, NULL, &sid2) == HIVE_OK);
+
+	ASSERT(sid1 == 1u);
+	ASSERT(sid2 == 3u);
+	ASSERT(s->next_stream_id == 5u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_submit_request_max_concurrent_honored(void)
+{
+	static const uint8_t n_method[] = ":method";
+	static const uint8_t n_path[] = ":path";
+	static const uint8_t n_scheme[] = ":scheme";
+	static const uint8_t v_get[] = "GET";
+	static const uint8_t v_http[] = "http";
+	static const uint8_t v_path[] = "/limit";
+	hive_nv_t nva[3];
+	hive_session_t *s;
+	uint32_t sid;
+
+	s = new_client_send_session();
+	s->remote_settings.max_concurrent_streams = 2u;
+
+	nva[0] = (hive_nv_t){n_method, v_get,
+	    sizeof(n_method) - 1u, sizeof(v_get) - 1u, 0u};
+	nva[1] = (hive_nv_t){n_path, v_path,
+	    sizeof(n_path) - 1u, sizeof(v_path) - 1u, 0u};
+	nva[2] = (hive_nv_t){n_scheme, v_http,
+	    sizeof(n_scheme) - 1u, sizeof(v_http) - 1u, 0u};
+
+	ASSERT(hive_submit_request(s, nva, 3u, NULL, &sid) == HIVE_OK);
+	ASSERT(hive_submit_request(s, nva, 3u, NULL, &sid) == HIVE_OK);
+	ASSERT(hive_submit_request(s, nva, 3u, NULL, &sid) ==
+	    HIVE_ERR_REFUSED_STREAM);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_submit_request_with_body(void)
+{
+	static const uint8_t n_method[] = ":method";
+	static const uint8_t n_path[] = ":path";
+	static const uint8_t n_scheme[] = ":scheme";
+	static const uint8_t v_post[] = "POST";
+	static const uint8_t v_http[] = "http";
+	static const uint8_t v_path[] = "/upload";
+	hive_nv_t nva[3];
+	hive_data_source_t ds;
+	hive_session_t *s;
+	hive_stream_t *st;
+	send_capture_t cap;
+	frame_hdr_t hdr;
+	uint32_t sid;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_client_send_session();
+
+	nva[0] = (hive_nv_t){n_method, v_post,
+	    sizeof(n_method) - 1u, sizeof(v_post) - 1u, 0u};
+	nva[1] = (hive_nv_t){n_path, v_path,
+	    sizeof(n_path) - 1u, sizeof(v_path) - 1u, 0u};
+	nva[2] = (hive_nv_t){n_scheme, v_http,
+	    sizeof(n_scheme) - 1u, sizeof(v_http) - 1u, 0u};
+
+	ds.read_callback = resp_read_copy_eof_cb;
+	ds.ptr = NULL;
+
+	ASSERT(hive_submit_request(s, nva, 3u, &ds, &sid) == HIVE_OK);
+	ASSERT(sid == 1u);
+
+	st = stream_lookup(s, sid);
+	ASSERT(st != NULL);
+	ASSERT(st->data_source.read_callback == resp_read_copy_eof_cb);
+
+	s->callbacks.send = send_cb_capture;
+	s->user_data = &cap;
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(cap.calls == 1);
+	ASSERT(cap.iovcnt == 3);
+
+	frame_hdr_parse(cap.iov[0].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_HEADERS);
+	ASSERT(hdr.stream_id == sid);
+	ASSERT((hdr.flags & HIVE_FLAG_END_HEADERS) != 0u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) == 0u);
+
+	frame_hdr_parse(cap.iov[1].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_DATA);
+	ASSERT(hdr.stream_id == sid);
+	ASSERT(hdr.length == 5u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) != 0u);
+	ASSERT(cap.iov[2].iov_len == 5u);
+	ASSERT(memcmp(cap.iov[2].iov_base, "hello", 5u) == 0);
 
 	hive_session_free(s);
 	return 1;
