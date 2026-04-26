@@ -48,6 +48,10 @@ int test_send_fatal_error(void);
 int test_send_headers_single_frame_layout(void);
 int test_send_headers_split_layout(void);
 int test_send_headers_split_end_stream_flag(void);
+int test_submit_response_headers_only(void);
+int test_submit_response_with_data_copy(void);
+int test_submit_response_no_copy(void);
+int test_submit_response_eof_flag(void);
 int test_options_defaults(void);
 int test_options_set_valid(void);
 int test_options_set_invalid(void);
@@ -126,6 +130,17 @@ typedef struct {
 	int last_iovcnt;
 } send_count_state_t;
 
+typedef struct {
+	int calls;
+	int iovcnt;
+	struct iovec iov[8];
+} send_capture_t;
+
+typedef struct {
+	const uint8_t *data;
+	size_t len;
+} no_copy_src_t;
+
 static ssize_t
 send_cb_partial(hive_session_t *session,
                 const struct iovec *iov,
@@ -169,6 +184,85 @@ send_cb_counting(hive_session_t *session,
 	st->call_count++;
 	st->last_iovcnt = iovcnt;
 	return total;
+}
+
+static ssize_t
+send_cb_capture(hive_session_t *session,
+                const struct iovec *iov,
+                int iovcnt,
+                void *user_data)
+{
+	send_capture_t *cap;
+	ssize_t total;
+	int i;
+
+	(void)session;
+
+	cap = user_data;
+	total = 0;
+	cap->calls++;
+	cap->iovcnt = iovcnt;
+	ASSERT(iovcnt <= (int)(sizeof(cap->iov) / sizeof(cap->iov[0])));
+	for (i = 0; i < iovcnt; i++) {
+		cap->iov[i] = iov[i];
+		total += (ssize_t)iov[i].iov_len;
+	}
+
+	return total;
+}
+
+static ssize_t
+resp_read_copy_eof_cb(hive_session_t *session,
+                      uint32_t stream_id,
+                      uint8_t **buf,
+                      size_t length,
+                      uint32_t *data_flags,
+                      hive_data_source_t *source,
+                      void *user_data)
+{
+	static const uint8_t body[] = "hello";
+
+	(void)session;
+	(void)stream_id;
+	(void)source;
+	(void)user_data;
+
+	ASSERT(buf != NULL);
+	ASSERT(*buf != NULL);
+	ASSERT(length >= sizeof(body) - 1u);
+	ASSERT(data_flags != NULL);
+
+	memcpy(*buf, body, sizeof(body) - 1u);
+	*data_flags = HIVE_DATA_FLAG_EOF;
+	return (ssize_t)(sizeof(body) - 1u);
+}
+
+static ssize_t
+resp_read_no_copy_eof_cb(hive_session_t *session,
+                         uint32_t stream_id,
+                         uint8_t **buf,
+                         size_t length,
+                         uint32_t *data_flags,
+                         hive_data_source_t *source,
+                         void *user_data)
+{
+	no_copy_src_t *src;
+
+	(void)session;
+	(void)stream_id;
+	(void)user_data;
+
+	ASSERT(buf != NULL);
+	ASSERT(data_flags != NULL);
+	ASSERT(source != NULL);
+
+	src = source->ptr;
+	ASSERT(src != NULL);
+	ASSERT(length >= src->len);
+
+	*buf = (uint8_t *)src->data;
+	*data_flags = HIVE_DATA_FLAG_NO_COPY | HIVE_DATA_FLAG_EOF;
+	return (ssize_t)src->len;
 }
 
 /* Send callback that always returns -1 (fatal I/O error). */
@@ -983,6 +1077,182 @@ test_send_headers_split_end_stream_flag(void)
 	frame_hdr_parse(
 	    s->send_iov[(size_t)s->send_iov_count - 2u].iov_base, &hdr);
 	ASSERT((hdr.flags & HIVE_FLAG_END_HEADERS) != 0u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_submit_response_headers_only(void)
+{
+	static const uint8_t n_status[] = ":status";
+	static const uint8_t v_204[] = "204";
+	hive_nv_t nva[1];
+	hive_session_t *s;
+	frame_hdr_t hdr;
+	int ret;
+
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_HALF_CLOSED_REMOTE) == HIVE_OK);
+
+	nva[0].name = n_status;
+	nva[0].value = v_204;
+	nva[0].name_len = sizeof(n_status) - 1u;
+	nva[0].value_len = sizeof(v_204) - 1u;
+	nva[0].flags = 0u;
+
+	ret = hive_submit_response(s, 1u, nva, 1u, NULL);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(s->send_iov_count == 1);
+
+	frame_hdr_parse(s->send_iov[0].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_HEADERS);
+	ASSERT(hdr.stream_id == 1u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_HEADERS) != 0u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) != 0u);
+	ASSERT(stream_lookup(s, 1u) == NULL);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_submit_response_with_data_copy(void)
+{
+	static const uint8_t n_status[] = ":status";
+	static const uint8_t v_200[] = "200";
+	hive_nv_t nva[1];
+	hive_data_source_t ds;
+	hive_session_t *s;
+	hive_stream_t *st;
+	send_capture_t cap;
+	frame_hdr_t hdr;
+	int ret;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_HALF_CLOSED_REMOTE) == HIVE_OK);
+
+	nva[0].name = n_status;
+	nva[0].value = v_200;
+	nva[0].name_len = sizeof(n_status) - 1u;
+	nva[0].value_len = sizeof(v_200) - 1u;
+	nva[0].flags = 0u;
+
+	ds.read_callback = resp_read_copy_eof_cb;
+	ds.ptr = NULL;
+
+	ret = hive_submit_response(s, 1u, nva, 1u, &ds);
+	ASSERT(ret == HIVE_OK);
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+	ASSERT(st->data_source.read_callback == resp_read_copy_eof_cb);
+
+	s->callbacks.send = send_cb_capture;
+	s->user_data = &cap;
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(cap.calls == 1);
+	ASSERT(cap.iovcnt == 3);
+
+	frame_hdr_parse(cap.iov[0].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_HEADERS);
+	ASSERT(hdr.stream_id == 1u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_HEADERS) != 0u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) == 0u);
+
+	frame_hdr_parse(cap.iov[1].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_DATA);
+	ASSERT(hdr.stream_id == 1u);
+	ASSERT(hdr.length == 5u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) != 0u);
+	ASSERT(cap.iov[2].iov_len == 5u);
+	ASSERT(memcmp(cap.iov[2].iov_base, "hello", 5u) == 0);
+	ASSERT(stream_lookup(s, 1u) == NULL);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_submit_response_no_copy(void)
+{
+	static const uint8_t n_status[] = ":status";
+	static const uint8_t v_200[] = "200";
+	static const uint8_t body[] = "no-copy-body";
+	hive_nv_t nva[1];
+	hive_data_source_t ds;
+	hive_session_t *s;
+	send_capture_t cap;
+	no_copy_src_t src;
+	frame_hdr_t hdr;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 3u, HIVE_STREAM_HALF_CLOSED_REMOTE) == HIVE_OK);
+
+	nva[0].name = n_status;
+	nva[0].value = v_200;
+	nva[0].name_len = sizeof(n_status) - 1u;
+	nva[0].value_len = sizeof(v_200) - 1u;
+	nva[0].flags = 0u;
+
+	src.data = body;
+	src.len = sizeof(body) - 1u;
+	ds.read_callback = resp_read_no_copy_eof_cb;
+	ds.ptr = &src;
+
+	ASSERT(hive_submit_response(s, 3u, nva, 1u, &ds) == HIVE_OK);
+	s->callbacks.send = send_cb_capture;
+	s->user_data = &cap;
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(cap.calls == 1);
+	ASSERT(cap.iovcnt == 3);
+
+	frame_hdr_parse(cap.iov[1].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_DATA);
+	ASSERT(hdr.stream_id == 3u);
+	ASSERT(hdr.length == src.len);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) != 0u);
+	ASSERT(cap.iov[2].iov_base == body);
+	ASSERT(cap.iov[2].iov_len == src.len);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_submit_response_eof_flag(void)
+{
+	static const uint8_t n_status[] = ":status";
+	static const uint8_t v_200[] = "200";
+	hive_nv_t nva[1];
+	hive_data_source_t ds;
+	hive_session_t *s;
+	send_capture_t cap;
+	frame_hdr_t hdr;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 5u, HIVE_STREAM_HALF_CLOSED_REMOTE) == HIVE_OK);
+
+	nva[0].name = n_status;
+	nva[0].value = v_200;
+	nva[0].name_len = sizeof(n_status) - 1u;
+	nva[0].value_len = sizeof(v_200) - 1u;
+	nva[0].flags = 0u;
+
+	ds.read_callback = resp_read_copy_eof_cb;
+	ds.ptr = NULL;
+
+	ASSERT(hive_submit_response(s, 5u, nva, 1u, &ds) == HIVE_OK);
+	s->callbacks.send = send_cb_capture;
+	s->user_data = &cap;
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(cap.iovcnt == 3);
+
+	frame_hdr_parse(cap.iov[1].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_DATA);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) != 0u);
 
 	hive_session_free(s);
 	return 1;

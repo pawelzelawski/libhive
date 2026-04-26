@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-26
 **Current Phase**: Phase 6 — Submit and Send
-**Next Task**: 6.4 — `hive_submit_response()`
+**Next Task**: 6.5 — Additional submit functions
 
 ### Phase Summary
 
@@ -978,7 +978,7 @@ are wired. Two-phase GOAWAY works. Stream introspection functions work.
 - iovec overflow: if `send_iov_count + needed > opt_max_send_iov`,
   flush internally before continuing (ARCHITECTURE.md §6.7)
 
-**6.4 — `hive_submit_response()`**
+**6.4 — `hive_submit_response()`** ✓ DONE
 - Validate stream exists and is in HALF_CLOSED_REMOTE or OPEN state
 - Queue HEADERS via `send_queue_append_headers()`
 - Store `data_source` in `stream->data_source` — fixed for stream lifetime

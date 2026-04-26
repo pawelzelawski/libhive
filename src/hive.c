@@ -1130,12 +1130,49 @@ hive_submit_response(hive_session_t *session,
                      size_t nvlen,
                      hive_data_source_t *data_source)
 {
-	(void)session;
-	(void)stream_id;
-	(void)nva;
-	(void)nvlen;
-	(void)data_source;
-	return HIVE_ERR_SESSION_CLOSED;
+	hive_stream_t *stream;
+	uint8_t end_stream;
+	int ret;
+
+	if (session == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (nva == NULL || nvlen == 0u)
+		return HIVE_ERR_INVALID_ARG;
+
+	stream = stream_lookup(session, stream_id);
+	if (stream == NULL)
+		return HIVE_ERR_STREAM_CLOSED;
+	if (stream->state != HIVE_STREAM_OPEN &&
+	    stream->state != HIVE_STREAM_HALF_CLOSED_REMOTE)
+		return HIVE_ERR_STREAM_CLOSED;
+
+	end_stream = (data_source == NULL) ? 1u : 0u;
+	ret = send_queue_append_headers(
+	    session, stream_id, nva, nvlen, end_stream);
+	if (ret != HIVE_OK)
+		return ret;
+
+	if (data_source != NULL)
+		stream->data_source = *data_source;
+	else
+		memset(&stream->data_source, 0, sizeof(stream->data_source));
+
+	if (end_stream) {
+		if (stream->state == HIVE_STREAM_OPEN) {
+			stream->state = HIVE_STREAM_HALF_CLOSED_LOCAL;
+		} else if (stream->state == HIVE_STREAM_HALF_CLOSED_REMOTE) {
+			stream->state = HIVE_STREAM_CLOSED;
+			if (session->callbacks.on_stream_close != NULL)
+				(void)session->callbacks.on_stream_close(
+				    session,
+				    stream_id,
+				    HIVE_H2_NO_ERROR,
+				    session->user_data);
+			stream_close(session, stream);
+		}
+	}
+
+	return HIVE_OK;
 }
 
 int

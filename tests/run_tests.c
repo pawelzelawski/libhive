@@ -127,6 +127,10 @@ int test_send_fatal_error(void);
 int test_send_headers_single_frame_layout(void);
 int test_send_headers_split_layout(void);
 int test_send_headers_split_end_stream_flag(void);
+int test_submit_response_headers_only(void);
+int test_submit_response_with_data_copy(void);
+int test_submit_response_no_copy(void);
+int test_submit_response_eof_flag(void);
 int test_options_defaults(void);
 int test_options_set_valid(void);
 int test_options_set_invalid(void);
@@ -197,6 +201,12 @@ main(void)
 	RUN(send_headers_single_frame_layout);
 	RUN(send_headers_split_layout);
 	RUN(send_headers_split_end_stream_flag);
+
+	/* Phase 6.4 — hive_submit_response() */
+	RUN(submit_response_headers_only);
+	RUN(submit_response_with_data_copy);
+	RUN(submit_response_no_copy);
+	RUN(submit_response_eof_flag);
 
 	/* Phase 4.2 — options API */
 	RUN(options_defaults);
