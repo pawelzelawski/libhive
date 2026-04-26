@@ -101,10 +101,14 @@ standalone HPACK public API.
 - Hash index for large tables (ARCHITECTURE.md §4.9)
 - Standalone `hive_hpack_encoder_t` and `hive_hpack_decoder_t` objects
 
-### 3.4 Stream Table (`src/hive_stream.c`, `src/hive_stream.h`)
+### 3.4 Stream Table (`src/hive.c`)
 
 **Purpose**: Two-layer stream state store: open-addressed hash table for
 O(1) lookup and pre-allocated slot array for state storage.
+
+**Note**: originally planned as a separate `hive_stream.c`/`hive_stream.h`
+pair; merged into `hive.c` during Phase 4 implementation. All stream table
+symbols remain internal and are declared in `hive_internal.h`.
 
 **Responsibilities**:
 - `stream_open()`, `stream_lookup()`, `stream_close()`
@@ -113,10 +117,14 @@ O(1) lookup and pre-allocated slot array for state storage.
 - Free stack management (O(1) slot alloc and free)
 - Stream state transitions (ARCHITECTURE.md §5.3)
 
-### 3.5 Flow Control (`src/hive_flow.c`, `src/hive_flow.h`)
+### 3.5 Flow Control (`src/hive_frame.c`)
 
 **Purpose**: Connection-level and stream-level flow control windows, and
 coalesced WINDOW_UPDATE emission.
+
+**Note**: originally planned as a separate `hive_flow.c`/`hive_flow.h`
+pair; merged into `hive_frame.c` during Phase 5 implementation alongside
+the receive state machine that consumes DATA frames.
 
 **Responsibilities**:
 - Receive window tracking: `recv_consumed` per stream and per connection
@@ -142,16 +150,23 @@ coalesced WINDOW_UPDATE emission.
   limits at `hive_session_send()` time
 - iovec overflow handling (ARCHITECTURE.md §6.7)
 
-### 3.7 Security (`src/hive_security.c`, `src/hive_security.h`)
+### 3.7 Security (`src/hive_frame.c`, `src/hive_hpack.c`)
 
 **Purpose**: All flood detection and exhaustion protection logic.
+
+**Note**: originally planned as a separate `hive_security.c`/`hive_security.h`
+pair; implemented directly in `hive_frame.c` (frame-level checks) and
+`hive_hpack.c` (HPACK bomb protection and HTTP messaging validation) during
+Phase 7. There is no separate security module.
 
 **Responsibilities**:
 - HPACK bomb: decoded size and count limits (ARCHITECTURE.md §8.2)
 - CONTINUATION flood: compressed reassembly cap (ARCHITECTURE.md §8.3)
-- SETTINGS flood: pending queue limit and GOAWAY (ARCHITECTURE.md §8.4)
+- SETTINGS flood: inbound counter and GOAWAY (ARCHITECTURE.md §8.4)
 - RST_STREAM flood: rolling rate counter and callback (ARCHITECTURE.md §8.5)
 - Stream ID exhaustion: auto-GOAWAY threshold (ARCHITECTURE.md §8.6)
+- HTTP messaging validation: RFC 9113 §8 rules (ARCHITECTURE.md §8)
+- `hive_buf_t` ASan poisoning: ephemeral region marking (ARCHITECTURE.md §8.8)
 
 Note: the HPACK always-copy rule (ARCHITECTURE.md §8.1) is enforced inside
 `hive_hpack.c` at every dynamic table insertion. It is not a security module
@@ -344,10 +359,7 @@ LIB_SRC = src/hive.c             \
            src/hive_frame_bare.c \
            src/hive_frame.c      \
            src/hive_hpack.c      \
-           src/hive_stream.c     \
-           src/hive_flow.c       \
            src/hive_send.c       \
-           src/hive_security.c   \
            $(COMPAT_SRC)
 
 LIB_OBJ = $(LIB_SRC:.c=.o)
@@ -356,18 +368,21 @@ libhive.a: $(LIB_OBJ)
     $(AR) rcs $@ $^
 ```
 
+Stream table (§3.4), flow control (§3.5), and security (§3.7) logic are
+implemented directly in `hive.c` and `hive_frame.c` — there are no separate
+`hive_stream.c`, `hive_flow.c`, or `hive_security.c` files.
+
 ### 5.6 Test Binary Structure
 
 ```makefile
 TEST_SRC = tests/test_hpack.c       \
            tests/test_frame.c       \
-           tests/test_stream.c      \
            tests/test_flow.c        \
            tests/test_session.c     \
            tests/test_security.c    \
            tests/run_tests.c
 
-TEST_BIN = tests/run_tests
+TEST_BIN = build/tests/run_tests
 
 $(TEST_BIN): $(TEST_SRC) libhive.a
     $(CC) $(CFLAGS) $(CFLAGS_FT) $(CFLAGS_OS) \
@@ -376,6 +391,9 @@ $(TEST_BIN): $(TEST_SRC) libhive.a
 
 `tests/test_harness.h` is a header included by each test file — it is not
 a compiled source file and must not appear in TEST_SRC.
+
+Stream table tests are in `tests/test_session.c` (not a separate
+`test_stream.c`), co-located with session creation and send-queue tests.
 
 ---
 

@@ -1,18 +1,20 @@
 # Makefile — libhive build system
 #
 # Targets:
-#   make / make dev   - debug build with ASan/UBSan (Linux only)
-#   make release      - optimised hardened build
-#   make test         - build and run unit tests (ASan/UBSan)
-#   make test-tsan    - TSan build, Linux only
-#   make valgrind     - run tests under Valgrind, Linux only
+#   make / make dev    - debug build with ASan/UBSan (Linux only)
+#   make release       - optimised hardened build
+#   make test          - build and run unit tests (ASan/UBSan)
+#   make test-clock    - rebuild library with -DHIVE_TEST_CLOCK=1 and run
+#                        all tests; required for RST_STREAM flood tests
+#   make test-tsan     - TSan build, Linux only
+#   make valgrind      - run tests under Valgrind, Linux only
 #   make h2spec-server - build conformance test server
-#   make h2spec       - run h2spec conformance suite
-#   make tools        - build developer tools (frame decoder)
-#   make lint         - clang-tidy + cppcheck
-#   make format       - clang-format -i on all sources
-#   make clean        - remove build artifacts
-#   make install      - install libhive.a and include/hive.h
+#   make h2spec        - run h2spec conformance suite
+#   make tools         - build developer tools (frame decoder)
+#   make lint          - clang-tidy + cppcheck
+#   make format        - clang-format -i on all sources
+#   make clean         - remove build artifacts
+#   make install       - install libhive.a and include/hive.h
 #
 # Compatible with GNU make (Linux) and BSD make (OpenBSD).
 # Uses != for shell assignment - supported by GNU make >= 3.82 and BSD make.
@@ -70,22 +72,26 @@ CFLAGS_TSAN = $(CSTD) $(CWARN) $(CFLAGS_FT) $(CFLAGS_OS) \
               -fno-omit-frame-pointer \
               -DDEBUG \
               -DHIVE_DEBUG=1
-# Extra flags hook: make dev EXTRA_CFLAGS=-DHIVE_TEST_CLOCK=1
+# Extra flags hook for one-off overrides (e.g. EXTRA_CFLAGS=-DX=1).
+# Use `make test-clock` for the RST_STREAM flood clock tests.
 EXTRA_CFLAGS ?=
 INCLUDES = -I include/
 # --- Build paths ------------------------------------------------------------
-BUILD_DIR       = build
-BUILD_REL_DIR   = $(BUILD_DIR)/rel
-BUILD_VG_DIR    = $(BUILD_DIR)/vg
-BUILD_TSAN_DIR  = $(BUILD_DIR)/tsan
-BUILD_TEST_DIR  = $(BUILD_DIR)/tests
-BUILD_TOOLS_DIR = $(BUILD_DIR)/tools
-LIB_DEV  = $(BUILD_DIR)/libhive.a
-LIB_REL  = $(BUILD_REL_DIR)/libhive.a
-LIB_VG   = $(BUILD_VG_DIR)/libhive.a
-LIB_TSAN = $(BUILD_TSAN_DIR)/libhive.a
-TEST_BIN    = $(BUILD_TEST_DIR)/run_tests
-TEST_BIN_VG = $(BUILD_TEST_DIR)/run_tests_vg
+BUILD_DIR        = build
+BUILD_REL_DIR    = $(BUILD_DIR)/rel
+BUILD_VG_DIR     = $(BUILD_DIR)/vg
+BUILD_TSAN_DIR   = $(BUILD_DIR)/tsan
+BUILD_CLOCK_DIR  = $(BUILD_DIR)/clock
+BUILD_TEST_DIR   = $(BUILD_DIR)/tests
+BUILD_TOOLS_DIR  = $(BUILD_DIR)/tools
+LIB_DEV   = $(BUILD_DIR)/libhive.a
+LIB_REL   = $(BUILD_REL_DIR)/libhive.a
+LIB_VG    = $(BUILD_VG_DIR)/libhive.a
+LIB_TSAN  = $(BUILD_TSAN_DIR)/libhive.a
+LIB_CLOCK = $(BUILD_CLOCK_DIR)/libhive.a
+TEST_BIN       = $(BUILD_TEST_DIR)/run_tests
+TEST_BIN_VG    = $(BUILD_TEST_DIR)/run_tests_vg
+TEST_BIN_CLOCK = $(BUILD_TEST_DIR)/run_tests_tsclock
 # Top-level copy — embedders and TECH_STACK.md reference libhive.a here.
 LIBHIVE_A = libhive.a
 # --- Test source ------------------------------------------------------------
@@ -101,7 +107,7 @@ PREFIX     ?= /usr/local
 LIBDIR     ?= $(PREFIX)/lib
 INCLUDEDIR ?= $(PREFIX)/include
 # --- Phony targets ----------------------------------------------------------
-.PHONY: all dev release test test-asan test-tsan valgrind \
+.PHONY: all dev release test test-asan test-tsan test-clock valgrind \
         h2spec-server h2spec tools lint format clean install
 all: dev
 # --- Development build ------------------------------------------------------
@@ -114,6 +120,15 @@ release: $(LIB_REL)
 test: $(TEST_BIN)
 	sh tests/run_tests.sh
 test-asan: test
+# --- Test with clock abstraction (RST_STREAM flood tests) ------------------
+# Recompiles the library with -DHIVE_TEST_CLOCK=1 so that hive_monotonic_secs()
+# reads from hive_test_clock_secs instead of CLOCK_MONOTONIC. Required for
+# test_rst_stream_flood_callback and test_rst_stream_flood_window_reset.
+test-clock: $(LIB_CLOCK)
+	@mkdir -p $(BUILD_TEST_DIR)
+	$(CC) $(CFLAGS_DEV) -DHIVE_TEST_CLOCK=1 $(EXTRA_CFLAGS) $(INCLUDES) \
+	    $(TEST_SRC) $(LIB_CLOCK) -o $(TEST_BIN_CLOCK)
+	$(TEST_BIN_CLOCK)
 # --- TSan (Linux only) ------------------------------------------------------
 test-tsan: $(LIB_TSAN)
 	@mkdir -p $(BUILD_TEST_DIR)
@@ -250,6 +265,26 @@ $(LIB_TSAN): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c 
 	    $(BUILD_TSAN_DIR)/hive_frame_bare.o $(BUILD_TSAN_DIR)/hive_frame.o \
 	    $(BUILD_TSAN_DIR)/hive_send.o
 	test -z "$(COMPAT_SRC)" || ar qs $(LIB_TSAN) $(BUILD_TSAN_DIR)/compat_str.o
+# --- Clock-test library (ASan/UBSan + HIVE_TEST_CLOCK=1) -------------------
+$(LIB_CLOCK): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c src/hive_send.c $(COMPAT_SRC)
+	@mkdir -p $(BUILD_CLOCK_DIR)
+	$(CC) $(CFLAGS_DEV) -DHIVE_TEST_CLOCK=1 $(EXTRA_CFLAGS) $(INCLUDES) \
+	    -c src/hive.c -o $(BUILD_CLOCK_DIR)/hive.o
+	$(CC) $(CFLAGS_DEV) -DHIVE_TEST_CLOCK=1 $(EXTRA_CFLAGS) $(INCLUDES) \
+	    -c src/hive_hpack.c -o $(BUILD_CLOCK_DIR)/hive_hpack.o
+	$(CC) $(CFLAGS_DEV) -DHIVE_TEST_CLOCK=1 $(EXTRA_CFLAGS) $(INCLUDES) \
+	    -c src/hive_frame_bare.c -o $(BUILD_CLOCK_DIR)/hive_frame_bare.o
+	$(CC) $(CFLAGS_DEV) -DHIVE_TEST_CLOCK=1 $(EXTRA_CFLAGS) $(INCLUDES) \
+	    -c src/hive_frame.c -o $(BUILD_CLOCK_DIR)/hive_frame.o
+	$(CC) $(CFLAGS_DEV) -DHIVE_TEST_CLOCK=1 $(EXTRA_CFLAGS) $(INCLUDES) \
+	    -c src/hive_send.c -o $(BUILD_CLOCK_DIR)/hive_send.o
+	test -z "$(COMPAT_SRC)" || \
+	    $(CC) $(CFLAGS_DEV) -DHIVE_TEST_CLOCK=1 $(EXTRA_CFLAGS) $(INCLUDES) \
+	    -c src/compat_str.c -o $(BUILD_CLOCK_DIR)/compat_str.o
+	ar rcs $(LIB_CLOCK) $(BUILD_CLOCK_DIR)/hive.o $(BUILD_CLOCK_DIR)/hive_hpack.o \
+	    $(BUILD_CLOCK_DIR)/hive_frame_bare.o $(BUILD_CLOCK_DIR)/hive_frame.o \
+	    $(BUILD_CLOCK_DIR)/hive_send.o
+	test -z "$(COMPAT_SRC)" || ar qs $(LIB_CLOCK) $(BUILD_CLOCK_DIR)/compat_str.o
 # --- Test binary (ASan/UBSan) -----------------------------------------------
 $(TEST_BIN): $(LIB_DEV) $(TEST_SRC)
 	@mkdir -p $(BUILD_TEST_DIR)

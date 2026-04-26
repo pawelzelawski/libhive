@@ -276,6 +276,10 @@ settings_payload_complete(hive_session_t *s)
 		return 0;
 	}
 
+	/* SECURITY: SETTINGS flood protection. Track inbound non-ACK SETTINGS
+	 * frames via inbound_settings_count (ARCHITECTURE.md §8.4).  Exceeding
+	 * opt_max_settings_pending before our ACK is queued is a connection
+	 * error (GOAWAY PROTOCOL_ERROR); see CODING_STANDARDS.md §4.2. */
 	s->inbound_settings_count++;
 	if (s->inbound_settings_count > s->opt_max_settings_pending)
 		return protocol_error(s);
@@ -895,6 +899,14 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				if (s->pad_remaining > 0) {
 					s->recv_state = RECV_DATA_PAD;
 				} else {
+					/* SECURITY: Content-Length consistency
+					 * enforcement. RFC 9113 §8.1.2 requires
+					 * that the number of DATA bytes matches
+					 * the value declared in Content-Length.
+					 * Mismatch is a stream error
+					 * (RST_STREAM PROTOCOL_ERROR). See
+					 * ARCHITECTURE.md §8.7 and
+					 * CODING_STANDARDS.md §4.2. */
 					if ((s->cur_frame.flags &
 					     HIVE_FLAG_END_STREAM) != 0 &&
 					    have_stream_state &&
@@ -930,6 +942,13 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 
 					dst = stream_lookup(
 					    s, s->cur_frame.stream_id);
+					/* SECURITY: Content-Length consistency
+					 * enforcement (padded DATA path). Same
+					 * rule as the non-padded path: mismatch
+					 * between received DATA bytes and the
+					 * Content-Length header is a stream
+					 * error (RST_STREAM PROTOCOL_ERROR).
+					 * See ARCHITECTURE.md §8.7. */
 					if (dst != NULL &&
 					    s->opt_no_http_messaging == 0 &&
 					    dst->content_length_expected !=
@@ -1149,8 +1168,8 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				/* SECURITY: Total header block accumulated via
 				 * PUSH_PROMISE + CONTINUATION must not exceed
 				 * opt_max_continuation_size.  Prevents
-				 * header-block bomb attacks
-				 * (ARCHITECTURE.md §8.2). */
+				 * CONTINUATION flood attacks
+				 * (ARCHITECTURE.md §8.3). */
 				if ((s->reassembly_len + n) >
 				    s->opt_max_continuation_size) {
 					return protocol_error(s);
