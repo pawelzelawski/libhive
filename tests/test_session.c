@@ -62,6 +62,8 @@ int test_submit_ping_ack(void);
 int test_submit_request_assigns_stream_id(void);
 int test_submit_request_max_concurrent_honored(void);
 int test_submit_request_with_body(void);
+int test_stream_get_state(void);
+int test_stream_user_data(void);
 int test_options_defaults(void);
 int test_options_set_valid(void);
 int test_options_set_invalid(void);
@@ -1797,6 +1799,62 @@ test_submit_request_with_body(void)
 	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) != 0u);
 	ASSERT(cap.iov[2].iov_len == 5u);
 	ASSERT(memcmp(cap.iov[2].iov_base, "hello", 5u) == 0);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_stream_get_state(void)
+{
+	static const uint8_t n_etag[] = "etag";
+	static const uint8_t v_etag[] = "abc";
+	hive_nv_t nva[1];
+	hive_session_t *s;
+
+	s = new_server_send_session();
+
+	ASSERT(hive_stream_get_state(s, 1u) == HIVE_STREAM_IDLE);
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+	ASSERT(hive_stream_get_state(s, 1u) == HIVE_STREAM_OPEN);
+
+	nva[0].name = n_etag;
+	nva[0].value = v_etag;
+	nva[0].name_len = sizeof(n_etag) - 1u;
+	nva[0].value_len = sizeof(v_etag) - 1u;
+	nva[0].flags = 0u;
+	ASSERT(hive_submit_trailers(s, 1u, nva, 1u) == HIVE_OK);
+	ASSERT(hive_stream_get_state(s, 1u) == HIVE_STREAM_HALF_CLOSED_LOCAL);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_stream_user_data(void)
+{
+	hive_session_t *s;
+	hive_stream_t *st;
+	uint32_t marker;
+
+	marker = 0x12345678u;
+	s = new_server_send_session();
+
+	ASSERT(hive_stream_set_user_data(s, 1u, &marker) ==
+	    HIVE_ERR_STREAM_CLOSED);
+	ASSERT(hive_stream_get_user_data(s, 1u) == NULL);
+
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+	ASSERT(hive_stream_set_user_data(s, 1u, &marker) == HIVE_OK);
+	ASSERT(hive_stream_get_user_data(s, 1u) == &marker);
+
+	st = stream_lookup(s, 1u);
+	ASSERT(st != NULL);
+	stream_close(s, st);
+
+	ASSERT(hive_stream_get_user_data(s, 1u) == NULL);
+	ASSERT(hive_stream_set_user_data(s, 1u, &marker) ==
+	    HIVE_ERR_STREAM_CLOSED);
 
 	hive_session_free(s);
 	return 1;

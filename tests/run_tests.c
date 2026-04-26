@@ -141,6 +141,8 @@ int test_submit_ping_ack(void);
 int test_submit_request_assigns_stream_id(void);
 int test_submit_request_max_concurrent_honored(void);
 int test_submit_request_with_body(void);
+int test_stream_get_state(void);
+int test_stream_user_data(void);
 int test_options_defaults(void);
 int test_options_set_valid(void);
 int test_options_set_invalid(void);
@@ -239,6 +241,8 @@ main(void)
 	RUN(on_ping_fires_when_no_auto_ack);
 	RUN(on_ping_ack_fires);
 	RUN(on_connection_error_fires_before_goaway);
+	RUN(stream_get_state);
+	RUN(stream_user_data);
 
 	/* Phase 4.2 — options API */
 	RUN(options_defaults);

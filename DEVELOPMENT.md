@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-26
 **Current Phase**: Phase 6 — Submit and Send
-**Next Task**: 6.8 — Stream introspection
+**Next Task**: 7.1 — CONTINUATION flood protection (§8.3)
 
 ### Phase Summary
 
@@ -1012,7 +1012,7 @@ are wired. Two-phase GOAWAY works. Stream introspection functions work.
 - `on_ping_ack`: fire in RECV_PING_PAYLOAD when ACK=1
 - `on_connection_error`: fire in `session_error()` before GOAWAY is queued
 
-**6.8 — Stream introspection**
+**6.8 — Stream introspection** ✓ DONE
 - `hive_stream_get_state()` — return `hive_stream_state_t` for a stream_id;
   return `HIVE_STREAM_IDLE` if not found
 - `hive_stream_set_user_data()` — set `stream->user_data`; return

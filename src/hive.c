@@ -1558,9 +1558,16 @@ hive_session_get_remote_settings(hive_session_t *session)
 int
 hive_stream_get_state(hive_session_t *session, uint32_t stream_id)
 {
-	(void)session;
-	(void)stream_id;
-	return -1;
+	const hive_stream_t *stream;
+
+	if (session == NULL)
+		return HIVE_STREAM_IDLE;
+
+	stream = stream_lookup(session, stream_id);
+	if (stream == NULL)
+		return HIVE_STREAM_IDLE;
+
+	return stream->state;
 }
 
 int
@@ -1568,18 +1575,32 @@ hive_stream_set_user_data(hive_session_t *session,
                           uint32_t stream_id,
                           void *user_data)
 {
-	(void)session;
-	(void)stream_id;
-	(void)user_data;
-	return HIVE_ERR_SESSION_CLOSED;
+	hive_stream_t *stream;
+
+	if (session == NULL)
+		return HIVE_ERR_INVALID_ARG;
+
+	stream = stream_lookup(session, stream_id);
+	if (stream == NULL)
+		return HIVE_ERR_STREAM_CLOSED;
+
+	stream->user_data = user_data;
+	return HIVE_OK;
 }
 
 void *
 hive_stream_get_user_data(hive_session_t *session, uint32_t stream_id)
 {
-	(void)session;
-	(void)stream_id;
-	return NULL;
+	const hive_stream_t *stream;
+
+	if (session == NULL)
+		return NULL;
+
+	stream = stream_lookup(session, stream_id);
+	if (stream == NULL)
+		return NULL;
+
+	return stream->user_data;
 }
 
 int
