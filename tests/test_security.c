@@ -20,6 +20,14 @@ int test_settings_unsolicited_ack(void);
 int test_rst_stream_flood_callback(void);
 int test_rst_stream_flood_window_reset(void);
 int test_stream_id_exhaustion_triggers_prepare(void);
+int test_http_messaging_pseudo_after_regular(void);
+int test_http_messaging_unknown_pseudo_header(void);
+int test_http_messaging_duplicate_pseudo_header(void);
+int test_http_messaging_pseudo_header_in_trailers(void);
+int test_http_messaging_uppercase_field_name(void);
+int test_http_messaging_forbidden_connection_header(void);
+int test_http_messaging_te_invalid_value(void);
+int test_http_messaging_content_length_mismatch(void);
 
 #if defined(HIVE_TEST_CLOCK) && HIVE_TEST_CLOCK == 1
 uint64_t hive_test_clock_secs;
@@ -77,6 +85,23 @@ send_cb_full(hive_session_t *session,
 	return total;
 }
 
+static int
+on_header_noop(hive_session_t *session,
+	uint32_t stream_id,
+	hive_buf_t *name,
+	hive_buf_t *value,
+	uint8_t flags,
+	void *user_data)
+{
+	(void)session;
+	(void)stream_id;
+	(void)name;
+	(void)value;
+	(void)flags;
+	(void)user_data;
+	return HIVE_OK;
+}
+
 static size_t
 build_settings_frame(uint8_t *dst, uint8_t flags)
 {
@@ -96,6 +121,67 @@ u32be_at(const uint8_t *p)
 {
 	return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
 	       ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+static size_t
+build_data_frame(uint8_t *dst,
+	    uint32_t stream_id,
+	    uint8_t flags,
+	    const uint8_t *payload,
+	    size_t payload_len)
+{
+	frame_hdr_write_at(
+	    dst, (uint32_t)payload_len, HIVE_FRAME_DATA, flags, stream_id);
+	if (payload_len > 0)
+		memcpy(dst + 9, payload, payload_len);
+	return 9u + payload_len;
+}
+
+static size_t
+build_headers_frame_hpack(hive_session_t *s,
+	    uint8_t *dst,
+	    size_t dst_cap,
+	    uint32_t stream_id,
+	    uint8_t flags,
+	    const hive_nv_t *nva,
+	    size_t nvlen)
+{
+	uint8_t block[1024];
+	size_t block_len;
+
+	block_len = sizeof(block);
+	ASSERT(hpack_encode_block(&s->enc_table,
+	                          &s->mem,
+	                          nva,
+	                          nvlen,
+	                          block,
+	                          sizeof(block),
+	                          &block_len) == HIVE_OK);
+	ASSERT(dst_cap >= 9u + block_len);
+
+	frame_hdr_write_at(dst,
+	                  (uint32_t)block_len,
+	                  HIVE_FRAME_HEADERS,
+	                  (uint8_t)(flags | HIVE_FLAG_END_HEADERS),
+	                  stream_id);
+	if (block_len > 0)
+		memcpy(dst + 9, block, block_len);
+	return 9u + block_len;
+}
+
+static int
+assert_rst_protocol(hive_session_t *s, uint32_t stream_id)
+{
+	frame_hdr_t hdr;
+
+	ASSERT(s->closed == 0u);
+	ASSERT(s->send_iov_count == 1);
+	frame_hdr_parse(s->send_buf, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_RST_STREAM);
+	ASSERT(hdr.stream_id == stream_id);
+	ASSERT(hdr.length == 4u);
+	ASSERT(u32be_at(s->send_buf + 9) == HIVE_H2_PROTOCOL_ERROR);
+	return 1;
 }
 
 static hive_session_t *
@@ -120,6 +206,7 @@ new_server_security_session(uint32_t max_settings_pending,
 
 	memset(&cb, 0, sizeof(cb));
 	cb.send = send_cb_full;
+	cb.on_header = on_header_noop;
 	cb.on_rst_stream_flood = on_rst_stream_flood;
 
 	s = hive_session_server_new(NULL, opt, &cb, user_data);
@@ -283,6 +370,192 @@ test_stream_id_exhaustion_triggers_prepare(void)
 	ASSERT(hdr.stream_id == 0u);
 	ASSERT(u32be_at(s->send_buf + 9) == 0x7fffffffu);
 	ASSERT(u32be_at(s->send_buf + 13) == HIVE_H2_NO_ERROR);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_http_messaging_pseudo_after_regular(void)
+{
+	hive_session_t *s;
+	uint8_t frame[256];
+	size_t n;
+	static const hive_nv_t headers[] = {
+		{(const uint8_t *)"content-type", (const uint8_t *)"text/plain",
+		    12u, 10u, 0u},
+		{(const uint8_t *)":method", (const uint8_t *)"GET", 7u, 3u, 0u},
+	};
+
+	s = new_server_security_session(3u, 100u, 10u, NULL, NULL);
+	n = build_headers_frame_hpack(
+	    s, frame, sizeof(frame), 1u, 0u, headers, 2u);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(assert_rst_protocol(s, 1u));
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_http_messaging_unknown_pseudo_header(void)
+{
+	hive_session_t *s;
+	uint8_t frame[256];
+	size_t n;
+	static const hive_nv_t headers[] = {
+		{(const uint8_t *)":bogus", (const uint8_t *)"x", 6u, 1u, 0u},
+	};
+
+	s = new_server_security_session(3u, 100u, 10u, NULL, NULL);
+	n = build_headers_frame_hpack(
+	    s, frame, sizeof(frame), 1u, 0u, headers, 1u);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(assert_rst_protocol(s, 1u));
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_http_messaging_duplicate_pseudo_header(void)
+{
+	hive_session_t *s;
+	uint8_t frame[256];
+	size_t n;
+	static const hive_nv_t headers[] = {
+		{(const uint8_t *)":method", (const uint8_t *)"GET", 7u, 3u, 0u},
+		{(const uint8_t *)":method", (const uint8_t *)"POST", 7u, 4u, 0u},
+	};
+
+	s = new_server_security_session(3u, 100u, 10u, NULL, NULL);
+	n = build_headers_frame_hpack(
+	    s, frame, sizeof(frame), 1u, 0u, headers, 2u);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(assert_rst_protocol(s, 1u));
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_http_messaging_pseudo_header_in_trailers(void)
+{
+	hive_session_t *s;
+	uint8_t frame1[256];
+	uint8_t frame2[256];
+	size_t n1;
+	size_t n2;
+	static const hive_nv_t headers1[] = {
+		{(const uint8_t *)"content-type", (const uint8_t *)"text/plain",
+		    12u, 10u, 0u},
+	};
+	static const hive_nv_t headers2[] = {
+		{(const uint8_t *)":method", (const uint8_t *)"GET", 7u, 3u, 0u},
+	};
+
+	s = new_server_security_session(3u, 100u, 10u, NULL, NULL);
+	n1 = build_headers_frame_hpack(
+	    s, frame1, sizeof(frame1), 1u, 0u, headers1, 1u);
+	ASSERT(hive_session_recv(s, frame1, n1) == (ssize_t)n1);
+	ASSERT(s->send_iov_count == 0);
+
+	n2 = build_headers_frame_hpack(
+	    s, frame2, sizeof(frame2), 1u, HIVE_FLAG_END_STREAM, headers2, 1u);
+	ASSERT(hive_session_recv(s, frame2, n2) == (ssize_t)n2);
+	ASSERT(assert_rst_protocol(s, 1u));
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_http_messaging_uppercase_field_name(void)
+{
+	hive_session_t *s;
+	uint8_t frame[256];
+	size_t n;
+	static const hive_nv_t headers[] = {
+		{(const uint8_t *)"Content-Type", (const uint8_t *)"text/plain",
+		    12u, 10u, 0u},
+	};
+
+	s = new_server_security_session(3u, 100u, 10u, NULL, NULL);
+	n = build_headers_frame_hpack(
+	    s, frame, sizeof(frame), 1u, 0u, headers, 1u);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(assert_rst_protocol(s, 1u));
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_http_messaging_forbidden_connection_header(void)
+{
+	hive_session_t *s;
+	uint8_t frame[256];
+	size_t n;
+	static const hive_nv_t headers[] = {
+		{(const uint8_t *)"connection", (const uint8_t *)"keep-alive",
+		    10u, 10u, 0u},
+	};
+
+	s = new_server_security_session(3u, 100u, 10u, NULL, NULL);
+	n = build_headers_frame_hpack(
+	    s, frame, sizeof(frame), 1u, 0u, headers, 1u);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(assert_rst_protocol(s, 1u));
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_http_messaging_te_invalid_value(void)
+{
+	hive_session_t *s;
+	uint8_t frame[256];
+	size_t n;
+	static const hive_nv_t headers[] = {
+		{(const uint8_t *)"te", (const uint8_t *)"gzip", 2u, 4u, 0u},
+	};
+
+	s = new_server_security_session(3u, 100u, 10u, NULL, NULL);
+	n = build_headers_frame_hpack(
+	    s, frame, sizeof(frame), 1u, 0u, headers, 1u);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(assert_rst_protocol(s, 1u));
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_http_messaging_content_length_mismatch(void)
+{
+	hive_session_t *s;
+	uint8_t headers[256];
+	uint8_t data_frame[80];
+	uint8_t body[50];
+	size_t n;
+	static const hive_nv_t req_headers[] = {
+		{(const uint8_t *)"content-length", (const uint8_t *)"100", 14u,
+		    3u, 0u},
+	};
+
+	memset(body, 'x', sizeof(body));
+	s = new_server_security_session(3u, 100u, 10u, NULL, NULL);
+
+	n = build_headers_frame_hpack(
+	    s, headers, sizeof(headers), 1u, 0u, req_headers, 1u);
+	ASSERT(hive_session_recv(s, headers, n) == (ssize_t)n);
+	ASSERT(s->send_iov_count == 0);
+
+	n = build_data_frame(
+	    data_frame, 1u, HIVE_FLAG_END_STREAM, body, sizeof(body));
+	ASSERT(hive_session_recv(s, data_frame, n) == (ssize_t)n);
+	ASSERT(assert_rst_protocol(s, 1u));
 
 	hive_session_free(s);
 	return 1;

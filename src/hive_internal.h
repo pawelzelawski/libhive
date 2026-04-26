@@ -91,6 +91,9 @@ typedef enum {
 	HIVE_STREAM_RESERVED_REMOTE = 6, /* client received PUSH_PROMISE */
 } hive_stream_state_t;
 
+/* Internal hive_stream_t::flags bits. */
+#define HIVE_STREAM_FLAG_HEADERS_SEEN 0x01u
+
 /*
  * Per-stream state object — pool-allocated from stream_slots[].
  * stream_id == 0 means the slot is not in use.

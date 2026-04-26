@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-26
 **Current Phase**: Phase 7 — Security Hardening
-**Next Task**: 7.5 — HTTP messaging validation (RFC 9113 §8)
+**Next Task**: 8.1 — h2c Upgrade path
 
 ### Phase Summary
 
@@ -16,7 +16,7 @@
 | 4 | Session Core | DONE | 32/32 (Phase 4 slice) | Tasks 4.0–4.7 done on Linux + OpenBSD; completion criteria confirmed 2026-04-25 |
 | 5 | Flow Control and DATA | DONE | All Phase 5 tests pass (Linux + OpenBSD) | Receive-side enforcement, WINDOW_UPDATE, DATA delivery |
 | 6 | Submit and Send | DONE | All Phase 6 tests pass (Linux + OpenBSD) | Full send queue, partial-send, response/request submit, new callbacks |
-| 7 | Security Hardening | IN PROGRESS | Tasks 7.1-7.4 verified (Linux + OpenBSD) | Flood protection, exhaustion, limits, Content-Length, clock abstraction |
+| 7 | Security Hardening | IN PROGRESS | Tasks 7.1-7.6 verified (Linux + OpenBSD) | Flood protection, exhaustion, limits, HTTP messaging validation, buffer lifetime |
 | 8 | h2c and Server Push | NOT STARTED | — | Upgrade path, PUSH_PROMISE, two-phase GOAWAY, client role |
 | 9 | Conformance and Polish | NOT STARTED | — | h2spec, README, API reference, tools |
 
@@ -1162,7 +1162,7 @@ configurable via the options API.
   call `hive_submit_goaway_prepare(s)` — not `hive_submit_goaway_final()`,
   as the two-phase approach is correct here (allow in-flight streams to finish)
 
-**7.5 — HTTP messaging validation (RFC 9113 §8) — complete**
+**7.5 — HTTP messaging validation (RFC 9113 §8)** ✓ DONE
 - When `opt_no_http_messaging == 0`, enforce fully in `hpack_decode_block()`:
   - Pseudo-header ordering: pseudo-headers must appear before regular headers
   - Unknown pseudo-headers → RST_STREAM PROTOCOL_ERROR
@@ -1178,7 +1178,7 @@ configurable via the options API.
     and `content_length_received` (uint64_t) are already part of `hive_stream_t`
     as defined in Phase 4; the `_Static_assert` already reflects the 64-byte size.
 
-**7.6 — `hive_buf_t` ASan poisoning (by-pointer delivery)**
+**7.6 — `hive_buf_t` ASan poisoning (by-pointer delivery)** ✓ DONE
 - In `hpack_decode_block()`, after `on_header` callback returns:
   - Clear `HIVE_BUF_VALID` in `name->flags` and `value->flags`
     (the library's own handle objects, addressed via the pointers passed
@@ -1241,14 +1241,14 @@ File: `tests/test_security.c`
 
 ### Phase 7 Completion Criteria
 
-- [ ] CONTINUATION flood test confirms connection error (GOAWAY), not RST_STREAM
-- [ ] SETTINGS flood test confirms `inbound_settings_count` is the counter
+- [x] CONTINUATION flood test confirms connection error (GOAWAY), not RST_STREAM
+- [x] SETTINGS flood test confirms `inbound_settings_count` is the counter
 - [x] RST_STREAM flood tests pass using clock abstraction (no sleep)
 - [x] Stream ID exhaustion triggers prepare-phase GOAWAY, not final GOAWAY
-- [ ] HTTP messaging validation tests pass: all rule categories covered
-- [ ] Content-Length consistency enforcement passes
+- [x] HTTP messaging validation tests pass: all rule categories covered
+- [x] Content-Length consistency enforcement passes
 - [ ] Quality milestone M8 confirmed (allocator discipline audit)
-- [ ] All Phase 7 tests pass on Linux and OpenBSD
+- [x] All Phase 7 tests pass on Linux and OpenBSD
 - [ ] Valgrind clean; ASan/UBSan clean on both platforms
 
 ---

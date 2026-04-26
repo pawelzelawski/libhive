@@ -1530,16 +1530,45 @@ hive_session_feed_upgrade_headers(hive_session_t *session,
 int
 hive_buf_retain(hive_session_t *session, hive_buf_t *buf)
 {
-	(void)session;
-	(void)buf;
-	return HIVE_ERR_SESSION_CLOSED;
+	uint8_t *copy;
+
+	if (session == NULL || buf == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if ((buf->flags & HIVE_BUF_VALID) == 0)
+		return HIVE_ERR_INVALID_ARG;
+	if ((buf->flags & HIVE_BUF_OWNED) != 0)
+		return HIVE_OK;
+
+	if (buf->len == 0) {
+		buf->flags |= HIVE_BUF_OWNED;
+		return HIVE_OK;
+	}
+
+	copy = session->mem.malloc(buf->len, session->mem.ctx);
+	if (copy == NULL)
+		return HIVE_ERR_NOMEM;
+
+	/* Source memory may be poisoned in HIVE_DEBUG once callback returns. */
+	HIVE_ASAN_UNPOISON(buf->data, buf->len);
+	memcpy(copy, buf->data, buf->len);
+	buf->data = copy;
+	buf->flags |= HIVE_BUF_OWNED;
+
+	return HIVE_OK;
 }
 
 void
 hive_buf_free(hive_session_t *session, hive_buf_t *buf)
 {
-	(void)session;
-	(void)buf;
+	if (session == NULL || buf == NULL)
+		return;
+
+	if ((buf->flags & HIVE_BUF_OWNED) != 0 && buf->data != NULL)
+		session->mem.free((void *)buf->data, session->mem.ctx);
+
+	buf->data = NULL;
+	buf->len = 0;
+	buf->flags = 0;
 }
 
 int32_t

@@ -1647,13 +1647,169 @@ hpack_poison_if_ephemeral(const hive_session_t *s, const hive_buf_t *buf)
 	}
 }
 
+typedef struct {
+	int pseudo_done;
+	uint8_t pseudo_seen;
+	int is_trailer_block;
+} hpack_http_state_t;
+
+#define HPACK_PSEUDO_METHOD 0x01u
+#define HPACK_PSEUDO_SCHEME 0x02u
+#define HPACK_PSEUDO_PATH 0x04u
+#define HPACK_PSEUDO_STATUS 0x08u
+#define HPACK_PSEUDO_AUTHORITY 0x10u
+
 static int
-hpack_validate_http_messaging_stub(const hive_buf_t *name,
-                                   const hive_buf_t *value)
+hpack_ascii_has_uppercase(const hive_buf_t *name)
 {
-	(void)name;
-	(void)value;
-	/* Full RFC 9113 §8 validation is implemented in Phase 7. */
+	size_t i;
+
+	for (i = 0; i < name->len; i++) {
+		if (name->data[i] >= 'A' && name->data[i] <= 'Z')
+			return 1;
+	}
+
+	return 0;
+}
+
+static int
+hpack_buf_equal_lit(const hive_buf_t *buf, const char *lit)
+{
+	size_t i;
+
+	for (i = 0; i < buf->len; i++) {
+		if (lit[i] == '\0' || buf->data[i] != (uint8_t)lit[i])
+			return 0;
+	}
+
+	return lit[i] == '\0';
+}
+
+static int
+hpack_is_forbidden_name(const hive_buf_t *name)
+{
+	return hpack_buf_equal_lit(name, "connection") ||
+	       hpack_buf_equal_lit(name, "keep-alive") ||
+	       hpack_buf_equal_lit(name, "proxy-connection") ||
+	       hpack_buf_equal_lit(name, "upgrade") ||
+	       hpack_buf_equal_lit(name, "transfer-encoding");
+}
+
+static int
+hpack_parse_content_length(const hive_buf_t *value, int64_t *out)
+{
+	uint64_t n;
+	size_t i;
+
+	if (value->len == 0)
+		return HIVE_ERR_PROTOCOL;
+
+	n = 0;
+	for (i = 0; i < value->len; i++) {
+		uint8_t c;
+
+		c = value->data[i];
+		if (c < '0' || c > '9')
+			return HIVE_ERR_PROTOCOL;
+		if (n > (uint64_t)INT64_MAX / 10u)
+			return HIVE_ERR_PROTOCOL;
+		n = (n * 10u) + (uint64_t)(c - '0');
+		if (n > (uint64_t)INT64_MAX)
+			return HIVE_ERR_PROTOCOL;
+	}
+
+	*out = (int64_t)n;
+	return HIVE_OK;
+}
+
+static int
+hpack_is_ows(uint8_t c)
+{
+	return c == ' ' || c == '\t';
+}
+
+static int
+hpack_te_value_is_trailers(const hive_buf_t *value)
+{
+	size_t i;
+	size_t j;
+
+	i = 0;
+	j = value->len;
+	while (i < j && hpack_is_ows(value->data[i]))
+		i++;
+	while (j > i && hpack_is_ows(value->data[j - 1]))
+		j--;
+
+	if (j != i + 8u)
+		return 0;
+
+	return memcmp(value->data + i, "trailers", 8u) == 0;
+}
+
+static int
+hpack_validate_http_messaging(hive_stream_t *stream,
+                              hpack_http_state_t *http_state,
+                              const hive_buf_t *name,
+                              const hive_buf_t *value)
+{
+	uint8_t pseudo_bit;
+	int64_t content_length;
+
+	/* SECURITY: RFC 9113 requires lowercase field names in HTTP/2. */
+	if (hpack_ascii_has_uppercase(name))
+		return HIVE_ERR_PROTOCOL;
+
+	if (name->len > 0 && name->data[0] == ':') {
+		if (http_state->is_trailer_block)
+			return HIVE_ERR_PROTOCOL;
+		if (http_state->pseudo_done)
+			return HIVE_ERR_PROTOCOL;
+
+		if (hpack_buf_equal_lit(name, ":method"))
+			pseudo_bit = HPACK_PSEUDO_METHOD;
+		else if (hpack_buf_equal_lit(name, ":scheme"))
+			pseudo_bit = HPACK_PSEUDO_SCHEME;
+		else if (hpack_buf_equal_lit(name, ":path"))
+			pseudo_bit = HPACK_PSEUDO_PATH;
+		else if (hpack_buf_equal_lit(name, ":status"))
+			pseudo_bit = HPACK_PSEUDO_STATUS;
+		else if (hpack_buf_equal_lit(name, ":authority"))
+			pseudo_bit = HPACK_PSEUDO_AUTHORITY;
+		else
+			return HIVE_ERR_PROTOCOL;
+
+		if ((http_state->pseudo_seen & pseudo_bit) != 0)
+			return HIVE_ERR_PROTOCOL;
+		http_state->pseudo_seen |= pseudo_bit;
+		return HIVE_OK;
+	}
+
+	http_state->pseudo_done = 1;
+
+	if (hpack_is_forbidden_name(name))
+		return HIVE_ERR_PROTOCOL;
+
+	if (hpack_buf_equal_lit(name, "te") &&
+	    !hpack_te_value_is_trailers(value))
+		return HIVE_ERR_PROTOCOL;
+
+	if (!http_state->is_trailer_block &&
+	    hpack_buf_equal_lit(name, "content-length")) {
+		if (hpack_parse_content_length(value, &content_length) !=
+		    HIVE_OK)
+			return HIVE_ERR_PROTOCOL;
+		if (stream != NULL) {
+			if (stream->content_length_expected == -1) {
+				stream->content_length_expected =
+				    content_length;
+			} else if (stream->content_length_expected !=
+			           content_length) {
+				return HIVE_ERR_PROTOCOL;
+			}
+		}
+	}
+
 	return HIVE_OK;
 }
 
@@ -1669,14 +1825,9 @@ hpack_decode_block(hive_session_t *s,
 	uint32_t decoded_count;
 	int size_update_phase;
 	int stream_error_pending;
+	hive_stream_t *stream;
+	hpack_http_state_t http_state;
 	int cb_ret;
-
-	(void)error_stream_id;
-	/* TODO(phase:4): route stream error to error_stream_id per ARCH §4.5.
-	 * For HEADERS blocks: error_stream_id == reassembly_stream_id.
-	 * For PUSH_PROMISE blocks: error_stream_id ==
-	 * reassembly_promised_stream_id. The carrying stream is unaffected by
-	 * PUSH_PROMISE decode errors. */
 
 	if (s == NULL || (len > 0 && data == NULL))
 		return HIVE_ERR_INVALID_ARG;
@@ -1686,6 +1837,12 @@ hpack_decode_block(hive_session_t *s,
 	decoded_count = 0;
 	size_update_phase = 1;
 	stream_error_pending = suppress_callbacks ? 1 : 0;
+	stream = stream_lookup(s, error_stream_id);
+	http_state.pseudo_done = 0;
+	http_state.pseudo_seen = 0;
+	http_state.is_trailer_block =
+	    stream != NULL &&
+	    (stream->flags & HIVE_STREAM_FLAG_HEADERS_SEEN) != 0;
 
 	if (!suppress_callbacks && s->callbacks.on_begin_headers != NULL) {
 		cb_ret = s->callbacks.on_begin_headers(
@@ -1863,8 +2020,8 @@ hpack_decode_block(hive_session_t *s,
 			stream_error_pending = 1;
 
 		if (s->opt_no_http_messaging == 0 && !stream_error_pending) {
-			ret = hpack_validate_http_messaging_stub(name_buf,
-			                                         value_buf);
+			ret = hpack_validate_http_messaging(
+			    stream, &http_state, name_buf, value_buf);
 			if (ret != HIVE_OK)
 				stream_error_pending = 1;
 		}
@@ -1902,6 +2059,9 @@ hpack_decode_block(hive_session_t *s,
 		 * check at call site. See ARCHITECTURE.md §4.5.
 		 */
 		return HIVE_ERR_PROTOCOL;
+
+	if (stream != NULL)
+		stream->flags |= HIVE_STREAM_FLAG_HEADERS_SEEN;
 
 	if (!suppress_callbacks && s->callbacks.on_headers_complete != NULL) {
 		cb_ret =

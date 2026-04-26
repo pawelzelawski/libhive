@@ -151,6 +151,7 @@ headers_decode_complete(hive_session_t *s,
                         uint32_t stream_id,
                         uint8_t end_stream)
 {
+	hive_stream_t *stream;
 	int ret;
 
 	if (!headers_callbacks_enabled(s))
@@ -164,10 +165,21 @@ headers_decode_complete(hive_session_t *s,
 		s->reassembly_len = 0;
 		return 0;
 	}
+	s->reassembly_len = 0;
 	if (ret == HIVE_ERR_COMPRESSION)
 		return session_error(
 		    s, HIVE_ERR_COMPRESSION, HIVE_H2_COMPRESSION_ERROR);
-	return protocol_error(s);
+
+	stream = stream_lookup(s, stream_id);
+	if (stream != NULL && s->callbacks.on_stream_close != NULL) {
+		(void)s->callbacks.on_stream_close(
+		    s, stream_id, HIVE_H2_PROTOCOL_ERROR, s->user_data);
+	}
+	if (stream != NULL)
+		stream_close(s, stream);
+	(void)stream_error(
+	    s, stream_id, HIVE_ERR_PROTOCOL, HIVE_H2_PROTOCOL_ERROR);
+	return 0;
 }
 
 static int
@@ -847,6 +859,22 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			if (n > avail) {
 				n = avail;
 			}
+			if (n > 0 && have_stream_state) {
+				/* SECURITY: Content-Length accounting tracks
+				 * only application DATA bytes (excludes padding
+				 * bytes and the Pad Length field). */
+				if (st->content_length_received >
+				    UINT64_MAX - (uint64_t)n) {
+					(void)stream_error(
+					    s,
+					    s->cur_frame.stream_id,
+					    HIVE_ERR_PROTOCOL,
+					    HIVE_H2_PROTOCOL_ERROR);
+					s->recv_state = RECV_SKIP_PAYLOAD;
+					break;
+				}
+				st->content_length_received += (uint64_t)n;
+			}
 			if (n > 0 && s->callbacks.on_data_chunk != NULL) {
 				/* SECURITY: on_data_chunk receives a zero-copy
 				 * pointer into caller-owned input memory. Its
@@ -867,6 +895,20 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				if (s->pad_remaining > 0) {
 					s->recv_state = RECV_DATA_PAD;
 				} else {
+					if ((s->cur_frame.flags &
+					     HIVE_FLAG_END_STREAM) != 0 &&
+					    have_stream_state &&
+					    s->opt_no_http_messaging == 0 &&
+					    st->content_length_expected != -1 &&
+					    st->content_length_received !=
+					        (uint64_t)st
+					            ->content_length_expected) {
+						(void)stream_error(
+						    s,
+						    s->cur_frame.stream_id,
+						    HIVE_ERR_PROTOCOL,
+						    HIVE_H2_PROTOCOL_ERROR);
+					}
 					s->recv_state = RECV_FRAME_HEADER;
 				}
 			}
@@ -882,6 +924,26 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			s->pad_remaining -= (uint32_t)n;
 			s->payload_remaining -= (uint32_t)n;
 			if (s->pad_remaining == 0) {
+				if ((s->cur_frame.flags &
+				     HIVE_FLAG_END_STREAM) != 0) {
+					const hive_stream_t *dst;
+
+					dst = stream_lookup(
+					    s, s->cur_frame.stream_id);
+					if (dst != NULL &&
+					    s->opt_no_http_messaging == 0 &&
+					    dst->content_length_expected !=
+					        -1 &&
+					    dst->content_length_received !=
+					        (uint64_t)dst
+					            ->content_length_expected) {
+						(void)stream_error(
+						    s,
+						    s->cur_frame.stream_id,
+						    HIVE_ERR_PROTOCOL,
+						    HIVE_H2_PROTOCOL_ERROR);
+					}
+				}
 				s->recv_state = RECV_FRAME_HEADER;
 			}
 			break;

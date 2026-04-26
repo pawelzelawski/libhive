@@ -210,6 +210,14 @@ int test_settings_unsolicited_ack(void);
 int test_rst_stream_flood_callback(void);
 int test_rst_stream_flood_window_reset(void);
 int test_stream_id_exhaustion_triggers_prepare(void);
+int test_http_messaging_pseudo_after_regular(void);
+int test_http_messaging_unknown_pseudo_header(void);
+int test_http_messaging_duplicate_pseudo_header(void);
+int test_http_messaging_pseudo_header_in_trailers(void);
+int test_http_messaging_uppercase_field_name(void);
+int test_http_messaging_forbidden_connection_header(void);
+int test_http_messaging_te_invalid_value(void);
+int test_http_messaging_content_length_mismatch(void);
 
 int
 main(void)
@@ -328,6 +336,16 @@ main(void)
 
 	/* Phase 7.4 -- stream ID exhaustion */
 	RUN(stream_id_exhaustion_triggers_prepare);
+
+	/* Phase 7.5 -- HTTP messaging validation */
+	RUN(http_messaging_pseudo_after_regular);
+	RUN(http_messaging_unknown_pseudo_header);
+	RUN(http_messaging_duplicate_pseudo_header);
+	RUN(http_messaging_pseudo_header_in_trailers);
+	RUN(http_messaging_uppercase_field_name);
+	RUN(http_messaging_forbidden_connection_header);
+	RUN(http_messaging_te_invalid_value);
+	RUN(http_messaging_content_length_mismatch);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);
