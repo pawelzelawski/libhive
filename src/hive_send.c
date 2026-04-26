@@ -307,11 +307,23 @@ send_queue_flush_data(hive_session_t *s)
 			continue;
 		stream_id = st->stream_id;
 
+		/*
+		 * SECURITY: send-window gating — skip this stream if either
+		 * the connection-level or stream-level send window is zero
+		 * or negative.  This enforces flow control limits advertised
+		 * by the peer.  See ARCHITECTURE.md §6.5.
+		 */
 		if (s->send_window <= 0 || st->send_window <= 0)
 			continue;
 		if (s->send_iov_count + 2 > (int)s->opt_max_send_iov)
 			continue;
 
+		/*
+		 * SECURITY: outbound DATA frame sizing must respect the
+		 * peer's advertised max_frame_size (remote_settings) and
+		 * both send windows.  Using local_settings here would be
+		 * a protocol violation.  See ARCHITECTURE.md §2.5.
+		 */
 		max_len = s->remote_settings.max_frame_size;
 		if ((uint32_t)s->send_window < max_len)
 			max_len = (uint32_t)s->send_window;

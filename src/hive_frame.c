@@ -985,11 +985,13 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				n = avail;
 			}
 			if (n > 0) {
-				/* SECURITY: Accumulated header block across
+				/*
+				 * SECURITY: Accumulated header block across
 				 * HEADERS + CONTINUATION frames must not exceed
 				 * opt_max_continuation_size.  Prevents
 				 * CONTINUATION flood / header-block bomb
-				 * attacks (ARCHITECTURE.md §8.3). */
+				 * attacks (ARCHITECTURE.md §8.3).
+				 */
 				if ((s->reassembly_len + n) >
 				    s->opt_max_continuation_size) {
 					return protocol_error(s);

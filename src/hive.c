@@ -1092,8 +1092,19 @@ hive_session_send(hive_session_t *session)
 int
 hive_session_want_read(hive_session_t *session)
 {
-	(void)session;
-	return 0;
+	if (session == NULL)
+		return 0;
+	/*
+	 * SECURITY: after receiving a GOAWAY from the peer, reading is
+	 * advisory-only.  The caller may continue reading to drain in-flight
+	 * streams with ID <= last_stream_id, but no new streams will be
+	 * accepted.  See ARCHITECTURE.md §9.8.
+	 */
+	if (session->session_state == HIVE_SESSION_CLOSED)
+		return 0;
+	if (session->goaway_recv != 0)
+		return 0;
+	return 1;
 }
 
 int
@@ -1444,8 +1455,7 @@ hive_submit_goaway_final(hive_session_t *session,
 
 	if (session == NULL)
 		return HIVE_ERR_INVALID_ARG;
-	if (session->session_state == HIVE_SESSION_CLOSED ||
-	    session->session_state == HIVE_SESSION_GOAWAY_SENT)
+	if (session->session_state == HIVE_SESSION_CLOSED)
 		return HIVE_ERR_SESSION_CLOSED;
 	if (debug_len > 0u && debug_data == NULL)
 		return HIVE_ERR_INVALID_ARG;
