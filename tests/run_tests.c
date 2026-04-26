@@ -207,6 +207,8 @@ int test_data_send_eof_closes_half_closed_remote(void);
 /* --- test_security.c ------------------------------------------------------ */
 int test_settings_flood_uses_inbound_counter(void);
 int test_settings_unsolicited_ack(void);
+int test_rst_stream_flood_callback(void);
+int test_rst_stream_flood_window_reset(void);
 
 int
 main(void)
@@ -318,6 +320,10 @@ main(void)
 	/* Phase 7.2 -- SETTINGS flood protection */
 	RUN(settings_flood_uses_inbound_counter);
 	RUN(settings_unsolicited_ack);
+
+	/* Phase 7.3 -- RST_STREAM flood detection */
+	RUN(rst_stream_flood_callback);
+	RUN(rst_stream_flood_window_reset);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);

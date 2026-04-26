@@ -9,6 +9,7 @@
 #include "hive_frame_bare.h"
 #include "hive_hpack.h"
 #include "hive_internal.h"
+#include "hive_clock.h"
 #include "hive_send.h"
 
 static void
@@ -1209,6 +1210,30 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				s->payload_remaining--;
 			}
 			if (s->payload_remaining == 0) {
+				uint64_t now;
+
+				now = hive_monotonic_secs();
+				if (now - s->rst_flood_window_start >=
+				    (uint64_t)s->opt_rst_flood_window_secs) {
+					s->rst_flood_count = 0u;
+					s->rst_flood_window_start = now;
+				}
+				s->rst_flood_count++;
+				if (s->rst_flood_count >
+				    s->opt_rst_flood_threshold) {
+					/* SECURITY: RST_STREAM flood threshold
+					 * exceeded. Library reports via
+					 * callback and does not take unilateral
+					 * connection action. */
+					if (s->callbacks.on_rst_stream_flood !=
+					    NULL) {
+						(void)s->callbacks
+						    .on_rst_stream_flood(
+						        s,
+						        s->rst_flood_count,
+						        s->user_data);
+					}
+				}
 				s->ctrl_staging_count = 0;
 				s->recv_state = RECV_FRAME_HEADER;
 			}
