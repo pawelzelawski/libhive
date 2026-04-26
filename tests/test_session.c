@@ -52,6 +52,7 @@ int test_submit_response_headers_only(void);
 int test_submit_response_with_data_copy(void);
 int test_submit_response_no_copy(void);
 int test_submit_response_eof_flag(void);
+int test_full_get_request_response(void);
 int test_submit_trailers(void);
 int test_submit_interim_response(void);
 int test_submit_rst_stream(void);
@@ -342,6 +343,32 @@ typedef struct {
 	uint8_t ping_ack_opaque[8];
 } callback_capture_t;
 
+typedef struct {
+	int calls;
+	size_t len;
+	uint8_t bytes[512];
+} roundtrip_send_capture_t;
+
+typedef struct {
+	roundtrip_send_capture_t wire;
+	int headers_complete_count;
+	int submit_count;
+	int submit_rc;
+} roundtrip_server_ctx_t;
+
+typedef struct {
+	int begin_count;
+	int header_count;
+	int complete_count;
+	int data_count;
+	int saw_status_200;
+	uint32_t stream_id;
+	uint8_t headers_complete_flags;
+	uint8_t data_flags;
+	size_t data_len;
+	uint8_t data[32];
+} roundtrip_client_capture_t;
+
 static int
 alloc_should_fail(alloc_track_t *st)
 {
@@ -593,6 +620,135 @@ on_connection_error_cb(hive_session_t *session,
 	cap->connection_error_h2_err = h2_error_code;
 	cap->connection_error_saw_goaway_queued =
 	    (session->send_iov_count > 0) ? 1 : 0;
+	return HIVE_OK;
+}
+
+static ssize_t
+send_cb_roundtrip_collect(hive_session_t *session,
+    const struct iovec *iov,
+    int iovcnt,
+    void *user_data)
+{
+	roundtrip_server_ctx_t *ctx;
+	ssize_t total;
+	size_t i;
+
+	(void)session;
+
+	ctx = user_data;
+	total = 0;
+	ctx->wire.calls++;
+	for (i = 0u; i < (size_t)iovcnt; i++) {
+		ASSERT(ctx->wire.len + iov[i].iov_len <= sizeof(ctx->wire.bytes));
+		memcpy(ctx->wire.bytes + ctx->wire.len,
+		    iov[i].iov_base,
+		    iov[i].iov_len);
+		ctx->wire.len += iov[i].iov_len;
+		total += (ssize_t)iov[i].iov_len;
+	}
+
+	return total;
+}
+
+static int
+on_headers_complete_submit_response(hive_session_t *session,
+    uint32_t stream_id,
+    uint8_t flags,
+    void *user_data)
+{
+	static const uint8_t n_status[] = ":status";
+	static const uint8_t v_200[] = "200";
+	hive_nv_t nva[1];
+	hive_data_source_t ds;
+	roundtrip_server_ctx_t *ctx;
+
+	(void)flags;
+
+	ctx = user_data;
+	ctx->headers_complete_count++;
+	nva[0].name = n_status;
+	nva[0].value = v_200;
+	nva[0].name_len = sizeof(n_status) - 1u;
+	nva[0].value_len = sizeof(v_200) - 1u;
+	nva[0].flags = 0u;
+	ds.read_callback = resp_read_copy_eof_cb;
+	ds.ptr = NULL;
+
+	ctx->submit_rc = hive_submit_response(session, stream_id, nva, 1u, &ds);
+	if (ctx->submit_rc == HIVE_OK)
+		ctx->submit_count++;
+	return ctx->submit_rc;
+}
+
+static int
+on_roundtrip_begin_headers(hive_session_t *session,
+    uint32_t stream_id,
+    void *user_data)
+{
+	roundtrip_client_capture_t *cap;
+
+	(void)session;
+	cap = user_data;
+	cap->begin_count++;
+	cap->stream_id = stream_id;
+	return HIVE_OK;
+}
+
+static int
+on_roundtrip_header(hive_session_t *session,
+    uint32_t stream_id,
+    hive_buf_t *name,
+    hive_buf_t *value,
+    uint8_t flags,
+    void *user_data)
+{
+	roundtrip_client_capture_t *cap;
+
+	(void)session;
+	(void)flags;
+	cap = user_data;
+	cap->header_count++;
+	cap->stream_id = stream_id;
+	if (name->len == 7u && memcmp(name->data, ":status", 7u) == 0 &&
+	    value->len == 3u && memcmp(value->data, "200", 3u) == 0)
+		cap->saw_status_200 = 1;
+	return HIVE_OK;
+}
+
+static int
+on_roundtrip_headers_complete(hive_session_t *session,
+    uint32_t stream_id,
+    uint8_t flags,
+    void *user_data)
+{
+	roundtrip_client_capture_t *cap;
+
+	(void)session;
+	cap = user_data;
+	cap->complete_count++;
+	cap->stream_id = stream_id;
+	cap->headers_complete_flags = flags;
+	return HIVE_OK;
+}
+
+static int
+on_roundtrip_data_chunk(hive_session_t *session,
+    uint32_t stream_id,
+    const uint8_t *data,
+    size_t len,
+    uint8_t flags,
+    void *user_data)
+{
+	roundtrip_client_capture_t *cap;
+
+	(void)session;
+	cap = user_data;
+	cap->data_count++;
+	cap->stream_id = stream_id;
+	cap->data_flags = flags;
+	ASSERT(cap->data_len + len <= sizeof(cap->data));
+	memcpy(cap->data + cap->data_len, data, len);
+	cap->data_len += len;
 	return HIVE_OK;
 }
 
@@ -1468,6 +1624,110 @@ test_submit_response_eof_flag(void)
 	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) != 0u);
 
 	hive_session_free(s);
+	return 1;
+}
+
+int
+test_full_get_request_response(void)
+{
+	hive_callbacks_t server_cb;
+	hive_callbacks_t client_cb;
+	roundtrip_server_ctx_t srv_ctx;
+	roundtrip_client_capture_t cli_cap;
+	hive_session_t *server;
+	hive_session_t *client;
+	uint8_t req_frame[29];
+	uint8_t hpack_get[20];
+	frame_hdr_t hdr;
+	size_t off;
+
+	memset(&server_cb, 0, sizeof(server_cb));
+	memset(&client_cb, 0, sizeof(client_cb));
+	memset(&srv_ctx, 0, sizeof(srv_ctx));
+	memset(&cli_cap, 0, sizeof(cli_cap));
+
+	server_cb.send = send_cb_roundtrip_collect;
+	server_cb.on_headers_complete = on_headers_complete_submit_response;
+	server = hive_session_server_new(NULL, NULL, &server_cb, &srv_ctx);
+	ASSERT(server != NULL);
+	server->send_iov_count = 0;
+	server->send_buf_used = 0;
+	server->send_partial = 0;
+	server->send_partial_offset = 0;
+	server->recv_state = RECV_FRAME_HEADER;
+	server->preface_count = 0;
+
+	hpack_get[0] = 0x82;
+	hpack_get[1] = 0x86;
+	hpack_get[2] = 0x84;
+	hpack_get[3] = 0x41;
+	hpack_get[4] = 0x0f;
+	memcpy(hpack_get + 5, "www.example.com", 15u);
+
+	frame_hdr_write_at(req_frame,
+	    sizeof(hpack_get),
+	    HIVE_FRAME_HEADERS,
+	    HIVE_FLAG_END_HEADERS | HIVE_FLAG_END_STREAM,
+	    1u);
+	memcpy(req_frame + 9, hpack_get, sizeof(hpack_get));
+
+	ASSERT(hive_session_recv(server, req_frame, sizeof(req_frame)) ==
+	    (ssize_t)sizeof(req_frame));
+	ASSERT(srv_ctx.headers_complete_count == 1);
+	ASSERT(srv_ctx.submit_count == 1);
+	ASSERT(srv_ctx.submit_rc == HIVE_OK);
+
+	ASSERT(hive_session_send(server) == HIVE_OK);
+	ASSERT(srv_ctx.wire.calls == 1);
+	ASSERT(srv_ctx.wire.len > 18u);
+
+	off = 0u;
+	frame_hdr_parse(srv_ctx.wire.bytes + off, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_HEADERS);
+	ASSERT(hdr.stream_id == 1u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_HEADERS) != 0u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) == 0u);
+	off += 9u + hdr.length;
+
+	ASSERT(off + 9u <= srv_ctx.wire.len);
+	frame_hdr_parse(srv_ctx.wire.bytes + off, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_DATA);
+	ASSERT(hdr.stream_id == 1u);
+	ASSERT(hdr.length == 5u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) != 0u);
+	ASSERT(off + 9u + hdr.length == srv_ctx.wire.len);
+	ASSERT(memcmp(srv_ctx.wire.bytes + off + 9u, "hello", 5u) == 0);
+
+	client_cb.send = send_cb_full;
+	client_cb.on_begin_headers = on_roundtrip_begin_headers;
+	client_cb.on_header = on_roundtrip_header;
+	client_cb.on_headers_complete = on_roundtrip_headers_complete;
+	client_cb.on_data_chunk = on_roundtrip_data_chunk;
+	client = hive_session_client_new(NULL, NULL, &client_cb, &cli_cap);
+	ASSERT(client != NULL);
+	client->send_iov_count = 0;
+	client->send_buf_used = 0;
+	client->send_partial = 0;
+	client->send_partial_offset = 0;
+	client->recv_state = RECV_FRAME_HEADER;
+	client->preface_count = 0;
+	ASSERT(stream_open(client, 1u, HIVE_STREAM_HALF_CLOSED_LOCAL) == HIVE_OK);
+
+	ASSERT(hive_session_recv(client, srv_ctx.wire.bytes, srv_ctx.wire.len) ==
+	    (ssize_t)srv_ctx.wire.len);
+	ASSERT(cli_cap.begin_count == 1);
+	ASSERT(cli_cap.header_count >= 1);
+	ASSERT(cli_cap.complete_count == 1);
+	ASSERT(cli_cap.data_count == 1);
+	ASSERT(cli_cap.stream_id == 1u);
+	ASSERT(cli_cap.saw_status_200 == 1);
+	ASSERT((cli_cap.headers_complete_flags & HIVE_FLAG_END_STREAM) == 0u);
+	ASSERT((cli_cap.data_flags & HIVE_FLAG_END_STREAM) != 0u);
+	ASSERT(cli_cap.data_len == 5u);
+	ASSERT(memcmp(cli_cap.data, "hello", 5u) == 0);
+
+	hive_session_free(client);
+	hive_session_free(server);
 	return 1;
 }
 

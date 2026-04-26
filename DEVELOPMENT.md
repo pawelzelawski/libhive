@@ -1039,8 +1039,8 @@ File: `tests/test_session.c` (extended)
 - `test_submit_response_no_copy`: submit with `HIVE_DATA_FLAG_NO_COPY`;
   callback redirects `*buf` to caller memory; verify DATA body iovec points
   to that caller memory, not into `send_buf`
-- `test_submit_response_eof_flag`: verify END_STREAM bit set retroactively
-  at `send_buf[hdr_offset + 4]` when `HIVE_DATA_FLAG_EOF` is set
+- `test_submit_response_eof_flag`: verify END_STREAM bit is set in the
+  emitted DATA frame header when `HIVE_DATA_FLAG_EOF` is set
 
 **End-to-end round trip**:
 - `test_full_get_request_response`: feed a HEADERS frame (GET /), submit
@@ -1061,11 +1061,11 @@ File: `tests/test_session.c` (extended)
   verify `on_connection_error` fires before GOAWAY is queued
 
 **Two-phase GOAWAY**:
-- `test_goaway_prepare`: call `hive_submit_goaway_prepare()`; verify GOAWAY
+- `test_submit_goaway_prepare`: call `hive_submit_goaway_prepare()`; verify GOAWAY
   with last_stream_id=0x7FFFFFFF queued and session still OPEN; call
   `hive_submit_goaway_final()`; verify GOAWAY with `last_stream_id_remote`
   queued and session GOAWAY_SENT; verify no new streams accepted
-- `test_goaway_final`: call `hive_submit_goaway_final()`; verify GOAWAY with
+- `test_submit_goaway_final`: call `hive_submit_goaway_final()`; verify GOAWAY with
   `last_stream_id_remote` queued; verify no new streams accepted
 
 **Client role**:
@@ -1087,15 +1087,15 @@ File: `tests/test_session.c` (extended)
 
 ### Phase 6 Completion Criteria
 
-- [ ] Full request-response round-trip test passes
-- [ ] `NO_COPY` iovec pointer test passes (`*buf` redirect works correctly)
-- [ ] Partial send resume test passes
-- [ ] All five new callbacks fire correctly
-- [ ] Two-phase GOAWAY tests pass
-- [ ] MAX_CONCURRENT_STREAMS enforcement in `hive_submit_request()` passes
-- [ ] All Phase 6 tests pass on Linux and OpenBSD
-- [ ] Valgrind clean; ASan/UBSan clean on both platforms
-- [ ] Quality milestones M2 and M3 confirmed (all unit tests pass)
+- [x] Full request-response round-trip test passes
+- [x] `NO_COPY` iovec pointer test passes (`*buf` redirect works correctly)
+- [x] Partial send resume test passes
+- [x] All five new callbacks fire correctly
+- [x] Two-phase GOAWAY tests pass
+- [x] MAX_CONCURRENT_STREAMS enforcement in `hive_submit_request()` passes
+- [x] All Phase 6 tests pass on Linux and OpenBSD (Linux + OpenBSD verified 2026-04-26)
+- [x] Valgrind clean; ASan/UBSan clean on both platforms (Linux Valgrind+ASan/UBSan verified; OpenBSD `make dev && make test` verified 2026-04-26)
+- [x] Quality milestones M2 and M3 confirmed (Linux + OpenBSD verified 2026-04-26)
 
 ---
 
