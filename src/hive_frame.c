@@ -44,15 +44,28 @@ bytes_equal(const uint8_t *a, const uint8_t *b, size_t n)
 	return 1;
 }
 
+static void u32be_write(uint8_t *p, uint32_t v);
+
 static int
 session_error(hive_session_t *s, int hive_err, uint32_t h2_err)
 {
+	uint8_t payload[8];
+
 	s->last_err = hive_err;
 	s->last_h2_err = h2_err;
 	s->closed = 1;
 	if (s->callbacks.on_connection_error != NULL) {
 		(void)s->callbacks.on_connection_error(
 		    s, hive_err, h2_err, s->user_data);
+	}
+	if (s->goaway_sent == 0) {
+		u32be_write(payload, s->last_stream_id_remote & 0x7fffffffu);
+		u32be_write(payload + 4, h2_err);
+		(void)send_queue_append_ctrl(
+		    s, HIVE_FRAME_GOAWAY, 0u, 0u, payload, sizeof(payload));
+		s->goaway_sent = 1;
+		s->goaway_last_stream_id_sent =
+		    s->last_stream_id_remote & 0x7fffffffu;
 	}
 	return -1;
 }
@@ -1149,6 +1162,29 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				s->payload_remaining--;
 			}
 			if (s->payload_remaining == 0) {
+				if ((s->cur_frame.flags & HIVE_FLAG_ACK) != 0) {
+					if (s->callbacks.on_ping_ack != NULL) {
+						(void)s->callbacks.on_ping_ack(
+						    s,
+						    s->ctrl_staging,
+						    s->user_data);
+					}
+				} else if (s->opt_no_auto_ping_ack == 0) {
+					if (send_queue_append_ctrl(
+					        s,
+					        HIVE_FRAME_PING,
+					        HIVE_FLAG_ACK,
+					        0u,
+					        s->ctrl_staging,
+					        8u) != HIVE_OK)
+						return session_error(
+						    s,
+						    HIVE_ERR_NOMEM,
+						    HIVE_H2_INTERNAL_ERROR);
+				} else if (s->callbacks.on_ping != NULL) {
+					(void)s->callbacks.on_ping(
+					    s, s->ctrl_staging, s->user_data);
+				}
 				s->ctrl_staging_count = 0;
 				s->recv_state = RECV_FRAME_HEADER;
 			}

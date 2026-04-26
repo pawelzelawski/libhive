@@ -600,7 +600,9 @@ test_data_recv_exceeds_connection_window(void)
 	ASSERT(s->closed == 1);
 	ASSERT(s->last_err == HIVE_ERR_FLOW_CONTROL);
 	ASSERT(s->last_h2_err == HIVE_H2_FLOW_CONTROL_ERROR);
-	ASSERT(s->send_iov_count == 0);
+	ASSERT(s->send_iov_count == 1);
+	ASSERT(((const uint8_t *)s->send_iov[0].iov_base)[3] ==
+	    HIVE_FRAME_GOAWAY);
 
 	hive_session_free(s);
 	return 1;
@@ -862,7 +864,9 @@ test_window_update_coalescing_overflow_no_queue(void)
 	ASSERT(s->closed == 1);
 	ASSERT(s->last_err == HIVE_ERR_FLOW_CONTROL);
 	ASSERT(s->last_h2_err == HIVE_H2_FLOW_CONTROL_ERROR);
-	ASSERT(s->send_iov_count == 0);
+	ASSERT(s->send_iov_count == 1);
+	ASSERT(((const uint8_t *)s->send_iov[0].iov_base)[3] ==
+	    HIVE_FRAME_GOAWAY);
 
 	hive_session_free(s);
 	return 1;

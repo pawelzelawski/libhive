@@ -170,6 +170,11 @@ int test_server_preface_valid(void);
 int test_server_preface_invalid(void);
 int test_client_preface_first_frame_not_settings(void);
 int test_client_preface_settings_with_ack(void);
+int test_on_settings_ack_fires(void);
+int test_on_goaway_fires(void);
+int test_on_ping_fires_when_no_auto_ack(void);
+int test_on_ping_ack_fires(void);
+int test_on_connection_error_fires_before_goaway(void);
 
 /* --- test_flow.c ---------------------------------------------------------- */
 int test_window_update_connection(void);
@@ -229,6 +234,11 @@ main(void)
 	RUN(submit_request_assigns_stream_id);
 	RUN(submit_request_max_concurrent_honored);
 	RUN(submit_request_with_body);
+	RUN(on_settings_ack_fires);
+	RUN(on_goaway_fires);
+	RUN(on_ping_fires_when_no_auto_ack);
+	RUN(on_ping_ack_fires);
+	RUN(on_connection_error_fires_before_goaway);
 
 	/* Phase 4.2 — options API */
 	RUN(options_defaults);

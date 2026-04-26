@@ -91,6 +91,11 @@ int test_server_preface_valid(void);
 int test_server_preface_invalid(void);
 int test_client_preface_first_frame_not_settings(void);
 int test_client_preface_settings_with_ack(void);
+int test_on_settings_ack_fires(void);
+int test_on_goaway_fires(void);
+int test_on_ping_fires_when_no_auto_ack(void);
+int test_on_ping_ack_fires(void);
+int test_on_connection_error_fires_before_goaway(void);
 
 /* ------------------------------------------------------------------ */
 /* Shared test infrastructure                                          */
@@ -318,6 +323,23 @@ typedef struct {
 	int saw_authority;
 } headers_capture_t;
 
+typedef struct {
+	int settings_ack_count;
+	int goaway_count;
+	int ping_count;
+	int ping_ack_count;
+	int connection_error_count;
+	int connection_error_saw_goaway_queued;
+	int connection_error_hive_err;
+	uint32_t connection_error_h2_err;
+	uint32_t goaway_last_stream_id;
+	uint32_t goaway_error_code;
+	const uint8_t *goaway_debug_data;
+	size_t goaway_debug_len;
+	uint8_t ping_opaque[8];
+	uint8_t ping_ack_opaque[8];
+} callback_capture_t;
+
 static int
 alloc_should_fail(alloc_track_t *st)
 {
@@ -496,6 +518,82 @@ on_headers_complete_capture(hive_session_t *session,
 	return HIVE_OK;
 }
 
+static int
+on_settings_ack_cb(hive_session_t *session, void *user_data)
+{
+	callback_capture_t *cap;
+
+	(void)session;
+	cap = user_data;
+	cap->settings_ack_count++;
+	return HIVE_OK;
+}
+
+static int
+on_goaway_cb(hive_session_t *session,
+    uint32_t last_stream_id,
+    uint32_t error_code,
+    const uint8_t *debug_data,
+    size_t debug_len,
+    void *user_data)
+{
+	callback_capture_t *cap;
+
+	(void)session;
+	cap = user_data;
+	cap->goaway_count++;
+	cap->goaway_last_stream_id = last_stream_id;
+	cap->goaway_error_code = error_code;
+	cap->goaway_debug_data = debug_data;
+	cap->goaway_debug_len = debug_len;
+	return HIVE_OK;
+}
+
+static int
+on_ping_cb(hive_session_t *session,
+    const uint8_t opaque[8],
+    void *user_data)
+{
+	callback_capture_t *cap;
+
+	(void)session;
+	cap = user_data;
+	cap->ping_count++;
+	memcpy(cap->ping_opaque, opaque, sizeof(cap->ping_opaque));
+	return HIVE_OK;
+}
+
+static int
+on_ping_ack_cb(hive_session_t *session,
+    const uint8_t opaque[8],
+    void *user_data)
+{
+	callback_capture_t *cap;
+
+	(void)session;
+	cap = user_data;
+	cap->ping_ack_count++;
+	memcpy(cap->ping_ack_opaque, opaque, sizeof(cap->ping_ack_opaque));
+	return HIVE_OK;
+}
+
+static int
+on_connection_error_cb(hive_session_t *session,
+    int hive_err,
+    uint32_t h2_error_code,
+    void *user_data)
+{
+	callback_capture_t *cap;
+
+	cap = user_data;
+	cap->connection_error_count++;
+	cap->connection_error_hive_err = hive_err;
+	cap->connection_error_h2_err = h2_error_code;
+	cap->connection_error_saw_goaway_queued =
+	    (session->send_iov_count > 0) ? 1 : 0;
+	return HIVE_OK;
+}
+
 static void
 settings_param_write(uint8_t *dst, uint16_t id, uint32_t value)
 {
@@ -526,6 +624,41 @@ read_u32_be(const uint8_t in[4])
 	    (uint32_t)in[3];
 }
 
+static void
+write_u32_be(uint8_t out[4], uint32_t v)
+{
+	out[0] = (uint8_t)((v >> 24) & 0xffu);
+	out[1] = (uint8_t)((v >> 16) & 0xffu);
+	out[2] = (uint8_t)((v >> 8) & 0xffu);
+	out[3] = (uint8_t)(v & 0xffu);
+}
+
+static size_t
+build_ping_frame(uint8_t *dst, uint8_t flags, const uint8_t opaque[8])
+{
+	frame_hdr_write_at(dst, 8u, HIVE_FRAME_PING, flags, 0u);
+	memcpy(dst + 9, opaque, 8u);
+	return 17u;
+}
+
+static size_t
+build_goaway_frame(uint8_t *dst,
+    uint32_t last_stream_id,
+    uint32_t error_code,
+    const uint8_t *debug_data,
+    size_t debug_len)
+{
+	uint32_t payload_len;
+
+	payload_len = 8u + (uint32_t)debug_len;
+	frame_hdr_write_at(dst, payload_len, HIVE_FRAME_GOAWAY, 0u, 0u);
+	write_u32_be(dst + 9, last_stream_id & 0x7fffffffu);
+	write_u32_be(dst + 13, error_code);
+	if (debug_len > 0)
+		memcpy(dst + 17, debug_data, debug_len);
+	return 9u + 8u + debug_len;
+}
+
 static hive_session_t *
 new_server_recv_session(settings_capture_t *cap)
 {
@@ -538,6 +671,44 @@ new_server_recv_session(settings_capture_t *cap)
 	cb.on_settings_ack = on_settings_ack_capture;
 
 	s = hive_session_server_new(NULL, NULL, &cb, cap);
+	ASSERT(s != NULL);
+
+	/* Ignore queued server preface in receive-path tests. */
+	s->send_iov_count = 0;
+	s->send_buf_used = 0;
+	s->send_partial = 0;
+	s->send_partial_offset = 0;
+	s->recv_state = RECV_FRAME_HEADER;
+	s->preface_count = 0;
+
+	return s;
+}
+
+static hive_session_t *
+new_server_callback_session(callback_capture_t *cap, uint8_t no_auto_ping_ack)
+{
+	hive_callbacks_t cb;
+	hive_options_t *opt;
+	hive_session_t *s;
+
+	opt = NULL;
+	if (no_auto_ping_ack != 0) {
+		opt = hive_options_new();
+		ASSERT(opt != NULL);
+		ASSERT(hive_options_set_no_auto_ping_ack(opt, 1u) == HIVE_OK);
+	}
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+	cb.on_settings_ack = on_settings_ack_cb;
+	cb.on_goaway = on_goaway_cb;
+	cb.on_ping = on_ping_cb;
+	cb.on_ping_ack = on_ping_ack_cb;
+	cb.on_connection_error = on_connection_error_cb;
+
+	s = hive_session_server_new(NULL, opt, &cb, cap);
+	if (opt != NULL)
+		hive_options_free(opt);
 	ASSERT(s != NULL);
 
 	/* Ignore queued server preface in receive-path tests. */
@@ -2711,6 +2882,131 @@ test_client_preface_settings_with_ack(void)
 	ASSERT(hive_session_recv(s, in, n) == -1);
 	ASSERT(s->last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s->last_h2_err == HIVE_H2_PROTOCOL_ERROR);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_on_settings_ack_fires(void)
+{
+	callback_capture_t cap;
+	hive_session_t *s;
+	uint8_t frame[9];
+	size_t n;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_callback_session(&cap, 0u);
+
+	s->pending_count = 1;
+	s->pending_head = 0;
+	n = build_settings_frame(frame, HIVE_FLAG_ACK, NULL, 0u);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(cap.settings_ack_count == 1);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_on_goaway_fires(void)
+{
+	callback_capture_t cap;
+	hive_session_t *s;
+	uint8_t frame[64];
+	static const uint8_t dbg[] = {0xdeu, 0xadu, 0xbeu, 0xefu};
+	size_t n;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_callback_session(&cap, 0u);
+
+	n = build_goaway_frame(
+	    frame, 3u, HIVE_H2_PROTOCOL_ERROR, dbg, sizeof(dbg));
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(cap.goaway_count == 1);
+	ASSERT(cap.goaway_last_stream_id == 3u);
+	ASSERT(cap.goaway_error_code == HIVE_H2_PROTOCOL_ERROR);
+	ASSERT(cap.goaway_debug_data == s->reassembly_buf);
+	ASSERT(cap.goaway_debug_len == sizeof(dbg));
+	ASSERT(memcmp(cap.goaway_debug_data, dbg, sizeof(dbg)) == 0);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_on_ping_fires_when_no_auto_ack(void)
+{
+	callback_capture_t cap;
+	hive_session_t *s;
+	uint8_t frame[17];
+	static const uint8_t opaque[8] =
+	    {0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u, 0x08u};
+	size_t n;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_callback_session(&cap, 1u);
+
+	n = build_ping_frame(frame, 0u, opaque);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(cap.ping_count == 1);
+	ASSERT(cap.ping_ack_count == 0);
+	ASSERT(memcmp(cap.ping_opaque, opaque, sizeof(opaque)) == 0);
+	ASSERT(s->send_iov_count == 0);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_on_ping_ack_fires(void)
+{
+	callback_capture_t cap;
+	hive_session_t *s;
+	uint8_t frame[17];
+	static const uint8_t opaque[8] =
+	    {0xa1u, 0xa2u, 0xa3u, 0xa4u, 0xa5u, 0xa6u, 0xa7u, 0xa8u};
+	size_t n;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_callback_session(&cap, 0u);
+
+	n = build_ping_frame(frame, HIVE_FLAG_ACK, opaque);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(cap.ping_count == 0);
+	ASSERT(cap.ping_ack_count == 1);
+	ASSERT(memcmp(cap.ping_ack_opaque, opaque, sizeof(opaque)) == 0);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_on_connection_error_fires_before_goaway(void)
+{
+	callback_capture_t cap;
+	hive_session_t *s;
+	uint8_t frame[9];
+	const uint8_t *out;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_callback_session(&cap, 0u);
+
+	frame_hdr_write_at(frame, 0u, HIVE_FRAME_DATA, 0u, 0u);
+	ASSERT(hive_session_recv(s, frame, sizeof(frame)) == -1);
+	ASSERT(cap.connection_error_count == 1);
+	ASSERT(cap.connection_error_hive_err == HIVE_ERR_PROTOCOL);
+	ASSERT(cap.connection_error_h2_err == HIVE_H2_PROTOCOL_ERROR);
+	ASSERT(cap.connection_error_saw_goaway_queued == 0);
+
+	ASSERT(s->send_iov_count == 1);
+	out = s->send_iov[0].iov_base;
+	ASSERT(s->send_iov[0].iov_len == 17u);
+	ASSERT(out[3] == HIVE_FRAME_GOAWAY);
+	ASSERT(out[4] == 0u);
+	ASSERT(out[5] == 0u && out[6] == 0u && out[7] == 0u && out[8] == 0u);
+	ASSERT(read_u32_be(out + 9) == 0u);
+	ASSERT(read_u32_be(out + 13) == HIVE_H2_PROTOCOL_ERROR);
 
 	hive_session_free(s);
 	return 1;

@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-26
 **Current Phase**: Phase 6 — Submit and Send
-**Next Task**: 6.7 — New callbacks: wire up all five
+**Next Task**: 6.8 — Stream introspection
 
 ### Phase Summary
 
@@ -1003,7 +1003,7 @@ are wired. Two-phase GOAWAY works. Stream introspection functions work.
 - Queue HEADERS via `send_queue_append_headers()`
 - Store `data_source` in stream slot
 
-**6.7 — New callbacks: wire up all five**
+**6.7 — New callbacks: wire up all five** ✓ DONE
 - `on_settings_ack`: fire in RECV_SETTINGS_PAYLOAD on ACK path (Phase 4
   stub should already call it; verify it is correct here)
 - `on_goaway`: fire in RECV_GOAWAY_PAYLOAD after parsing last_stream_id
