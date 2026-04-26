@@ -26,6 +26,28 @@
 #include "hive_internal.h"
 #include "hive_send.h"
 
+static int
+send_queue_reserve_iov(hive_session_t *s, int needed)
+{
+	int ret;
+
+	if (needed <= 0)
+		return HIVE_ERR_INVALID_ARG;
+	if ((uint32_t)needed > s->opt_max_send_iov)
+		return HIVE_ERR_NOMEM;
+	if (s->send_iov_count + needed <= (int)s->opt_max_send_iov)
+		return HIVE_OK;
+
+	ret = hive_session_send(s);
+	if (ret != HIVE_OK)
+		return ret;
+	if (s->send_partial)
+		return HIVE_ERR_WOULDBLOCK;
+	if (s->send_iov_count + needed > (int)s->opt_max_send_iov)
+		return HIVE_ERR_NOMEM;
+	return HIVE_OK;
+}
+
 /*
  * Write a 9-byte HTTP/2 frame header at send_buf + send_buf_used,
  * advance send_buf_used by 9, and return a pointer to the written header.
@@ -59,7 +81,7 @@ frame_hdr_write(hive_session_t *s,
  *
  * One iovec entry per control frame.  Header and payload are contiguous.
  */
-void
+int
 send_queue_append_ctrl(hive_session_t *s,
                        uint8_t type,
                        uint8_t flags,
@@ -67,7 +89,23 @@ send_queue_append_ctrl(hive_session_t *s,
                        const uint8_t *payload,
                        uint32_t payload_len)
 {
-	size_t frame_start = s->send_buf_used;
+	size_t needed;
+	size_t frame_start;
+	int ret;
+
+	if (s == NULL || s->send_buf == NULL || s->send_iov == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (payload_len > 0 && payload == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	frame_start = s->send_buf_used;
+
+	ret = send_queue_reserve_iov(s, 1);
+	if (ret != HIVE_OK)
+		return ret;
+
+	needed = 9u + (size_t)payload_len;
+	if (frame_start + needed > s->send_buf_cap)
+		return HIVE_ERR_NOMEM;
 
 	frame_hdr_write(s, payload_len, type, flags, stream_id);
 
@@ -80,6 +118,7 @@ send_queue_append_ctrl(hive_session_t *s,
 	s->send_iov_count++;
 
 	s->send_buf_used += (size_t)payload_len;
+	return HIVE_OK;
 }
 
 /*
@@ -104,6 +143,7 @@ send_queue_append_headers(hive_session_t *s,
 	size_t encode_start;
 	size_t out_cap;
 	size_t encoded_len;
+	int rc;
 	int ret;
 
 	if (s == NULL)
@@ -116,6 +156,11 @@ send_queue_append_headers(hive_session_t *s,
 	max_frame = s->remote_settings.max_frame_size;
 	if (max_frame == 0)
 		return HIVE_ERR_INVALID_ARG;
+
+	/* Ensure at least one free iov slot before encoding into send_buf. */
+	rc = send_queue_reserve_iov(s, 1);
+	if (rc != HIVE_OK)
+		return rc;
 
 	first_hdr_offset = s->send_buf_used;
 	if (first_hdr_offset + 9u > s->send_buf_cap)
@@ -138,9 +183,6 @@ send_queue_append_headers(hive_session_t *s,
 
 	if (encoded_len <= (size_t)max_frame) {
 		uint8_t flags;
-
-		if (s->send_iov_count + 1 > (int)s->opt_max_send_iov)
-			return HIVE_ERR_NOMEM;
 
 		flags = HIVE_FLAG_END_HEADERS;
 		if (end_stream)

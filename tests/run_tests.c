@@ -119,6 +119,10 @@ int test_hpack_standalone_encoder_decoder(void);
 /* --- test_session.c ------------------------------------------------------- */
 int test_send_control_frame_queued(void);
 int test_send_partial_write(void);
+int test_send_partial_resume(void);
+int test_send_fires_once_per_call(void);
+int test_iovec_overflow(void);
+int test_iovec_overflow_wouldblock(void);
 int test_send_fatal_error(void);
 int test_send_headers_single_frame_layout(void);
 int test_send_headers_split_layout(void);
@@ -183,6 +187,10 @@ main(void)
 	/* Phase 4.0 — minimal send queue */
 	RUN(send_control_frame_queued);
 	RUN(send_partial_write);
+	RUN(send_partial_resume);
+	RUN(send_fires_once_per_call);
+	RUN(iovec_overflow);
+	RUN(iovec_overflow_wouldblock);
 	RUN(send_fatal_error);
 
 	/* Phase 6.1 — HEADERS queueing and split CONTINUATION layout */

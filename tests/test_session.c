@@ -40,6 +40,10 @@
 
 int test_send_control_frame_queued(void);
 int test_send_partial_write(void);
+int test_send_partial_resume(void);
+int test_send_fires_once_per_call(void);
+int test_iovec_overflow(void);
+int test_iovec_overflow_wouldblock(void);
 int test_send_fatal_error(void);
 int test_send_headers_single_frame_layout(void);
 int test_send_headers_split_layout(void);
@@ -117,6 +121,11 @@ typedef struct {
 	ssize_t partial_bytes; /* bytes to return on first call */
 } partial_send_state_t;
 
+typedef struct {
+	int call_count;
+	int last_iovcnt;
+} send_count_state_t;
+
 static ssize_t
 send_cb_partial(hive_session_t *session,
                 const struct iovec *iov,
@@ -138,6 +147,28 @@ send_cb_partial(hive_session_t *session,
 		return st->partial_bytes; /* simulated partial write */
 
 	return total; /* full write on subsequent calls */
+}
+
+static ssize_t
+send_cb_counting(hive_session_t *session,
+                 const struct iovec *iov,
+                 int iovcnt,
+                 void *user_data)
+{
+	send_count_state_t *st;
+	ssize_t total;
+	int i;
+
+	(void)session;
+
+	st = user_data;
+	total = 0;
+	for (i = 0; i < iovcnt; i++)
+		total += (ssize_t)iov[i].iov_len;
+
+	st->call_count++;
+	st->last_iovcnt = iovcnt;
+	return total;
 }
 
 /* Send callback that always returns -1 (fatal I/O error). */
@@ -426,6 +457,7 @@ test_send_session_init(hive_session_t *s,
 	s->send_partial         = 0;
 	s->send_partial_offset  = 0;
 	s->session_state        = HIVE_SESSION_OPEN;
+	s->opt_max_send_iov     = TEST_SEND_IOV_CAP;
 }
 
 /*
@@ -559,6 +591,200 @@ test_send_partial_write(void)
 	ASSERT(s.send_partial_offset == 0u);
 	ASSERT(s.send_iov_count == 0);
 	ASSERT(s.send_buf_used == 0u);
+
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* test_send_partial_resume                                            */
+/* ------------------------------------------------------------------ */
+
+int
+test_send_partial_resume(void)
+{
+	static uint8_t buf[TEST_SEND_BUF_CAP];
+	static struct iovec iov[TEST_SEND_IOV_CAP];
+	static const uint8_t ping_payload[8] = {
+	    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17
+	};
+	partial_send_state_t st;
+	hive_session_t s;
+	size_t total;
+	int ret;
+
+	test_send_session_init(&s, buf, sizeof(buf), iov);
+
+	/* Queue 3 frames to force multi-iov partial-offset skipping. */
+	send_queue_append_ctrl(&s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u,
+	    NULL, 0u);
+	send_queue_append_ctrl(&s, HIVE_FRAME_PING, 0u, 0u, ping_payload, 8u);
+	send_queue_append_ctrl(&s, HIVE_FRAME_WINDOW_UPDATE, 0u, 1u,
+	    (const uint8_t[]){0x00, 0x00, 0x01, 0x00}, 4u);
+
+	ASSERT(s.send_iov_count == 3);
+	total = s.send_iov[0].iov_len + s.send_iov[1].iov_len +
+	    s.send_iov[2].iov_len;
+	ASSERT(total == 39u);
+
+	st.call_count = 0;
+	st.partial_bytes = (ssize_t)(total / 2u);
+	s.callbacks.send = send_cb_partial;
+	s.user_data = &st;
+
+	ret = hive_session_send(&s);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(st.call_count == 1);
+	ASSERT(s.send_partial == 1);
+	ASSERT(s.send_partial_offset == (size_t)st.partial_bytes);
+	ASSERT(hive_session_want_write(&s) == 1);
+
+	ret = hive_session_send(&s);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(st.call_count == 2);
+	ASSERT(s.send_partial == 0);
+	ASSERT(s.send_partial_offset == 0u);
+	ASSERT(s.send_iov_count == 0);
+	ASSERT(s.send_buf_used == 0u);
+	ASSERT(hive_session_want_write(&s) == 0);
+
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* test_send_fires_once_per_call                                       */
+/* ------------------------------------------------------------------ */
+
+int
+test_send_fires_once_per_call(void)
+{
+	static uint8_t buf[TEST_SEND_BUF_CAP];
+	static struct iovec iov[TEST_SEND_IOV_CAP];
+	send_count_state_t st;
+	hive_session_t s;
+	int ret;
+
+	test_send_session_init(&s, buf, sizeof(buf), iov);
+
+	send_queue_append_ctrl(&s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u,
+	    NULL, 0u);
+	send_queue_append_ctrl(&s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u,
+	    NULL, 0u);
+	send_queue_append_ctrl(&s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u,
+	    NULL, 0u);
+	ASSERT(s.send_iov_count == 3);
+
+	memset(&st, 0, sizeof(st));
+	s.callbacks.send = send_cb_counting;
+	s.user_data = &st;
+
+	ret = hive_session_send(&s);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(st.call_count == 1);
+	ASSERT(st.last_iovcnt == 3);
+	ASSERT(s.send_iov_count == 0);
+
+	send_queue_append_ctrl(&s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u,
+	    NULL, 0u);
+	send_queue_append_ctrl(&s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u,
+	    NULL, 0u);
+	ASSERT(s.send_iov_count == 2);
+
+	ret = hive_session_send(&s);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(st.call_count == 2);
+	ASSERT(st.last_iovcnt == 2);
+	ASSERT(s.send_iov_count == 0);
+
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* test_iovec_overflow                                                 */
+/* ------------------------------------------------------------------ */
+
+int
+test_iovec_overflow(void)
+{
+	static uint8_t buf[TEST_SEND_BUF_CAP];
+	static struct iovec iov[TEST_SEND_IOV_CAP];
+	send_count_state_t st;
+	hive_session_t s;
+	int i;
+	int ret;
+
+	test_send_session_init(&s, buf, sizeof(buf), iov);
+	s.opt_max_send_iov = 4u;
+	memset(&st, 0, sizeof(st));
+	s.callbacks.send = send_cb_counting;
+	s.user_data = &st;
+
+	for (i = 0; i < 4; i++) {
+		ret = send_queue_append_ctrl(
+		    &s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u, NULL, 0u);
+		ASSERT(ret == HIVE_OK);
+	}
+	ASSERT(st.call_count == 0);
+	ASSERT(s.send_iov_count == 4);
+
+	ret = send_queue_append_ctrl(
+	    &s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u, NULL, 0u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(st.call_count == 1);
+	ASSERT(st.last_iovcnt == 4);
+	ASSERT(s.send_partial == 0);
+	ASSERT(s.send_iov_count == 1);
+
+	ret = hive_session_send(&s);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(st.call_count == 2);
+	ASSERT(st.last_iovcnt == 1);
+	ASSERT(s.send_iov_count == 0);
+
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* test_iovec_overflow_wouldblock                                      */
+/* ------------------------------------------------------------------ */
+
+int
+test_iovec_overflow_wouldblock(void)
+{
+	static uint8_t buf[TEST_SEND_BUF_CAP];
+	static struct iovec iov[TEST_SEND_IOV_CAP];
+	partial_send_state_t st;
+	hive_session_t s;
+	int ret;
+
+	test_send_session_init(&s, buf, sizeof(buf), iov);
+	s.opt_max_send_iov = 1u;
+	st.call_count = 0;
+	st.partial_bytes = 5;
+	s.callbacks.send = send_cb_partial;
+	s.user_data = &st;
+
+	ret = send_queue_append_ctrl(
+	    &s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u, NULL, 0u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(s.send_iov_count == 1);
+
+	ret = send_queue_append_ctrl(
+	    &s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u, NULL, 0u);
+	ASSERT(ret == HIVE_ERR_WOULDBLOCK);
+	ASSERT(st.call_count == 1);
+	ASSERT(s.send_partial == 1);
+	ASSERT(s.send_iov_count == 1);
+
+	ret = hive_session_send(&s);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(st.call_count == 2);
+	ASSERT(s.send_partial == 0);
+	ASSERT(s.send_iov_count == 0);
+
+	ret = send_queue_append_ctrl(
+	    &s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u, NULL, 0u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(s.send_iov_count == 1);
 
 	return 1;
 }

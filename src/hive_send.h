@@ -49,16 +49,16 @@ uint8_t *frame_hdr_write(hive_session_t *s,
  * Control frames: SETTINGS, SETTINGS ACK, PING, PING ACK, RST_STREAM,
  * WINDOW_UPDATE, GOAWAY.  See ARCHITECTURE.md §6.3.
  *
- * The caller must ensure there is room in send_buf and send_iov before
- * calling.  Overflow checks are the caller's responsibility in Phase 4;
- * Phase 6 adds iovec-overflow flushing (§6.7).
+ * Returns HIVE_OK on success. Returns HIVE_ERR_NOMEM when send_buf has
+ * insufficient space. Returns HIVE_ERR_WOULDBLOCK if an internal overflow
+ * flush was partial and the existing batch must be drained before appending.
  */
-void send_queue_append_ctrl(hive_session_t *s,
-                            uint8_t type,
-                            uint8_t flags,
-                            uint32_t stream_id,
-                            const uint8_t *payload,
-                            uint32_t payload_len);
+int send_queue_append_ctrl(hive_session_t *s,
+                           uint8_t type,
+                           uint8_t flags,
+                           uint32_t stream_id,
+                           const uint8_t *payload,
+                           uint32_t payload_len);
 
 /*
  * send_queue_append_headers — queue one HEADERS block, splitting into

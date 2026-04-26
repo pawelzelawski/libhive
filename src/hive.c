@@ -828,11 +828,12 @@ session_queue_server_preface(hive_session_t *s)
 {
 	uint8_t payload[36];
 	uint32_t payload_len;
+	int ret;
 
 	payload_len = session_build_settings_payload(s, payload);
-	send_queue_append_ctrl(
+	ret = send_queue_append_ctrl(
 	    s, HIVE_FRAME_SETTINGS, 0u, 0u, payload, payload_len);
-	return HIVE_OK;
+	return ret;
 }
 
 static int
@@ -840,6 +841,7 @@ session_queue_client_preface(hive_session_t *s)
 {
 	uint8_t payload[36];
 	uint32_t payload_len;
+	int ret;
 
 	if (s->send_buf_used + sizeof(client_preface_magic) > s->send_buf_cap)
 		return HIVE_ERR_NOMEM;
@@ -856,9 +858,9 @@ session_queue_client_preface(hive_session_t *s)
 	s->send_buf_used += sizeof(client_preface_magic);
 
 	payload_len = session_build_settings_payload(s, payload);
-	send_queue_append_ctrl(
+	ret = send_queue_append_ctrl(
 	    s, HIVE_FRAME_SETTINGS, 0u, 0u, payload, payload_len);
-	return HIVE_OK;
+	return ret;
 }
 
 static void

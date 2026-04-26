@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-26
 **Current Phase**: Phase 6 — Submit and Send
-**Next Task**: 6.3 — Full `hive_session_send()` (extends Phase 4 minimal)
+**Next Task**: 6.4 — `hive_submit_response()`
 
 ### Phase Summary
 
@@ -965,7 +965,7 @@ are wired. Two-phase GOAWAY works. Stream introspection functions work.
   - State transition on EOF: OPEN → HALF_CLOSED_LOCAL,
     HALF_CLOSED_REMOTE → CLOSED (per ARCHITECTURE.md §6.5)
 
-**6.3 — Full `hive_session_send()` (extends Phase 4 minimal)**
+**6.3 — Full `hive_session_send()` (extends Phase 4 minimal)** ✓ DONE
 - Replace the Phase 4 minimal implementation with the full version per
   ARCHITECTURE.md §6.6:
   - `send_queue_flush_data()` called first (now fully implemented)
