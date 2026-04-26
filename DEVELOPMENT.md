@@ -3,8 +3,8 @@
 ## Status Overview
 
 **Last Updated**: 2026-04-26
-**Current Phase**: Phase 6 — Submit and Send
-**Next Task**: 7.1 — CONTINUATION flood protection (§8.3)
+**Current Phase**: Phase 7 — Security Hardening
+**Next Task**: 7.2 — SETTINGS flood protection (§8.4)
 
 ### Phase Summary
 
@@ -15,8 +15,8 @@
 | 3 | HPACK | DONE | 34/34 (Phase 3 slice) | Tasks 3.1-3.7 done on Linux + OpenBSD; Phase 3 completion criteria confirmed 2026-04-23 |
 | 4 | Session Core | DONE | 32/32 (Phase 4 slice) | Tasks 4.0–4.7 done on Linux + OpenBSD; completion criteria confirmed 2026-04-25 |
 | 5 | Flow Control and DATA | NOT STARTED | — | Windows, recv-side enforcement, WINDOW_UPDATE, DATA delivery |
-| 6 | Submit and Send | NOT STARTED | — | Full send queue, partial-send, response/request submit, new callbacks |
-| 7 | Security Hardening | NOT STARTED | — | Flood protection, exhaustion, limits, Content-Length, clock abstraction |
+| 6 | Submit and Send | DONE | All Phase 6 tests pass (Linux + OpenBSD) | Full send queue, partial-send, response/request submit, new callbacks |
+| 7 | Security Hardening | IN PROGRESS | Task 7.1 verified (Linux + OpenBSD) | Flood protection, exhaustion, limits, Content-Length, clock abstraction |
 | 8 | h2c and Server Push | NOT STARTED | — | Upgrade path, PUSH_PROMISE, two-phase GOAWAY, client role |
 | 9 | Conformance and Polish | NOT STARTED | — | h2spec, README, API reference, tools |
 
@@ -1127,7 +1127,7 @@ configurable via the options API.
 
 ### Tasks
 
-**7.1 — CONTINUATION flood protection (§8.3) — connection error**
+**7.1 — CONTINUATION flood protection (§8.3) — connection error** ✓ DONE
 - In RECV_HEADERS_PAYLOAD and RECV_CONTINUATION_PAYLOAD: check
   `reassembly_len + n > opt_max_continuation_size` before writing to
   `reassembly_buf`; add `SECURITY:` comment

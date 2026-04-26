@@ -36,6 +36,8 @@ int test_recv_split_data_payload(void);
 int test_recv_split_settings_param(void);
 int test_recv_headers_plus_continuation(void);
 int test_recv_continuation_lockout(void);
+int test_recv_continuation_flood_headers_is_connection_error(void);
+int test_recv_continuation_flood_continuation_is_connection_error(void);
 int test_recv_frame_too_large(void);
 int test_recv_data_on_stream_zero(void);
 int test_recv_settings_nonzero_stream(void);
@@ -337,6 +339,8 @@ main(void)
 	RUN(recv_split_continuation_payload);
 	RUN(recv_headers_plus_continuation);
 	RUN(recv_continuation_lockout);
+	RUN(recv_continuation_flood_headers_is_connection_error);
+	RUN(recv_continuation_flood_continuation_is_connection_error);
 	RUN(recv_frame_too_large);
 	RUN(recv_data_on_stream_zero);
 	RUN(recv_settings_nonzero_stream);

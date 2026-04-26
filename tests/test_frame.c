@@ -28,6 +28,8 @@ int test_recv_split_data_payload(void);
 int test_recv_split_settings_param(void);
 int test_recv_headers_plus_continuation(void);
 int test_recv_continuation_lockout(void);
+int test_recv_continuation_flood_headers_is_connection_error(void);
+int test_recv_continuation_flood_continuation_is_connection_error(void);
 int test_recv_frame_too_large(void);
 int test_recv_data_on_stream_zero(void);
 int test_recv_settings_nonzero_stream(void);
@@ -105,6 +107,15 @@ build_frame(uint8_t *dst, uint32_t length, uint8_t type, uint8_t flags,
 		memcpy(dst + 9, payload, length);
 	}
 	return 9u + length;
+}
+
+static uint8_t
+queued_frame_type(const hive_session_t *s, int iov_index)
+{
+	const uint8_t *p;
+
+	p = (const uint8_t *)s->send_iov[iov_index].iov_base;
+	return p[3];
 }
 
 static int
@@ -521,6 +532,57 @@ test_recv_continuation_lockout(void)
 	ASSERT(hive_session_recv(&s, dataf, n) == -1);
 	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s.last_h2_err == HIVE_H2_PROTOCOL_ERROR);
+	return 1;
+}
+
+int
+test_recv_continuation_flood_headers_is_connection_error(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[8];
+	uint8_t headers[13];
+	const uint8_t payload[4] = {0x11, 0x22, 0x33, 0x44};
+	size_t n;
+
+	test_session_init(&s, reassembly, 3u);
+	n = build_frame(headers, 4, HIVE_FRAME_HEADERS, HIVE_FLAG_END_HEADERS, 1,
+	    payload);
+	ASSERT(hive_session_recv(&s, headers, n) == -1);
+	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
+	ASSERT(s.last_h2_err == HIVE_H2_PROTOCOL_ERROR);
+	ASSERT(s.closed == 1);
+	ASSERT(s.send_iov_count == 1);
+	ASSERT(queued_frame_type(&s, 0) == HIVE_FRAME_GOAWAY);
+	ASSERT(queued_frame_type(&s, 0) != HIVE_FRAME_RST_STREAM);
+	return 1;
+}
+
+int
+test_recv_continuation_flood_continuation_is_connection_error(void)
+{
+	hive_session_t s;
+	uint8_t reassembly[8];
+	uint8_t headers[11];
+	uint8_t cont[11];
+	const uint8_t p1[2] = {0xaa, 0xbb};
+	const uint8_t p2[2] = {0xcc, 0xdd};
+	size_t n;
+
+	test_session_init(&s, reassembly, 3u);
+	n = build_frame(headers, 2, HIVE_FRAME_HEADERS, 0, 1, p1);
+	ASSERT(hive_session_recv(&s, headers, n) == (ssize_t)n);
+	ASSERT(s.reassembly_len == 2);
+	ASSERT(s.reassembly_active == 1);
+
+	n = build_frame(cont, 2, HIVE_FRAME_CONTINUATION, HIVE_FLAG_END_HEADERS, 1,
+	    p2);
+	ASSERT(hive_session_recv(&s, cont, n) == -1);
+	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
+	ASSERT(s.last_h2_err == HIVE_H2_PROTOCOL_ERROR);
+	ASSERT(s.closed == 1);
+	ASSERT(s.send_iov_count == 1);
+	ASSERT(queued_frame_type(&s, 0) == HIVE_FRAME_GOAWAY);
+	ASSERT(queued_frame_type(&s, 0) != HIVE_FRAME_RST_STREAM);
 	return 1;
 }
 

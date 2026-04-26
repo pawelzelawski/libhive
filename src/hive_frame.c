@@ -915,15 +915,19 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				n = avail;
 			}
 			if (n > 0) {
-				/* SECURITY: Total accumulated header block must
-				 * not exceed opt_max_continuation_size.  This
-				 * prevents header-block bomb attacks where an
-				 * adversary chains many CONTINUATION frames to
-				 * exhaust reassembly memory
-				 * (ARCHITECTURE.md §8.3). */
+				/* SECURITY: CONTINUATION flood protection.
+				 * Enforce the reassembly cap before copying
+				 * into reassembly_buf. Exceeding this cap is a
+				 * connection error (GOAWAY PROTOCOL_ERROR),
+				 * never a stream error (RST_STREAM). See
+				 * ARCHITECTURE.md §8.3 and CODING_STANDARDS.md
+				 * §4.2. */
 				if ((s->reassembly_len + n) >
 				    s->opt_max_continuation_size) {
-					return protocol_error(s);
+					return session_error(
+					    s,
+					    HIVE_ERR_PROTOCOL,
+					    HIVE_H2_PROTOCOL_ERROR);
 				}
 				if (s->reassembly_buf != NULL) {
 					copy_bytes(s->reassembly_buf +
@@ -986,15 +990,20 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			}
 			if (n > 0) {
 				/*
-				 * SECURITY: Accumulated header block across
-				 * HEADERS + CONTINUATION frames must not exceed
-				 * opt_max_continuation_size.  Prevents
-				 * CONTINUATION flood / header-block bomb
-				 * attacks (ARCHITECTURE.md §8.3).
+				 * SECURITY: CONTINUATION flood protection.
+				 * Enforce the reassembly cap before copying
+				 * into reassembly_buf. Exceeding this cap is a
+				 * connection error (GOAWAY PROTOCOL_ERROR),
+				 * never a stream error (RST_STREAM). See
+				 * ARCHITECTURE.md §8.3 and CODING_STANDARDS.md
+				 * §4.2.
 				 */
 				if ((s->reassembly_len + n) >
 				    s->opt_max_continuation_size) {
-					return protocol_error(s);
+					return session_error(
+					    s,
+					    HIVE_ERR_PROTOCOL,
+					    HIVE_H2_PROTOCOL_ERROR);
 				}
 				if (s->reassembly_buf != NULL) {
 					copy_bytes(s->reassembly_buf +
