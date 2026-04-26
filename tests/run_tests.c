@@ -209,6 +209,7 @@ int test_settings_flood_uses_inbound_counter(void);
 int test_settings_unsolicited_ack(void);
 int test_rst_stream_flood_callback(void);
 int test_rst_stream_flood_window_reset(void);
+int test_stream_id_exhaustion_triggers_prepare(void);
 
 int
 main(void)
@@ -324,6 +325,9 @@ main(void)
 	/* Phase 7.3 -- RST_STREAM flood detection */
 	RUN(rst_stream_flood_callback);
 	RUN(rst_stream_flood_window_reset);
+
+	/* Phase 7.4 -- stream ID exhaustion */
+	RUN(stream_id_exhaustion_triggers_prepare);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);

@@ -308,6 +308,17 @@ headers_open_new_stream(hive_session_t *s, uint32_t stream_id)
 	if (ret != HIVE_OK)
 		return protocol_error(s);
 	s->last_stream_id_remote = stream_id;
+
+	/* SECURITY: Near stream-ID exhaustion, initiate prepare-phase GOAWAY
+	 * (RFC 9113 graceful shutdown) while keeping the session open so
+	 * in-flight streams can complete. */
+	if (stream_id > (0x7fffffffu - 1000u) && s->goaway_sent == 0) {
+		if (hive_submit_goaway_prepare(s) != HIVE_OK) {
+			return session_error(
+			    s, HIVE_ERR_NOMEM, HIVE_H2_INTERNAL_ERROR);
+		}
+	}
+
 	return 0;
 }
 

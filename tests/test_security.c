@@ -19,6 +19,7 @@ int test_settings_flood_uses_inbound_counter(void);
 int test_settings_unsolicited_ack(void);
 int test_rst_stream_flood_callback(void);
 int test_rst_stream_flood_window_reset(void);
+int test_stream_id_exhaustion_triggers_prepare(void);
 
 #if defined(HIVE_TEST_CLOCK) && HIVE_TEST_CLOCK == 1
 uint64_t hive_test_clock_secs;
@@ -81,6 +82,20 @@ build_settings_frame(uint8_t *dst, uint8_t flags)
 {
 	frame_hdr_write_at(dst, 0u, HIVE_FRAME_SETTINGS, flags, 0u);
 	return 9u;
+}
+
+static size_t
+build_headers_frame(uint8_t *dst, uint32_t stream_id, uint8_t flags)
+{
+	frame_hdr_write_at(dst, 0u, HIVE_FRAME_HEADERS, flags, stream_id);
+	return 9u;
+}
+
+static uint32_t
+u32be_at(const uint8_t *p)
+{
+	return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+	       ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
 static hive_session_t *
@@ -237,5 +252,39 @@ test_rst_stream_flood_window_reset(void)
 #else
 	return 1;
 #endif
+}
+
+int
+test_stream_id_exhaustion_triggers_prepare(void)
+{
+	hive_session_t *s;
+	uint8_t frame[9];
+	size_t n;
+	uint32_t stream_id;
+	frame_hdr_t hdr;
+
+	s = new_server_security_session(3u, 100u, 10u, NULL, NULL);
+
+	stream_id = 0x7ffffc19u; /* 2^31 - 999, odd peer stream for server role */
+	n = build_headers_frame(frame, stream_id, HIVE_FLAG_END_HEADERS);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+
+	ASSERT(stream_lookup(s, stream_id) != NULL);
+	ASSERT(s->goaway_prepare_sent == 1u);
+	ASSERT(s->goaway_sent == 1u);
+	ASSERT(s->session_state == HIVE_SESSION_OPEN);
+	ASSERT(s->goaway_last_stream_id_sent == 0x7fffffffu);
+	ASSERT(s->send_iov_count == 1u);
+
+	frame_hdr_parse(s->send_buf, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_GOAWAY);
+	ASSERT(hdr.length == 8u);
+	ASSERT(hdr.flags == 0u);
+	ASSERT(hdr.stream_id == 0u);
+	ASSERT(u32be_at(s->send_buf + 9) == 0x7fffffffu);
+	ASSERT(u32be_at(s->send_buf + 13) == HIVE_H2_NO_ERROR);
+
+	hive_session_free(s);
+	return 1;
 }
 
