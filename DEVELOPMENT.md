@@ -3,7 +3,7 @@
 ## Status Overview
 
 **Last Updated**: 2026-04-26
-**Current Phase**: Phase 7 — Security Hardening
+**Current Phase**: Phase 8 — h2c and Server Push
 **Next Task**: 8.1 — h2c Upgrade path
 
 ### Phase Summary
@@ -16,7 +16,7 @@
 | 4 | Session Core | DONE | 32/32 (Phase 4 slice) | Tasks 4.0–4.7 done on Linux + OpenBSD; completion criteria confirmed 2026-04-25 |
 | 5 | Flow Control and DATA | DONE | All Phase 5 tests pass (Linux + OpenBSD) | Receive-side enforcement, WINDOW_UPDATE, DATA delivery |
 | 6 | Submit and Send | DONE | All Phase 6 tests pass (Linux + OpenBSD) | Full send queue, partial-send, response/request submit, new callbacks |
-| 7 | Security Hardening | IN PROGRESS | Tasks 7.1-7.6 verified (Linux + OpenBSD) | Flood protection, exhaustion, limits, HTTP messaging validation, buffer lifetime |
+| 7 | Security Hardening | DONE | All Phase 7 tests pass (Linux + OpenBSD) | Completion criteria confirmed 2026-04-26; flood protection, exhaustion, HTTP messaging validation, buffer lifetime |
 | 8 | h2c and Server Push | NOT STARTED | — | Upgrade path, PUSH_PROMISE, two-phase GOAWAY, client role |
 | 9 | Conformance and Polish | NOT STARTED | — | h2spec, README, API reference, tools |
 
@@ -27,11 +27,11 @@
 | M1 | Build system works on Linux and OpenBSD | DONE |
 | M2 | All unit tests pass on Linux | DONE |
 | M3 | All unit tests pass on OpenBSD | DONE |
-| M4 | Valgrind clean on Linux | NOT STARTED |
-| M5 | ASan/UBSan clean on both platforms | NOT STARTED |
+| M4 | Valgrind clean on Linux | DONE |
+| M5 | ASan/UBSan clean on both platforms | DONE |
 | M6 | clang-format clean | NOT STARTED |
 | M7 | clang-tidy clean | NOT STARTED |
-| M8 | No direct malloc/free calls in src/ except the NULL-allocator shim | NOT STARTED |
+| M8 | No direct malloc/free calls in src/ except the NULL-allocator shim | DONE |
 | M9 | Full HPACK test suite passes (encode-decode round-trip) | DONE |
 | M10 | Frame state machine handles split delivery (1 byte at a time) | DONE |
 | M11 | h2spec full suite passes — zero failures | NOT STARTED |
@@ -1247,9 +1247,9 @@ File: `tests/test_security.c`
 - [x] Stream ID exhaustion triggers prepare-phase GOAWAY, not final GOAWAY
 - [x] HTTP messaging validation tests pass: all rule categories covered
 - [x] Content-Length consistency enforcement passes
-- [ ] Quality milestone M8 confirmed (allocator discipline audit)
+- [x] Quality milestone M8 confirmed (allocator discipline audit)
 - [x] All Phase 7 tests pass on Linux and OpenBSD
-- [ ] Valgrind clean; ASan/UBSan clean on both platforms
+- [x] Valgrind clean; ASan/UBSan clean on both platforms
 
 ---
 

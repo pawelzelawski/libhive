@@ -205,6 +205,7 @@ int test_data_send_zero_no_eof_clears_source(void);
 int test_data_send_eof_closes_half_closed_remote(void);
 
 /* --- test_security.c ------------------------------------------------------ */
+int test_continuation_flood_is_connection_error(void);
 int test_settings_flood_uses_inbound_counter(void);
 int test_settings_unsolicited_ack(void);
 int test_rst_stream_flood_callback(void);
@@ -218,6 +219,7 @@ int test_http_messaging_uppercase_field_name(void);
 int test_http_messaging_forbidden_connection_header(void);
 int test_http_messaging_te_invalid_value(void);
 int test_http_messaging_content_length_mismatch(void);
+int test_hpack_negative_index_zero(void);
 
 int
 main(void)
@@ -327,6 +329,7 @@ main(void)
 	RUN(data_send_eof_closes_half_closed_remote);
 
 	/* Phase 7.2 -- SETTINGS flood protection */
+	RUN(continuation_flood_is_connection_error);
 	RUN(settings_flood_uses_inbound_counter);
 	RUN(settings_unsolicited_ack);
 
@@ -346,6 +349,7 @@ main(void)
 	RUN(http_messaging_forbidden_connection_header);
 	RUN(http_messaging_te_invalid_value);
 	RUN(http_messaging_content_length_mismatch);
+	RUN(hpack_negative_index_zero);
 
 	/* Phase 2.2 — frame header serialisation */
 	RUN(frame_hdr_write_data);

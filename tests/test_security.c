@@ -17,6 +17,7 @@
 
 int test_settings_flood_uses_inbound_counter(void);
 int test_settings_unsolicited_ack(void);
+int test_continuation_flood_is_connection_error(void);
 int test_rst_stream_flood_callback(void);
 int test_rst_stream_flood_window_reset(void);
 int test_stream_id_exhaustion_triggers_prepare(void);
@@ -28,6 +29,8 @@ int test_http_messaging_uppercase_field_name(void);
 int test_http_messaging_forbidden_connection_header(void);
 int test_http_messaging_te_invalid_value(void);
 int test_http_messaging_content_length_mismatch(void);
+int test_hpack_negative_index_zero(void);
+int test_hive_buf_asan_poisoning(void);
 
 #if defined(HIVE_TEST_CLOCK) && HIVE_TEST_CLOCK == 1
 uint64_t hive_test_clock_secs;
@@ -116,6 +119,34 @@ build_headers_frame(uint8_t *dst, uint32_t stream_id, uint8_t flags)
 	return 9u;
 }
 
+static size_t
+build_headers_frame_block(uint8_t *dst,
+	    uint32_t stream_id,
+	    uint8_t flags,
+	    const uint8_t *payload,
+	    size_t payload_len)
+{
+	frame_hdr_write_at(
+	    dst, (uint32_t)payload_len, HIVE_FRAME_HEADERS, flags, stream_id);
+	if (payload_len > 0)
+		memcpy(dst + 9, payload, payload_len);
+	return 9u + payload_len;
+}
+
+static size_t
+build_continuation_frame(uint8_t *dst,
+	    uint32_t stream_id,
+	    uint8_t flags,
+	    const uint8_t *payload,
+	    size_t payload_len)
+{
+	frame_hdr_write_at(
+	    dst, (uint32_t)payload_len, HIVE_FRAME_CONTINUATION, flags, stream_id);
+	if (payload_len > 0)
+		memcpy(dst + 9, payload, payload_len);
+	return 9u + payload_len;
+}
+
 static uint32_t
 u32be_at(const uint8_t *p)
 {
@@ -181,6 +212,20 @@ assert_rst_protocol(hive_session_t *s, uint32_t stream_id)
 	ASSERT(hdr.stream_id == stream_id);
 	ASSERT(hdr.length == 4u);
 	ASSERT(u32be_at(s->send_buf + 9) == HIVE_H2_PROTOCOL_ERROR);
+	return 1;
+}
+
+static int
+assert_goaway(hive_session_t *s, uint32_t h2_err)
+{
+	frame_hdr_t hdr;
+
+	ASSERT(s->send_iov_count == 1);
+	frame_hdr_parse(s->send_buf, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_GOAWAY);
+	ASSERT(hdr.stream_id == 0u);
+	ASSERT(hdr.length >= 8u);
+	ASSERT(u32be_at(s->send_buf + 13) == h2_err);
 	return 1;
 }
 
@@ -264,6 +309,35 @@ test_settings_unsolicited_ack(void)
 	ASSERT(hive_session_recv(s, frame, n) == -1);
 	ASSERT(s->last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s->last_h2_err == HIVE_H2_PROTOCOL_ERROR);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_continuation_flood_is_connection_error(void)
+{
+	hive_session_t *s;
+	uint8_t headers[13];
+	uint8_t cont[13];
+	uint8_t payload1[4] = {0x82u, 0x84u, 0x86u, 0x41u};
+	uint8_t payload2[4] = {0x8cu, 0xf1u, 0xe3u, 0xc2u};
+	size_t n;
+
+	s = new_server_security_session(3u, 100u, 10u, NULL, NULL);
+	s->opt_max_continuation_size = 6u;
+
+	n = build_headers_frame_block(headers, 1u, 0u, payload1, sizeof(payload1));
+	ASSERT(hive_session_recv(s, headers, n) == (ssize_t)n);
+	ASSERT(s->reassembly_active == 1u);
+
+	n = build_continuation_frame(
+	    cont, 1u, HIVE_FLAG_END_HEADERS, payload2, sizeof(payload2));
+	ASSERT(hive_session_recv(s, cont, n) == -1);
+	ASSERT(s->last_err == HIVE_ERR_PROTOCOL);
+	ASSERT(s->last_h2_err == HIVE_H2_PROTOCOL_ERROR);
+	ASSERT(s->closed == 1u);
+	ASSERT(assert_goaway(s, HIVE_H2_PROTOCOL_ERROR));
 
 	hive_session_free(s);
 	return 1;
@@ -558,6 +632,42 @@ test_http_messaging_content_length_mismatch(void)
 	ASSERT(assert_rst_protocol(s, 1u));
 
 	hive_session_free(s);
+	return 1;
+}
+
+int
+test_hpack_negative_index_zero(void)
+{
+	hive_session_t *s;
+	uint8_t frame[10];
+
+	s = new_server_security_session(3u, 100u, 10u, NULL, NULL);
+
+	frame_hdr_write_at(frame, 1u, HIVE_FRAME_HEADERS, HIVE_FLAG_END_HEADERS, 1u);
+	frame[9] = 0x80u; /* indexed representation with index=0 (invalid). */
+
+	ASSERT(hive_session_recv(s, frame, sizeof(frame)) == -1);
+	ASSERT(s->last_err == HIVE_ERR_COMPRESSION);
+	ASSERT(s->last_h2_err == HIVE_H2_COMPRESSION_ERROR);
+	ASSERT(s->closed == 1u);
+	ASSERT(assert_goaway(s, HIVE_H2_COMPRESSION_ERROR));
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_hive_buf_asan_poisoning(void)
+{
+	/*
+	 * Manual verification only (expected ASan abort in HIVE_DEBUG builds):
+	 * 1) Capture name->data/value->data in on_header without hive_buf_retain().
+	 * 2) Access captured pointer after callback returns.
+	 * 3) Expect heap-use-after-poison for reassembly/scratch-backed buffers.
+	 *
+	 * This case is intentionally not executed in automated RUN() flow because
+	 * success condition is process termination under ASan.
+	 */
 	return 1;
 }
 
