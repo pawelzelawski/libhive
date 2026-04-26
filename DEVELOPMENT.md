@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-26
 **Current Phase**: Phase 6 — Submit and Send
-**Next Task**: 6.5 — Additional submit functions
+**Next Task**: 6.6 — `hive_submit_request()` (client role)
 
 ### Phase Summary
 
@@ -984,7 +984,7 @@ are wired. Two-phase GOAWAY works. Stream introspection functions work.
 - Store `data_source` in `stream->data_source` — fixed for stream lifetime
 - Stream state transitions per ARCHITECTURE.md §5.3
 
-**6.5 — Additional submit functions**
+**6.5 — Additional submit functions** ✓ DONE
 - `hive_submit_trailers()` — HEADERS with END_STREAM, no pseudo-headers
 - `hive_submit_interim_response()` — HEADERS with 1xx :status, no DATA follows
 - `hive_submit_goaway_prepare()` — sends GOAWAY with last_stream_id=0x7FFFFFFF;

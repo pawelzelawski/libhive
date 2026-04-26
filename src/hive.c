@@ -1123,6 +1123,77 @@ hive_session_want_write(hive_session_t *session)
 	return 0;
 }
 
+static int
+stream_close_local_on_end_stream(hive_session_t *session,
+                                 hive_stream_t *stream,
+                                 uint32_t stream_id)
+{
+	if (stream->state == HIVE_STREAM_OPEN) {
+		stream->state = HIVE_STREAM_HALF_CLOSED_LOCAL;
+	} else if (stream->state == HIVE_STREAM_HALF_CLOSED_REMOTE) {
+		stream->state = HIVE_STREAM_CLOSED;
+		if (session->callbacks.on_stream_close != NULL)
+			(void)session->callbacks.on_stream_close(
+			    session,
+			    stream_id,
+			    HIVE_H2_NO_ERROR,
+			    session->user_data);
+		stream_close(session, stream);
+	}
+
+	return HIVE_OK;
+}
+
+static int
+nv_contains_pseudo_header(const hive_nv_t *nva, size_t nvlen)
+{
+	size_t i;
+
+	for (i = 0; i < nvlen; i++) {
+		if (nva[i].name_len > 0u && nva[i].name != NULL &&
+		    nva[i].name[0] == ':')
+			return 1;
+	}
+
+	return 0;
+}
+
+static int
+nv_has_interim_status(const hive_nv_t *nva, size_t nvlen)
+{
+	static const uint8_t status_name[] = ":status";
+	const uint8_t *v;
+	size_t i;
+
+	for (i = 0; i < nvlen; i++) {
+		if (nva[i].name == NULL || nva[i].value == NULL)
+			continue;
+		if (nva[i].name_len != sizeof(status_name) - 1u)
+			continue;
+		if (memcmp(nva[i].name,
+		           status_name,
+		           sizeof(status_name) - 1u) != 0)
+			continue;
+
+		v = nva[i].value;
+		if (nva[i].value_len == 3u && v[0] == '1' && v[1] >= '0' &&
+		    v[1] <= '9' && v[2] >= '0' && v[2] <= '9')
+			return 1;
+		return 0;
+	}
+
+	return 0;
+}
+
+static void
+u32_write_be(uint8_t out[4], uint32_t v)
+{
+	out[0] = (uint8_t)((v >> 24) & 0xffu);
+	out[1] = (uint8_t)((v >> 16) & 0xffu);
+	out[2] = (uint8_t)((v >> 8) & 0xffu);
+	out[3] = (uint8_t)(v & 0xffu);
+}
+
 int
 hive_submit_response(hive_session_t *session,
                      uint32_t stream_id,
@@ -1157,20 +1228,9 @@ hive_submit_response(hive_session_t *session,
 	else
 		memset(&stream->data_source, 0, sizeof(stream->data_source));
 
-	if (end_stream) {
-		if (stream->state == HIVE_STREAM_OPEN) {
-			stream->state = HIVE_STREAM_HALF_CLOSED_LOCAL;
-		} else if (stream->state == HIVE_STREAM_HALF_CLOSED_REMOTE) {
-			stream->state = HIVE_STREAM_CLOSED;
-			if (session->callbacks.on_stream_close != NULL)
-				(void)session->callbacks.on_stream_close(
-				    session,
-				    stream_id,
-				    HIVE_H2_NO_ERROR,
-				    session->user_data);
-			stream_close(session, stream);
-		}
-	}
+	if (end_stream)
+		return stream_close_local_on_end_stream(
+		    session, stream, stream_id);
 
 	return HIVE_OK;
 }
@@ -1181,11 +1241,32 @@ hive_submit_trailers(hive_session_t *session,
                      const hive_nv_t *nva,
                      size_t nvlen)
 {
-	(void)session;
-	(void)stream_id;
-	(void)nva;
-	(void)nvlen;
-	return HIVE_ERR_SESSION_CLOSED;
+	hive_stream_t *stream;
+	int ret;
+
+	if (session == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (session->session_state == HIVE_SESSION_CLOSED)
+		return HIVE_ERR_SESSION_CLOSED;
+	if (nva == NULL || nvlen == 0u)
+		return HIVE_ERR_INVALID_ARG;
+
+	stream = stream_lookup(session, stream_id);
+	if (stream == NULL)
+		return HIVE_ERR_STREAM_CLOSED;
+	if (stream->state != HIVE_STREAM_OPEN &&
+	    stream->state != HIVE_STREAM_HALF_CLOSED_REMOTE)
+		return HIVE_ERR_STREAM_CLOSED;
+	if (stream->data_source.read_callback != NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (nv_contains_pseudo_header(nva, nvlen))
+		return HIVE_ERR_INVALID_ARG;
+
+	ret = send_queue_append_headers(session, stream_id, nva, nvlen, 1u);
+	if (ret != HIVE_OK)
+		return ret;
+
+	return stream_close_local_on_end_stream(session, stream, stream_id);
 }
 
 int
@@ -1194,11 +1275,25 @@ hive_submit_interim_response(hive_session_t *session,
                              const hive_nv_t *nva,
                              size_t nvlen)
 {
-	(void)session;
-	(void)stream_id;
-	(void)nva;
-	(void)nvlen;
-	return HIVE_ERR_SESSION_CLOSED;
+  const hive_stream_t *stream;
+
+	if (session == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (session->session_state == HIVE_SESSION_CLOSED)
+		return HIVE_ERR_SESSION_CLOSED;
+	if (nva == NULL || nvlen == 0u)
+		return HIVE_ERR_INVALID_ARG;
+
+	stream = stream_lookup(session, stream_id);
+	if (stream == NULL)
+		return HIVE_ERR_STREAM_CLOSED;
+	if (stream->state != HIVE_STREAM_OPEN &&
+	    stream->state != HIVE_STREAM_HALF_CLOSED_REMOTE)
+		return HIVE_ERR_STREAM_CLOSED;
+	if (!nv_has_interim_status(nva, nvlen))
+		return HIVE_ERR_INVALID_ARG;
+
+	return send_queue_append_headers(session, stream_id, nva, nvlen, 0u);
 }
 
 int
@@ -1236,17 +1331,56 @@ hive_submit_rst_stream(hive_session_t *session,
                        uint32_t stream_id,
                        uint32_t error_code)
 {
-	(void)session;
-	(void)stream_id;
-	(void)error_code;
-	return HIVE_ERR_SESSION_CLOSED;
+	hive_stream_t *stream;
+	uint8_t payload[4];
+	int ret;
+
+	if (session == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (session->session_state == HIVE_SESSION_CLOSED)
+		return HIVE_ERR_SESSION_CLOSED;
+
+	stream = stream_lookup(session, stream_id);
+	if (stream == NULL)
+		return HIVE_ERR_STREAM_CLOSED;
+
+	u32_write_be(payload, error_code);
+	ret = send_queue_append_ctrl(
+	    session, HIVE_FRAME_RST_STREAM, 0u, stream_id, payload, 4u);
+	if (ret != HIVE_OK)
+		return ret;
+
+	if (session->callbacks.on_stream_close != NULL)
+		(void)session->callbacks.on_stream_close(
+		    session, stream_id, error_code, session->user_data);
+	stream_close(session, stream);
+
+	return HIVE_OK;
 }
 
 int
 hive_submit_goaway_prepare(hive_session_t *session)
 {
-	(void)session;
-	return HIVE_ERR_SESSION_CLOSED;
+	uint8_t payload[8];
+	int ret;
+
+	if (session == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (session->session_state != HIVE_SESSION_OPEN)
+		return HIVE_ERR_SESSION_CLOSED;
+
+	u32_write_be(payload, 0x7fffffffu);
+	u32_write_be(payload + 4, HIVE_H2_NO_ERROR);
+	ret = send_queue_append_ctrl(
+	    session, HIVE_FRAME_GOAWAY, 0u, 0u, payload, sizeof(payload));
+	if (ret != HIVE_OK)
+		return ret;
+
+	session->goaway_prepare_sent = 1u;
+	session->goaway_sent = 1u;
+	session->goaway_last_stream_id_sent = 0x7fffffffu;
+
+	return HIVE_OK;
 }
 
 int
@@ -1255,27 +1389,68 @@ hive_submit_goaway_final(hive_session_t *session,
                          const uint8_t *debug_data,
                          size_t debug_len)
 {
-	(void)session;
-	(void)error_code;
-	(void)debug_data;
-	(void)debug_len;
-	return HIVE_ERR_SESSION_CLOSED;
+	uint8_t payload[8 + 256];
+	uint32_t last_stream_id;
+	int ret;
+
+	if (session == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (session->session_state == HIVE_SESSION_CLOSED ||
+	    session->session_state == HIVE_SESSION_GOAWAY_SENT)
+		return HIVE_ERR_SESSION_CLOSED;
+	if (debug_len > 0u && debug_data == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (debug_len > 256u)
+		return HIVE_ERR_INVALID_ARG;
+
+	last_stream_id = session->last_stream_id_remote & 0x7fffffffu;
+	u32_write_be(payload, last_stream_id);
+	u32_write_be(payload + 4, error_code);
+	if (debug_len > 0u)
+		memcpy(payload + 8, debug_data, debug_len);
+
+	ret = send_queue_append_ctrl(session,
+	                             HIVE_FRAME_GOAWAY,
+	                             0u,
+	                             0u,
+	                             payload,
+	                             (uint32_t)(8u + debug_len));
+	if (ret != HIVE_OK)
+		return ret;
+
+	session->goaway_sent = 1u;
+	session->goaway_last_stream_id_sent = last_stream_id;
+	session->session_state = HIVE_SESSION_GOAWAY_SENT;
+
+	return HIVE_OK;
 }
 
 int
 hive_submit_ping(hive_session_t *session, const uint8_t opaque[8])
 {
-	(void)session;
-	(void)opaque;
-	return HIVE_ERR_SESSION_CLOSED;
+	if (session == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (session->session_state == HIVE_SESSION_CLOSED)
+		return HIVE_ERR_SESSION_CLOSED;
+	if (opaque == NULL)
+		return HIVE_ERR_INVALID_ARG;
+
+	return send_queue_append_ctrl(
+	    session, HIVE_FRAME_PING, 0u, 0u, opaque, 8u);
 }
 
 int
 hive_submit_ping_ack(hive_session_t *session, const uint8_t opaque[8])
 {
-	(void)session;
-	(void)opaque;
-	return HIVE_ERR_SESSION_CLOSED;
+	if (session == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (session->session_state == HIVE_SESSION_CLOSED)
+		return HIVE_ERR_SESSION_CLOSED;
+	if (opaque == NULL)
+		return HIVE_ERR_INVALID_ARG;
+
+	return send_queue_append_ctrl(
+	    session, HIVE_FRAME_PING, HIVE_FLAG_ACK, 0u, opaque, 8u);
 }
 
 int

@@ -131,6 +131,13 @@ int test_submit_response_headers_only(void);
 int test_submit_response_with_data_copy(void);
 int test_submit_response_no_copy(void);
 int test_submit_response_eof_flag(void);
+int test_submit_trailers(void);
+int test_submit_interim_response(void);
+int test_submit_rst_stream(void);
+int test_submit_goaway_prepare(void);
+int test_submit_goaway_final(void);
+int test_submit_ping(void);
+int test_submit_ping_ack(void);
 int test_options_defaults(void);
 int test_options_set_valid(void);
 int test_options_set_invalid(void);
@@ -207,6 +214,15 @@ main(void)
 	RUN(submit_response_with_data_copy);
 	RUN(submit_response_no_copy);
 	RUN(submit_response_eof_flag);
+
+	/* Phase 6.5 — additional submit functions */
+	RUN(submit_trailers);
+	RUN(submit_interim_response);
+	RUN(submit_rst_stream);
+	RUN(submit_goaway_prepare);
+	RUN(submit_goaway_final);
+	RUN(submit_ping);
+	RUN(submit_ping_ack);
 
 	/* Phase 4.2 — options API */
 	RUN(options_defaults);

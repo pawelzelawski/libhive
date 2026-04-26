@@ -52,6 +52,13 @@ int test_submit_response_headers_only(void);
 int test_submit_response_with_data_copy(void);
 int test_submit_response_no_copy(void);
 int test_submit_response_eof_flag(void);
+int test_submit_trailers(void);
+int test_submit_interim_response(void);
+int test_submit_rst_stream(void);
+int test_submit_goaway_prepare(void);
+int test_submit_goaway_final(void);
+int test_submit_ping(void);
+int test_submit_ping_ack(void);
 int test_options_defaults(void);
 int test_options_set_valid(void);
 int test_options_set_invalid(void);
@@ -505,6 +512,15 @@ build_settings_frame(uint8_t *dst, uint8_t flags,
 	if (payload_len > 0 && payload != NULL)
 		memcpy(dst + 9, payload, payload_len);
 	return 9u + (size_t)payload_len;
+}
+
+static uint32_t
+read_u32_be(const uint8_t in[4])
+{
+	return ((uint32_t)in[0] << 24) |
+	    ((uint32_t)in[1] << 16) |
+	    ((uint32_t)in[2] << 8) |
+	    (uint32_t)in[3];
 }
 
 static hive_session_t *
@@ -1253,6 +1269,203 @@ test_submit_response_eof_flag(void)
 	frame_hdr_parse(cap.iov[1].iov_base, &hdr);
 	ASSERT(hdr.type == HIVE_FRAME_DATA);
 	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) != 0u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_submit_trailers(void)
+{
+	static const uint8_t n_etag[] = "etag";
+	static const uint8_t v_etag[] = "abc";
+	hive_nv_t nva[1];
+	hive_session_t *s;
+	frame_hdr_t hdr;
+
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_HALF_CLOSED_REMOTE) == HIVE_OK);
+
+	nva[0].name = n_etag;
+	nva[0].value = v_etag;
+	nva[0].name_len = sizeof(n_etag) - 1u;
+	nva[0].value_len = sizeof(v_etag) - 1u;
+	nva[0].flags = 0u;
+
+	ASSERT(hive_submit_trailers(s, 1u, nva, 1u) == HIVE_OK);
+	ASSERT(s->send_iov_count == 1);
+	frame_hdr_parse(s->send_iov[0].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_HEADERS);
+	ASSERT(hdr.stream_id == 1u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_HEADERS) != 0u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) != 0u);
+	ASSERT(stream_lookup(s, 1u) == NULL);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_submit_interim_response(void)
+{
+	static const uint8_t n_status[] = ":status";
+	static const uint8_t v_103[] = "103";
+	hive_nv_t nva[1];
+	hive_session_t *s;
+	hive_stream_t *st;
+	frame_hdr_t hdr;
+
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 3u, HIVE_STREAM_HALF_CLOSED_REMOTE) == HIVE_OK);
+
+	nva[0].name = n_status;
+	nva[0].value = v_103;
+	nva[0].name_len = sizeof(n_status) - 1u;
+	nva[0].value_len = sizeof(v_103) - 1u;
+	nva[0].flags = 0u;
+
+	ASSERT(hive_submit_interim_response(s, 3u, nva, 1u) == HIVE_OK);
+	ASSERT(s->send_iov_count == 1);
+	frame_hdr_parse(s->send_iov[0].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_HEADERS);
+	ASSERT(hdr.stream_id == 3u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_HEADERS) != 0u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) == 0u);
+	st = stream_lookup(s, 3u);
+	ASSERT(st != NULL);
+	ASSERT(st->state == HIVE_STREAM_HALF_CLOSED_REMOTE);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_submit_rst_stream(void)
+{
+	hive_session_t *s;
+	frame_hdr_t hdr;
+	const uint8_t *payload;
+
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 5u, HIVE_STREAM_OPEN) == HIVE_OK);
+
+	ASSERT(hive_submit_rst_stream(s, 5u, HIVE_H2_CANCEL) == HIVE_OK);
+	ASSERT(s->send_iov_count == 1);
+	frame_hdr_parse(s->send_iov[0].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_RST_STREAM);
+	ASSERT(hdr.stream_id == 5u);
+	ASSERT(hdr.length == 4u);
+	payload = (const uint8_t *)s->send_iov[0].iov_base + 9;
+	ASSERT(read_u32_be(payload) == HIVE_H2_CANCEL);
+	ASSERT(stream_lookup(s, 5u) == NULL);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_submit_goaway_prepare(void)
+{
+	hive_session_t *s;
+	frame_hdr_t hdr;
+	const uint8_t *payload;
+
+	s = new_server_send_session();
+
+	ASSERT(hive_submit_goaway_prepare(s) == HIVE_OK);
+	ASSERT(s->goaway_prepare_sent == 1u);
+	ASSERT(s->goaway_sent == 1u);
+	ASSERT(s->session_state == HIVE_SESSION_OPEN);
+	ASSERT(s->send_iov_count == 1);
+
+	frame_hdr_parse(s->send_iov[0].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_GOAWAY);
+	ASSERT(hdr.stream_id == 0u);
+	ASSERT(hdr.length == 8u);
+	payload = (const uint8_t *)s->send_iov[0].iov_base + 9;
+	ASSERT(read_u32_be(payload) == 0x7fffffffu);
+	ASSERT(read_u32_be(payload + 4) == HIVE_H2_NO_ERROR);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_submit_goaway_final(void)
+{
+	static const uint8_t debug[] = {0xde, 0xad};
+	hive_session_t *s;
+	frame_hdr_t hdr;
+	const uint8_t *payload;
+
+	s = new_server_send_session();
+	s->last_stream_id_remote = 7u;
+
+	ASSERT(hive_submit_goaway_final(
+	    s, HIVE_H2_PROTOCOL_ERROR, debug, sizeof(debug)) == HIVE_OK);
+	ASSERT(s->goaway_sent == 1u);
+	ASSERT(s->session_state == HIVE_SESSION_GOAWAY_SENT);
+	ASSERT(s->send_iov_count == 1);
+
+	frame_hdr_parse(s->send_iov[0].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_GOAWAY);
+	ASSERT(hdr.stream_id == 0u);
+	ASSERT(hdr.length == 10u);
+	payload = (const uint8_t *)s->send_iov[0].iov_base + 9;
+	ASSERT(read_u32_be(payload) == 7u);
+	ASSERT(read_u32_be(payload + 4) == HIVE_H2_PROTOCOL_ERROR);
+	ASSERT(payload[8] == 0xde);
+	ASSERT(payload[9] == 0xad);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_submit_ping(void)
+{
+	static const uint8_t opaque[8] =
+	    {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef};
+	hive_session_t *s;
+	frame_hdr_t hdr;
+	const uint8_t *payload;
+
+	s = new_server_send_session();
+
+	ASSERT(hive_submit_ping(s, opaque) == HIVE_OK);
+	ASSERT(s->send_iov_count == 1);
+	frame_hdr_parse(s->send_iov[0].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_PING);
+	ASSERT(hdr.stream_id == 0u);
+	ASSERT(hdr.length == 8u);
+	ASSERT((hdr.flags & HIVE_FLAG_ACK) == 0u);
+	payload = (const uint8_t *)s->send_iov[0].iov_base + 9;
+	ASSERT(memcmp(payload, opaque, 8u) == 0);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_submit_ping_ack(void)
+{
+	static const uint8_t opaque[8] =
+	    {0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe};
+	hive_session_t *s;
+	frame_hdr_t hdr;
+	const uint8_t *payload;
+
+	s = new_server_send_session();
+
+	ASSERT(hive_submit_ping_ack(s, opaque) == HIVE_OK);
+	ASSERT(s->send_iov_count == 1);
+	frame_hdr_parse(s->send_iov[0].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_PING);
+	ASSERT(hdr.stream_id == 0u);
+	ASSERT(hdr.length == 8u);
+	ASSERT((hdr.flags & HIVE_FLAG_ACK) != 0u);
+	payload = (const uint8_t *)s->send_iov[0].iov_base + 9;
+	ASSERT(memcmp(payload, opaque, 8u) == 0);
 
 	hive_session_free(s);
 	return 1;
