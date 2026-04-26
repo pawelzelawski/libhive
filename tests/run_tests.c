@@ -120,6 +120,9 @@ int test_hpack_standalone_encoder_decoder(void);
 int test_send_control_frame_queued(void);
 int test_send_partial_write(void);
 int test_send_fatal_error(void);
+int test_send_headers_single_frame_layout(void);
+int test_send_headers_split_layout(void);
+int test_send_headers_split_end_stream_flag(void);
 int test_options_defaults(void);
 int test_options_set_valid(void);
 int test_options_set_invalid(void);
@@ -177,6 +180,11 @@ main(void)
 	RUN(send_control_frame_queued);
 	RUN(send_partial_write);
 	RUN(send_fatal_error);
+
+	/* Phase 6.1 — HEADERS queueing and split CONTINUATION layout */
+	RUN(send_headers_single_frame_layout);
+	RUN(send_headers_split_layout);
+	RUN(send_headers_split_end_stream_flag);
 
 	/* Phase 4.2 — options API */
 	RUN(options_defaults);

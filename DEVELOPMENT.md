@@ -2,9 +2,9 @@
 
 ## Status Overview
 
-**Last Updated**: 2026-04-25
-**Current Phase**: Phase 5 — Flow Control and DATA
-**Next Task**: 5.4 — `hive_session_want_write()` update
+**Last Updated**: 2026-04-26
+**Current Phase**: Phase 6 — Submit and Send
+**Next Task**: 6.2 — Full send queue: DATA frame queuing (`uint8_t **buf`)
 
 ### Phase Summary
 
@@ -933,7 +933,7 @@ are wired. Two-phase GOAWAY works. Stream introspection functions work.
 
 ### Tasks
 
-**6.1 — Full send queue: HEADERS frame queuing**
+**6.1 — Full send queue: HEADERS frame queuing** ✓ DONE
 - In `send_queue_append_headers()`: implement the HEADERS splitting algorithm
   from ARCHITECTURE.md §6.4:
   - Reserve 9 bytes for first frame header

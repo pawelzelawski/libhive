@@ -83,6 +83,159 @@ send_queue_append_ctrl(hive_session_t *s,
 }
 
 /*
+ * Phase 6.1 — HEADERS queueing with CONTINUATION splitting.
+ *
+ * Encodes the header block contiguously, then emits either:
+ *   - single iov (HEADERS header + full payload), or
+ *   - alternating iovs (frame header, payload chunk, ...)
+ *     for HEADERS + CONTINUATION sequence.
+ *
+ * See ARCHITECTURE.md §6.4.
+ */
+int
+send_queue_append_headers(hive_session_t *s,
+                          uint32_t stream_id,
+                          const hive_nv_t *nva,
+                          size_t nvlen,
+                          uint8_t end_stream)
+{
+	uint32_t max_frame;
+	size_t first_hdr_offset;
+	size_t encode_start;
+	size_t out_cap;
+	size_t encoded_len;
+	int ret;
+
+	if (s == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (nvlen > 0 && nva == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (s->send_buf == NULL || s->send_iov == NULL)
+		return HIVE_ERR_INVALID_ARG;
+
+	max_frame = s->remote_settings.max_frame_size;
+	if (max_frame == 0)
+		return HIVE_ERR_INVALID_ARG;
+
+	first_hdr_offset = s->send_buf_used;
+	if (first_hdr_offset + 9u > s->send_buf_cap)
+		return HIVE_ERR_NOMEM;
+
+	encode_start = first_hdr_offset + 9u;
+	out_cap = s->send_buf_cap - encode_start;
+	if (out_cap > (size_t)s->opt_max_continuation_size)
+		out_cap = (size_t)s->opt_max_continuation_size;
+
+	ret = hpack_encode_block(&s->enc_table,
+	                         &s->mem,
+	                         nva,
+	                         nvlen,
+	                         s->send_buf + encode_start,
+	                         out_cap,
+	                         &encoded_len);
+	if (ret != HIVE_OK)
+		return ret;
+
+	if (encoded_len <= (size_t)max_frame) {
+		uint8_t flags;
+
+		if (s->send_iov_count + 1 > (int)s->opt_max_send_iov)
+			return HIVE_ERR_NOMEM;
+
+		flags = HIVE_FLAG_END_HEADERS;
+		if (end_stream)
+			flags |= HIVE_FLAG_END_STREAM;
+
+		frame_hdr_write_at(s->send_buf + first_hdr_offset,
+		                   (uint32_t)encoded_len,
+		                   HIVE_FRAME_HEADERS,
+		                   flags,
+		                   stream_id);
+		s->send_iov[s->send_iov_count].iov_base =
+		    s->send_buf + first_hdr_offset;
+		s->send_iov[s->send_iov_count].iov_len = 9u + encoded_len;
+		s->send_iov_count++;
+		s->send_buf_used = encode_start + encoded_len;
+		return HIVE_OK;
+	} else {
+		size_t n_frames;
+		size_t cont_hdr_area;
+		size_t cont_hdr_bytes;
+		size_t needed_iov;
+		size_t pos;
+		size_t frame_idx;
+
+		n_frames =
+		    (encoded_len + (size_t)max_frame - 1u) / (size_t)max_frame;
+		cont_hdr_area = encode_start + encoded_len;
+		cont_hdr_bytes = (n_frames - 1u) * 9u;
+		if (cont_hdr_area + cont_hdr_bytes > s->send_buf_cap)
+			return HIVE_ERR_NOMEM;
+
+		needed_iov = n_frames * 2u;
+		if ((size_t)s->send_iov_count + needed_iov >
+		    (size_t)s->opt_max_send_iov)
+			return HIVE_ERR_NOMEM;
+
+		pos = 0u;
+		frame_idx = 0u;
+		while (pos < encoded_len) {
+			size_t chunk_len;
+			uint8_t hdr_flags;
+			int is_last;
+
+			chunk_len = (size_t)max_frame;
+			if (chunk_len > encoded_len - pos)
+				chunk_len = encoded_len - pos;
+
+			is_last = (pos + chunk_len >= encoded_len) ? 1 : 0;
+			hdr_flags = is_last ? HIVE_FLAG_END_HEADERS : 0u;
+
+			if (frame_idx == 0u) {
+				if (end_stream)
+					hdr_flags |= HIVE_FLAG_END_STREAM;
+				frame_hdr_write_at(s->send_buf +
+				                       first_hdr_offset,
+				                   (uint32_t)chunk_len,
+				                   HIVE_FRAME_HEADERS,
+				                   hdr_flags,
+				                   stream_id);
+				s->send_iov[s->send_iov_count].iov_base =
+				    s->send_buf + first_hdr_offset;
+				s->send_iov[s->send_iov_count].iov_len = 9u;
+				s->send_iov_count++;
+			} else {
+				size_t cont_offset;
+
+				cont_offset =
+				    cont_hdr_area + (frame_idx - 1u) * 9u;
+				frame_hdr_write_at(s->send_buf + cont_offset,
+				                   (uint32_t)chunk_len,
+				                   HIVE_FRAME_CONTINUATION,
+				                   hdr_flags,
+				                   stream_id);
+				s->send_iov[s->send_iov_count].iov_base =
+				    s->send_buf + cont_offset;
+				s->send_iov[s->send_iov_count].iov_len = 9u;
+				s->send_iov_count++;
+			}
+
+			s->send_iov[s->send_iov_count].iov_base =
+			    s->send_buf + encode_start + pos;
+			s->send_iov[s->send_iov_count].iov_len = chunk_len;
+			s->send_iov_count++;
+
+			pos += chunk_len;
+			frame_idx++;
+		}
+
+		s->send_buf_used = cont_hdr_area + cont_hdr_bytes;
+	}
+
+	return HIVE_OK;
+}
+
+/*
  * Phase 5.3 — flow-control-gated DATA source scan.
  *
  * For each open stream with a pending data_source callback:

@@ -7,6 +7,7 @@
  * See ARCHITECTURE.md §6.2 for frame_hdr_write() pseudocode.
  * See ARCHITECTURE.md §6.1 for the send buffer layout.
  * See ARCHITECTURE.md §6.3 for send_queue_append_ctrl() pseudocode.
+ * See ARCHITECTURE.md §6.4 for send_queue_append_headers() pseudocode.
  * See ARCHITECTURE.md §6.6 for drain / partial-send model.
  *
  * Not included by embedders — internal to the library only.
@@ -58,6 +59,29 @@ void send_queue_append_ctrl(hive_session_t *s,
                             uint32_t stream_id,
                             const uint8_t *payload,
                             uint32_t payload_len);
+
+/*
+ * send_queue_append_headers — queue one HEADERS block, splitting into
+ * CONTINUATION frames when encoded HPACK bytes exceed
+ * remote_settings.max_frame_size.
+ *
+ * The encoded HPACK payload is written contiguously at encode_start.
+ * In split mode, CONTINUATION frame headers are written after the payload and
+ * iovecs are emitted in wire order (header, chunk, header, chunk, ...)
+ * without shifting payload bytes.
+ *
+ * end_stream controls END_STREAM on the first HEADERS frame.
+ * END_HEADERS is set on the last frame in the sequence.
+ *
+ * Returns HIVE_OK on success, HIVE_ERR_INVALID_ARG for bad arguments,
+ * HIVE_ERR_NOMEM when send buffer/iovec capacity is insufficient, or an
+ * encoder error propagated from hpack_encode_block().
+ */
+int send_queue_append_headers(hive_session_t *s,
+                              uint32_t stream_id,
+                              const hive_nv_t *nva,
+                              size_t nvlen,
+                              uint8_t end_stream);
 
 /*
  * send_queue_flush_data — drive pending data_source streams into the send

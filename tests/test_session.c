@@ -41,6 +41,9 @@
 int test_send_control_frame_queued(void);
 int test_send_partial_write(void);
 int test_send_fatal_error(void);
+int test_send_headers_single_frame_layout(void);
+int test_send_headers_split_layout(void);
+int test_send_headers_split_end_stream_flag(void);
 int test_options_defaults(void);
 int test_options_set_valid(void);
 int test_options_set_invalid(void);
@@ -425,6 +428,30 @@ test_send_session_init(hive_session_t *s,
 	s->session_state        = HIVE_SESSION_OPEN;
 }
 
+/*
+ * Build a real server session for HEADERS queueing tests (enc table/mem live),
+ * then clear startup preface bytes so send queue assertions are isolated.
+ */
+static hive_session_t *
+new_server_send_session(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+
+	s = hive_session_server_new(NULL, NULL, &cb, NULL);
+	ASSERT(s != NULL);
+
+	s->send_iov_count = 0;
+	s->send_buf_used = 0;
+	s->send_partial = 0;
+	s->send_partial_offset = 0;
+
+	return s;
+}
+
 /* ------------------------------------------------------------------ */
 /* test_send_control_frame_queued                                      */
 /* ------------------------------------------------------------------ */
@@ -568,6 +595,170 @@ test_send_fatal_error(void)
 	ASSERT(ret == HIVE_ERR_PROTOCOL);
 	ASSERT(s.session_state == (uint8_t)HIVE_SESSION_CLOSED);
 
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* test_send_headers_single_frame_layout                              */
+/* ------------------------------------------------------------------ */
+
+int
+test_send_headers_single_frame_layout(void)
+{
+	static const uint8_t n_status[] = ":status";
+	static const uint8_t v_200[] = "200";
+	hive_nv_t nva[1];
+	hive_session_t *s;
+	frame_hdr_t hdr;
+	uint8_t *p;
+	int ret;
+
+	s = new_server_send_session();
+
+	nva[0].name = n_status;
+	nva[0].value = v_200;
+	nva[0].name_len = sizeof(n_status) - 1u;
+	nva[0].value_len = sizeof(v_200) - 1u;
+	nva[0].flags = 0u;
+
+	ret = send_queue_append_headers(s, 1u, nva, 1u, 0u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(s->send_iov_count == 1);
+
+	p = s->send_iov[0].iov_base;
+	frame_hdr_parse(p, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_HEADERS);
+	ASSERT(hdr.stream_id == 1u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_HEADERS) != 0u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) == 0u);
+	ASSERT(s->send_iov[0].iov_len == 9u + (size_t)hdr.length);
+	ASSERT(s->send_buf_used == s->send_iov[0].iov_len);
+
+	hive_session_free(s);
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* test_send_headers_split_layout                                     */
+/* ------------------------------------------------------------------ */
+
+int
+test_send_headers_split_layout(void)
+{
+	static const uint8_t n_status[] = ":status";
+	static const uint8_t v_200[] = "200";
+	static const uint8_t n_long[] = "x-long-header";
+	static const uint8_t v_long[] =
+	    "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz";
+	hive_nv_t nva[2];
+	hive_session_t *s;
+	frame_hdr_t hdr;
+	uint32_t max_frame;
+	size_t i;
+	size_t total_payload;
+	size_t n_frames;
+	int ret;
+
+	s = new_server_send_session();
+	s->remote_settings.max_frame_size = 8u;
+	max_frame = s->remote_settings.max_frame_size;
+
+	nva[0].name = n_status;
+	nva[0].value = v_200;
+	nva[0].name_len = sizeof(n_status) - 1u;
+	nva[0].value_len = sizeof(v_200) - 1u;
+	nva[0].flags = 0u;
+	nva[1].name = n_long;
+	nva[1].value = v_long;
+	nva[1].name_len = sizeof(n_long) - 1u;
+	nva[1].value_len = sizeof(v_long) - 1u;
+	nva[1].flags = HIVE_NV_FLAG_NO_INDEX;
+
+	ret = send_queue_append_headers(s, 3u, nva, 2u, 0u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(s->send_iov_count >= 4);
+	ASSERT((s->send_iov_count % 2) == 0);
+
+	total_payload = 0u;
+	n_frames = (size_t)s->send_iov_count / 2u;
+	for (i = 0; i < (size_t)s->send_iov_count; i += 2u) {
+		frame_hdr_parse(s->send_iov[i].iov_base, &hdr);
+		ASSERT(hdr.stream_id == 3u);
+		if (i == 0u)
+			ASSERT(hdr.type == HIVE_FRAME_HEADERS);
+		else
+			ASSERT(hdr.type == HIVE_FRAME_CONTINUATION);
+
+		ASSERT(s->send_iov[i].iov_len == 9u);
+		ASSERT(s->send_iov[i + 1u].iov_len == (size_t)hdr.length);
+		ASSERT(hdr.length <= max_frame);
+
+		if (i + 2u < (size_t)s->send_iov_count)
+			ASSERT((hdr.flags & HIVE_FLAG_END_HEADERS) == 0u);
+		else
+			ASSERT((hdr.flags & HIVE_FLAG_END_HEADERS) != 0u);
+
+		total_payload += s->send_iov[i + 1u].iov_len;
+	}
+
+	ASSERT(s->send_buf_used ==
+	    9u + total_payload + (n_frames > 0u ? (n_frames - 1u) * 9u : 0u));
+
+	hive_session_free(s);
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* test_send_headers_split_end_stream_flag                            */
+/* ------------------------------------------------------------------ */
+
+int
+test_send_headers_split_end_stream_flag(void)
+{
+	static const uint8_t n_status[] = ":status";
+	static const uint8_t v_204[] = "204";
+	static const uint8_t n_long[] = "x-end-stream-check";
+	static const uint8_t v_long[] =
+	    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+	hive_nv_t nva[2];
+	hive_session_t *s;
+	frame_hdr_t hdr;
+	size_t i;
+	int ret;
+
+	s = new_server_send_session();
+	s->remote_settings.max_frame_size = 8u;
+
+	nva[0].name = n_status;
+	nva[0].value = v_204;
+	nva[0].name_len = sizeof(n_status) - 1u;
+	nva[0].value_len = sizeof(v_204) - 1u;
+	nva[0].flags = 0u;
+	nva[1].name = n_long;
+	nva[1].value = v_long;
+	nva[1].name_len = sizeof(n_long) - 1u;
+	nva[1].value_len = sizeof(v_long) - 1u;
+	nva[1].flags = HIVE_NV_FLAG_NO_INDEX;
+
+	ret = send_queue_append_headers(s, 5u, nva, 2u, 1u);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(s->send_iov_count >= 4);
+
+	frame_hdr_parse(s->send_iov[0].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_HEADERS);
+	ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) != 0u);
+
+	for (i = 2u; i < (size_t)s->send_iov_count; i += 2u) {
+		frame_hdr_parse(s->send_iov[i].iov_base, &hdr);
+		ASSERT(hdr.type == HIVE_FRAME_CONTINUATION);
+		ASSERT((hdr.flags & HIVE_FLAG_END_STREAM) == 0u);
+	}
+
+	frame_hdr_parse(
+	    s->send_iov[(size_t)s->send_iov_count - 2u].iov_base, &hdr);
+	ASSERT((hdr.flags & HIVE_FLAG_END_HEADERS) != 0u);
+
+	hive_session_free(s);
 	return 1;
 }
 
