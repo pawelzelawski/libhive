@@ -114,6 +114,36 @@ stream_was_idle(const hive_session_t *s, uint32_t stream_id)
 }
 
 static void
+goaway_close_unprocessed_local_streams(hive_session_t *s,
+                                       uint32_t last_stream_id)
+{
+	hive_stream_t *st;
+	uint32_t i;
+
+	if (s->stream_slots == NULL)
+		return;
+
+	for (i = 0u; i < s->opt_max_concurrent_streams; i++) {
+		st = &s->stream_slots[i];
+		if (st->stream_id == 0u)
+			continue;
+		if (st->stream_id <= last_stream_id)
+			continue;
+		if (!stream_is_locally_initiated(s, st->stream_id))
+			continue;
+
+		if (s->callbacks.on_stream_close != NULL) {
+			(void)s->callbacks.on_stream_close(
+			    s,
+			    st->stream_id,
+			    HIVE_H2_REFUSED_STREAM,
+			    s->user_data);
+		}
+		stream_close(s, st);
+	}
+}
+
+static void
 u32be_write(uint8_t *p, uint32_t v)
 {
 	p[0] = (uint8_t)((v >> 24) & 0xffu);
@@ -1544,6 +1574,12 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				    u32be(s->ctrl_staging) & 0x7fffffffU;
 				s->goaway_error_code_recv =
 				    u32be(s->ctrl_staging + 4);
+				s->goaway_recv = 1u;
+				if (s->session_state != HIVE_SESSION_CLOSED)
+					s->session_state =
+					    HIVE_SESSION_GOAWAY_RECV;
+				goaway_close_unprocessed_local_streams(
+				    s, s->goaway_last_stream_id_recv);
 				s->ctrl_staging_count = 0;
 				if (s->payload_remaining == 0) {
 					if (s->callbacks.on_goaway != NULL) {

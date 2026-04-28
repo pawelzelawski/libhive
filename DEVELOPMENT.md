@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-28
 **Current Phase**: Phase 8 — h2c and Server Push
-**Next Task**: 8.4 — Two-phase GOAWAY: end-to-end test path
+**Next Task**: 8.5 — Client role: full request-response
 
 ### Phase Summary
 
@@ -17,7 +17,7 @@
 | 5 | Flow Control and DATA | DONE | All Phase 5 tests pass (Linux + OpenBSD) | Receive-side enforcement, WINDOW_UPDATE, DATA delivery |
 | 6 | Submit and Send | DONE | All Phase 6 tests pass (Linux + OpenBSD) | Full send queue, partial-send, response/request submit, new callbacks |
 | 7 | Security Hardening | DONE | All Phase 7 tests pass (Linux + OpenBSD) | Completion criteria confirmed 2026-04-26; flood protection, exhaustion, HTTP messaging validation, buffer lifetime |
-| 8 | h2c and Server Push | IN PROGRESS | Tasks 8.1-8.3 tests pass (Linux + OpenBSD) | h2c Upgrade path, server push, and PUSH_PROMISE receive done; GOAWAY end-to-end and client role receive path remain |
+| 8 | h2c and Server Push | IN PROGRESS | Tasks 8.1-8.4 tests pass (Linux + OpenBSD) | h2c Upgrade path, server push, PUSH_PROMISE receive, and GOAWAY end-to-end path done; client role receive path remains |
 | 9 | Conformance and Polish | NOT STARTED | — | h2spec, README, API reference, tools |
 
 ### Quality Milestones
@@ -1305,7 +1305,7 @@ stream can be responded to. Two-phase GOAWAY shutdown is tested end-to-end.
 - Open promised stream in RESERVED_REMOTE state
 - Fire `on_push_promise` callback with the promised stream ID
 
-**8.4 — Two-phase GOAWAY: end-to-end test path**
+**8.4 — Two-phase GOAWAY: end-to-end test path** ✓ DONE
 - `hive_submit_goaway_prepare()` and `hive_submit_goaway_final()` are
   implemented in Phase 6. Phase 8 tests the complete two-phase sequence:
   prepare → drain in-flight streams → final → session free
@@ -1358,8 +1358,8 @@ File: `tests/test_session.c` (extended)
 - [x] Server push tests pass; reserved stream state transitions correct
 - [x] PUSH_PROMISE receive tests pass; promised stream opens in RESERVED_REMOTE and
       `on_push_promise` fires correctly
-- [ ] Two-phase GOAWAY end-to-end test passes
-- [ ] `want_read()` advisory test passes (0 after GOAWAY recv, but no crash
+- [x] Two-phase GOAWAY end-to-end test passes
+- [x] `want_read()` advisory test passes (0 after GOAWAY recv, but no crash
       if caller continues reading)
 - [ ] Client role end-to-end test passes
 - [ ] All Phase 8 tests pass on Linux and OpenBSD

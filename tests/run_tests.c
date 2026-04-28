@@ -187,6 +187,9 @@ int test_server_push_response(void);
 int test_push_disabled_by_remote_settings(void);
 int test_client_recv_push_promise(void);
 int test_client_recv_push_promise_refused(void);
+int test_goaway_two_phase(void);
+int test_goaway_recv_want_read_advisory(void);
+int test_goaway_recv_streams_closed(void);
 
 /* --- test_flow.c ---------------------------------------------------------- */
 int test_window_update_connection(void);
@@ -317,6 +320,11 @@ main(void)
 	/* Phase 8.3 — PUSH_PROMISE receive (client role) */
 	RUN(client_recv_push_promise);
 	RUN(client_recv_push_promise_refused);
+
+	/* Phase 8.4 — two-phase GOAWAY end-to-end path */
+	RUN(goaway_two_phase);
+	RUN(goaway_recv_want_read_advisory);
+	RUN(goaway_recv_streams_closed);
 
 	/* Phase 5.1 — WINDOW_UPDATE receive */
 	RUN(window_update_connection);
