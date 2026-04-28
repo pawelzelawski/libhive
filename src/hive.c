@@ -1316,6 +1316,47 @@ nv_has_interim_status(const hive_nv_t *nva, size_t nvlen)
 	return 0;
 }
 
+static int
+nv_has_push_required_pseudo(const hive_nv_t *nva, size_t nvlen)
+{
+	static const uint8_t n_method[] = ":method";
+	static const uint8_t n_path[] = ":path";
+	static const uint8_t n_scheme[] = ":scheme";
+	static const uint8_t n_authority[] = ":authority";
+	int has_method;
+	int has_path;
+	int has_scheme;
+	int has_authority;
+	size_t i;
+
+	has_method = 0;
+	has_path = 0;
+	has_scheme = 0;
+	has_authority = 0;
+
+	for (i = 0; i < nvlen; i++) {
+		if (nva[i].name == NULL)
+			continue;
+		if (nva[i].name_len == sizeof(n_method) - 1u &&
+		    memcmp(nva[i].name, n_method, sizeof(n_method) - 1u) == 0)
+			has_method = 1;
+		else if (nva[i].name_len == sizeof(n_path) - 1u &&
+		         memcmp(nva[i].name, n_path, sizeof(n_path) - 1u) == 0)
+			has_path = 1;
+		else if (nva[i].name_len == sizeof(n_scheme) - 1u &&
+		         memcmp(nva[i].name, n_scheme, sizeof(n_scheme) - 1u) ==
+		             0)
+			has_scheme = 1;
+		else if (nva[i].name_len == sizeof(n_authority) - 1u &&
+		         memcmp(nva[i].name,
+		                n_authority,
+		                sizeof(n_authority) - 1u) == 0)
+			has_authority = 1;
+	}
+
+	return has_method && has_path && has_scheme && has_authority;
+}
+
 static void
 u32_write_be(uint8_t out[4], uint32_t v)
 {
@@ -1345,7 +1386,8 @@ hive_submit_response(hive_session_t *session,
 	if (stream == NULL)
 		return HIVE_ERR_STREAM_CLOSED;
 	if (stream->state != HIVE_STREAM_OPEN &&
-	    stream->state != HIVE_STREAM_HALF_CLOSED_REMOTE)
+	    stream->state != HIVE_STREAM_HALF_CLOSED_REMOTE &&
+	    stream->state != HIVE_STREAM_RESERVED_LOCAL)
 		return HIVE_ERR_STREAM_CLOSED;
 
 	end_stream = (data_source == NULL) ? 1u : 0u;
@@ -1358,6 +1400,22 @@ hive_submit_response(hive_session_t *session,
 		stream->data_source = *data_source;
 	else
 		memset(&stream->data_source, 0, sizeof(stream->data_source));
+
+	if (stream->state == HIVE_STREAM_RESERVED_LOCAL) {
+		if (end_stream) {
+			if (session->callbacks.on_stream_close != NULL)
+				(void)session->callbacks.on_stream_close(
+				    session,
+				    stream_id,
+				    HIVE_H2_NO_ERROR,
+				    session->user_data);
+			stream_close(session, stream);
+			return HIVE_OK;
+		}
+
+		stream->state = HIVE_STREAM_HALF_CLOSED_REMOTE;
+		return HIVE_OK;
+	}
 
 	if (end_stream)
 		return stream_close_local_on_end_stream(
@@ -1434,12 +1492,60 @@ hive_submit_push_promise(hive_session_t *session,
                          size_t nvlen,
                          uint32_t *promised_stream_id_out)
 {
-	(void)session;
-	(void)stream_id;
-	(void)nva;
-	(void)nvlen;
-	(void)promised_stream_id_out;
-	return HIVE_ERR_SESSION_CLOSED;
+	const hive_stream_t *carry;
+	hive_stream_t *promised;
+	uint32_t promised_stream_id;
+	int ret;
+
+	if (session == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (session->session_state != HIVE_SESSION_OPEN)
+		return HIVE_ERR_SESSION_CLOSED;
+	if (session->role != HIVE_ROLE_SERVER)
+		return HIVE_ERR_INVALID_ARG;
+	if (nva == NULL || nvlen == 0u || promised_stream_id_out == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (!nv_has_push_required_pseudo(nva, nvlen))
+		return HIVE_ERR_INVALID_ARG;
+
+	carry = stream_lookup(session, stream_id);
+	if (carry == NULL)
+		return HIVE_ERR_STREAM_CLOSED;
+	if (carry->state != HIVE_STREAM_OPEN &&
+	    carry->state != HIVE_STREAM_HALF_CLOSED_REMOTE)
+		return HIVE_ERR_STREAM_CLOSED;
+
+	if (session->remote_settings.enable_push == 0u)
+		return HIVE_ERR_PROTOCOL;
+	if (session->stream_open_count >= session->opt_max_concurrent_streams)
+		return HIVE_ERR_REFUSED_STREAM;
+
+	promised_stream_id = session->next_stream_id;
+	if ((promised_stream_id & 1u) != 0u)
+		promised_stream_id++;
+	if (promised_stream_id == 0u || promised_stream_id > 0x7ffffffeu)
+		return HIVE_ERR_REFUSED_STREAM;
+
+	ret = stream_open(
+	    session, promised_stream_id, HIVE_STREAM_RESERVED_LOCAL);
+	if (ret != HIVE_OK)
+		return ret;
+
+	promised = stream_lookup(session, promised_stream_id);
+	if (promised == NULL)
+		return HIVE_ERR_PROTOCOL;
+
+	ret = send_queue_append_push_promise(
+	    session, stream_id, promised_stream_id, nva, nvlen);
+	if (ret != HIVE_OK) {
+		stream_close(session, promised);
+		return ret;
+	}
+
+	session->last_stream_id_local = promised_stream_id;
+	session->next_stream_id = promised_stream_id + 2u;
+	*promised_stream_id_out = promised_stream_id;
+	return HIVE_OK;
 }
 
 int

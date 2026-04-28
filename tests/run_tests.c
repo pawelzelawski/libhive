@@ -182,6 +182,9 @@ int test_on_connection_error_fires_before_goaway(void);
 int test_h2c_upgrade_settings_applied(void);
 int test_h2c_upgrade_stream1_open(void);
 int test_h2c_feed_upgrade_headers_fires_callbacks(void);
+int test_server_push_promise(void);
+int test_server_push_response(void);
+int test_push_disabled_by_remote_settings(void);
 
 /* --- test_flow.c ---------------------------------------------------------- */
 int test_window_update_connection(void);
@@ -303,6 +306,11 @@ main(void)
 	RUN(h2c_upgrade_settings_applied);
 	RUN(h2c_upgrade_stream1_open);
 	RUN(h2c_feed_upgrade_headers_fires_callbacks);
+
+	/* Phase 8.2 — server push */
+	RUN(server_push_promise);
+	RUN(server_push_response);
+	RUN(push_disabled_by_remote_settings);
 
 	/* Phase 5.1 — WINDOW_UPDATE receive */
 	RUN(window_update_connection);

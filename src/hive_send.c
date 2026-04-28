@@ -48,6 +48,15 @@ send_queue_reserve_iov(hive_session_t *s, int needed)
 	return HIVE_OK;
 }
 
+static void
+u32_write_be(uint8_t out[4], uint32_t v)
+{
+	out[0] = (uint8_t)((v >> 24) & 0xffu);
+	out[1] = (uint8_t)((v >> 16) & 0xffu);
+	out[2] = (uint8_t)((v >> 8) & 0xffu);
+	out[3] = (uint8_t)(v & 0xffu);
+}
+
 /*
  * Write a 9-byte HTTP/2 frame header at send_buf + send_buf_used,
  * advance send_buf_used by 9, and return a pointer to the written header.
@@ -273,6 +282,75 @@ send_queue_append_headers(hive_session_t *s,
 
 		s->send_buf_used = cont_hdr_area + cont_hdr_bytes;
 	}
+
+	return HIVE_OK;
+}
+
+int
+send_queue_append_push_promise(hive_session_t *s,
+                               uint32_t stream_id,
+                               uint32_t promised_stream_id,
+                               const hive_nv_t *nva,
+                               size_t nvlen)
+{
+	uint32_t max_frame;
+	size_t frame_offset;
+	size_t block_start;
+	size_t out_cap;
+	size_t block_len;
+	size_t payload_len;
+	int rc;
+
+	if (s == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (nvlen > 0 && nva == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (s->send_buf == NULL || s->send_iov == NULL)
+		return HIVE_ERR_INVALID_ARG;
+
+	max_frame = s->remote_settings.max_frame_size;
+	if (max_frame < 4u)
+		return HIVE_ERR_INVALID_ARG;
+
+	rc = send_queue_reserve_iov(s, 1);
+	if (rc != HIVE_OK)
+		return rc;
+
+	frame_offset = s->send_buf_used;
+	if (frame_offset + 13u > s->send_buf_cap)
+		return HIVE_ERR_NOMEM;
+
+	block_start = frame_offset + 9u + 4u;
+	out_cap = s->send_buf_cap - block_start;
+	if (out_cap > (size_t)s->opt_max_continuation_size)
+		out_cap = (size_t)s->opt_max_continuation_size;
+
+	rc = hpack_encode_block(&s->enc_table,
+	                        &s->mem,
+	                        nva,
+	                        nvlen,
+	                        s->send_buf + block_start,
+	                        out_cap,
+	                        &block_len);
+	if (rc != HIVE_OK)
+		return rc;
+
+	payload_len = 4u + block_len;
+	if (payload_len > (size_t)max_frame)
+		return HIVE_ERR_NOMEM;
+
+	u32_write_be(s->send_buf + frame_offset + 9u,
+	             promised_stream_id & 0x7fffffffu);
+	frame_hdr_write_at(s->send_buf + frame_offset,
+	                   (uint32_t)payload_len,
+	                   HIVE_FRAME_PUSH_PROMISE,
+	                   HIVE_FLAG_END_HEADERS,
+	                   stream_id);
+
+	s->send_iov[s->send_iov_count].iov_base = s->send_buf + frame_offset;
+	s->send_iov[s->send_iov_count].iov_len = 9u + payload_len;
+	s->send_iov_count++;
+	s->send_buf_used = block_start + block_len;
 
 	return HIVE_OK;
 }

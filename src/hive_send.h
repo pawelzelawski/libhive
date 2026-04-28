@@ -84,6 +84,20 @@ int send_queue_append_headers(hive_session_t *s,
                               uint8_t end_stream);
 
 /*
+ * send_queue_append_push_promise — queue one PUSH_PROMISE frame.
+ *
+ * Payload layout: 4-byte promised stream ID (R bit clear) followed by an
+ * HPACK-encoded request header block. This helper emits a single
+ * PUSH_PROMISE+END_HEADERS frame and returns HIVE_ERR_NOMEM if the encoded
+ * payload would exceed remote_settings.max_frame_size.
+ */
+int send_queue_append_push_promise(hive_session_t *s,
+                                   uint32_t stream_id,
+                                   uint32_t promised_stream_id,
+                                   const hive_nv_t *nva,
+                                   size_t nvlen);
+
+/*
  * send_queue_flush_data — drive pending data_source streams into the send
  * queue within flow control limits.
  *

@@ -101,6 +101,9 @@ int test_on_connection_error_fires_before_goaway(void);
 int test_h2c_upgrade_settings_applied(void);
 int test_h2c_upgrade_stream1_open(void);
 int test_h2c_feed_upgrade_headers_fires_callbacks(void);
+int test_server_push_promise(void);
+int test_server_push_response(void);
+int test_push_disabled_by_remote_settings(void);
 
 /* ------------------------------------------------------------------ */
 /* Shared test infrastructure                                          */
@@ -2644,6 +2647,138 @@ test_h2c_feed_upgrade_headers_fires_callbacks(void)
 	    HIVE_ERR_PROTOCOL);
 	hive_session_free(s_limit);
 
+	return 1;
+}
+
+int
+test_server_push_promise(void)
+{
+	static const uint8_t n_method[] = ":method";
+	static const uint8_t v_get[] = "GET";
+	static const uint8_t n_scheme[] = ":scheme";
+	static const uint8_t v_http[] = "http";
+	static const uint8_t n_path[] = ":path";
+	static const uint8_t v_path[] = "/pushed.css";
+	static const uint8_t n_authority[] = ":authority";
+	static const uint8_t v_authority[] = "www.example.com";
+	hive_nv_t nva[4];
+	hive_session_t *s;
+	frame_hdr_t hdr;
+	const uint8_t *payload;
+	uint32_t promised;
+
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_HALF_CLOSED_REMOTE) == HIVE_OK);
+
+	nva[0] = (hive_nv_t){n_method, v_get,
+	    sizeof(n_method) - 1u, sizeof(v_get) - 1u, 0u};
+	nva[1] = (hive_nv_t){n_scheme, v_http,
+	    sizeof(n_scheme) - 1u, sizeof(v_http) - 1u, 0u};
+	nva[2] = (hive_nv_t){n_path, v_path,
+	    sizeof(n_path) - 1u, sizeof(v_path) - 1u, 0u};
+	nva[3] = (hive_nv_t){n_authority, v_authority,
+	    sizeof(n_authority) - 1u, sizeof(v_authority) - 1u, 0u};
+
+	ASSERT(hive_submit_push_promise(s, 1u, nva, 4u, &promised) == HIVE_OK);
+	ASSERT(promised == 2u);
+	ASSERT(s->next_stream_id == 4u);
+	ASSERT(s->last_stream_id_local == 2u);
+	ASSERT(hive_stream_get_state(s, promised) == HIVE_STREAM_RESERVED_LOCAL);
+
+	ASSERT(s->send_iov_count == 1);
+	frame_hdr_parse(s->send_iov[0].iov_base, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_PUSH_PROMISE);
+	ASSERT(hdr.stream_id == 1u);
+	ASSERT((hdr.flags & HIVE_FLAG_END_HEADERS) != 0u);
+	ASSERT(hdr.length >= 4u);
+	payload = (const uint8_t *)s->send_iov[0].iov_base + 9u;
+	ASSERT((read_u32_be(payload) & 0x7fffffffu) == promised);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_server_push_response(void)
+{
+	static const uint8_t n_method[] = ":method";
+	static const uint8_t v_get[] = "GET";
+	static const uint8_t n_scheme[] = ":scheme";
+	static const uint8_t v_http[] = "http";
+	static const uint8_t n_path[] = ":path";
+	static const uint8_t v_path[] = "/push.js";
+	static const uint8_t n_authority[] = ":authority";
+	static const uint8_t v_authority[] = "www.example.com";
+	static const uint8_t n_status[] = ":status";
+	static const uint8_t v_200[] = "200";
+	hive_nv_t push_nva[4];
+	hive_nv_t resp_nva[1];
+	hive_data_source_t ds;
+	hive_session_t *s;
+	uint32_t promised;
+
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_HALF_CLOSED_REMOTE) == HIVE_OK);
+
+	push_nva[0] = (hive_nv_t){n_method, v_get,
+	    sizeof(n_method) - 1u, sizeof(v_get) - 1u, 0u};
+	push_nva[1] = (hive_nv_t){n_scheme, v_http,
+	    sizeof(n_scheme) - 1u, sizeof(v_http) - 1u, 0u};
+	push_nva[2] = (hive_nv_t){n_path, v_path,
+	    sizeof(n_path) - 1u, sizeof(v_path) - 1u, 0u};
+	push_nva[3] = (hive_nv_t){n_authority, v_authority,
+	    sizeof(n_authority) - 1u, sizeof(v_authority) - 1u, 0u};
+	ASSERT(hive_submit_push_promise(s, 1u, push_nva, 4u, &promised) == HIVE_OK);
+	ASSERT(hive_stream_get_state(s, promised) == HIVE_STREAM_RESERVED_LOCAL);
+
+	resp_nva[0] = (hive_nv_t){n_status, v_200,
+	    sizeof(n_status) - 1u, sizeof(v_200) - 1u, 0u};
+	ds.read_callback = resp_read_copy_eof_cb;
+	ds.ptr = NULL;
+
+	ASSERT(hive_submit_response(s, promised, resp_nva, 1u, &ds) == HIVE_OK);
+	ASSERT(hive_stream_get_state(s, promised) == HIVE_STREAM_HALF_CLOSED_REMOTE);
+
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(hive_stream_get_state(s, promised) == HIVE_STREAM_IDLE);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_push_disabled_by_remote_settings(void)
+{
+	static const uint8_t n_method[] = ":method";
+	static const uint8_t v_get[] = "GET";
+	static const uint8_t n_scheme[] = ":scheme";
+	static const uint8_t v_http[] = "http";
+	static const uint8_t n_path[] = ":path";
+	static const uint8_t v_path[] = "/no-push";
+	static const uint8_t n_authority[] = ":authority";
+	static const uint8_t v_authority[] = "www.example.com";
+	hive_nv_t nva[4];
+	hive_session_t *s;
+	uint32_t promised;
+
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_HALF_CLOSED_REMOTE) == HIVE_OK);
+	s->remote_settings.enable_push = 0u;
+
+	nva[0] = (hive_nv_t){n_method, v_get,
+	    sizeof(n_method) - 1u, sizeof(v_get) - 1u, 0u};
+	nva[1] = (hive_nv_t){n_scheme, v_http,
+	    sizeof(n_scheme) - 1u, sizeof(v_http) - 1u, 0u};
+	nva[2] = (hive_nv_t){n_path, v_path,
+	    sizeof(n_path) - 1u, sizeof(v_path) - 1u, 0u};
+	nva[3] = (hive_nv_t){n_authority, v_authority,
+	    sizeof(n_authority) - 1u, sizeof(v_authority) - 1u, 0u};
+
+	ASSERT(hive_submit_push_promise(s, 1u, nva, 4u, &promised) ==
+	    HIVE_ERR_PROTOCOL);
+	ASSERT(hive_stream_get_state(s, 2u) == HIVE_STREAM_IDLE);
+
+	hive_session_free(s);
 	return 1;
 }
 
