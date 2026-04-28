@@ -183,6 +183,67 @@ headers_decode_complete(hive_session_t *s,
 }
 
 static int
+push_promise_decode_complete(hive_session_t *s)
+{
+	hive_stream_t *stream;
+	uint32_t promised_stream_id;
+	int ret;
+	int cb_ret;
+
+	promised_stream_id = s->reassembly_promised_stream_id;
+	ret = hpack_decode_block(
+	    s, s->reassembly_buf, s->reassembly_len, 0, promised_stream_id);
+	s->reassembly_len = 0;
+	if (ret == HIVE_OK) {
+		if (s->callbacks.on_push_promise == NULL)
+			return 0;
+		cb_ret = s->callbacks.on_push_promise(s,
+		                                      s->reassembly_stream_id,
+		                                      promised_stream_id,
+		                                      s->user_data);
+		if (cb_ret == HIVE_OK)
+			return 0;
+		if (cb_ret == HIVE_ERR_COMPRESSION)
+			return session_error(
+			    s, HIVE_ERR_COMPRESSION, HIVE_H2_COMPRESSION_ERROR);
+		if (cb_ret == HIVE_ERR_REFUSED_STREAM) {
+			stream = stream_lookup(s, promised_stream_id);
+			if (stream != NULL &&
+			    s->callbacks.on_stream_close != NULL) {
+				(void)s->callbacks.on_stream_close(
+				    s,
+				    promised_stream_id,
+				    HIVE_H2_REFUSED_STREAM,
+				    s->user_data);
+			}
+			if (stream != NULL)
+				stream_close(s, stream);
+			(void)stream_error(s,
+			                   promised_stream_id,
+			                   HIVE_ERR_REFUSED_STREAM,
+			                   HIVE_H2_REFUSED_STREAM);
+			return 0;
+		}
+	}
+	if (ret == HIVE_ERR_COMPRESSION)
+		return session_error(
+		    s, HIVE_ERR_COMPRESSION, HIVE_H2_COMPRESSION_ERROR);
+
+	stream = stream_lookup(s, promised_stream_id);
+	if (stream != NULL && s->callbacks.on_stream_close != NULL) {
+		(void)s->callbacks.on_stream_close(s,
+		                                   promised_stream_id,
+		                                   HIVE_H2_PROTOCOL_ERROR,
+		                                   s->user_data);
+	}
+	if (stream != NULL)
+		stream_close(s, stream);
+	(void)stream_error(
+	    s, promised_stream_id, HIVE_ERR_PROTOCOL, HIVE_H2_PROTOCOL_ERROR);
+	return 0;
+}
+
+static int
 settings_apply_initial_window(hive_session_t *s, uint32_t val)
 {
 	int64_t delta;
@@ -1112,18 +1173,41 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				if ((s->cur_frame.flags &
 				     HIVE_FLAG_END_HEADERS) != 0) {
 					s->reassembly_active = 0;
-					if (s->reassembly_type == 0 &&
-					    headers_decode_complete(
-					        s,
-					        s->reassembly_stream_id,
-					        s->reassembly_end_stream) != 0)
+					if (s->reassembly_type == 0) {
+						if (headers_decode_complete(
+						        s,
+						        s->reassembly_stream_id,
+						        s->reassembly_end_stream) !=
+						    0)
+							return -1;
+					} else if (push_promise_decode_complete(
+					               s) != 0) {
 						return -1;
+					}
 				}
 				s->recv_state = RECV_FRAME_HEADER;
 			}
 			break;
 
 		case RECV_PUSH_PROMISE_PAYLOAD:
+			if (s->role == HIVE_ROLE_SERVER) {
+				return protocol_error(s);
+			}
+			if (s->opt_enable_push == 0u) {
+				return protocol_error(s);
+			}
+			if (s->stream_hash != NULL && s->stream_slots != NULL) {
+				const hive_stream_t *stream;
+
+				stream =
+				    stream_lookup(s, s->cur_frame.stream_id);
+				if (stream == NULL ||
+				    (stream->state != HIVE_STREAM_OPEN &&
+				     stream->state !=
+				         HIVE_STREAM_HALF_CLOSED_LOCAL)) {
+					return protocol_error(s);
+				}
+			}
 			if ((s->cur_frame.flags & HIVE_FLAG_PADDED) != 0 &&
 			    s->pad_length_received == 0) {
 				if (avail == 0) {
@@ -1149,6 +1233,30 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				s->reassembly_promised_stream_id =
 				    u32be(s->ctrl_staging) & 0x7fffffffU;
 				s->ctrl_staging_count = 0;
+				/* SECURITY: Client-side promised streams are
+				 * server-initiated. They must be even-numbered
+				 * and strictly monotonic. */
+				if ((s->reassembly_promised_stream_id & 1u) !=
+				        0u ||
+				    s->reassembly_promised_stream_id <=
+				        s->last_stream_id_remote) {
+					return protocol_error(s);
+				}
+				if (s->stream_hash != NULL &&
+				    s->stream_slots != NULL &&
+				    s->stream_free_stack != NULL) {
+					int open_ret;
+
+					open_ret = stream_open(
+					    s,
+					    s->reassembly_promised_stream_id,
+					    HIVE_STREAM_RESERVED_REMOTE);
+					if (open_ret != HIVE_OK) {
+						return protocol_error(s);
+					}
+				}
+				s->last_stream_id_remote =
+				    s->reassembly_promised_stream_id;
 				/* SECURITY: Pad length must not exceed the
 				 * remaining payload bytes after the
 				 * promised_stream_id field has been consumed.
@@ -1188,6 +1296,12 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				if ((s->cur_frame.flags &
 				     HIVE_FLAG_END_HEADERS) != 0) {
 					s->reassembly_active = 0;
+					s->reassembly_type = 1;
+					s->reassembly_stream_id =
+					    s->cur_frame.stream_id;
+					if (push_promise_decode_complete(s) !=
+					    0)
+						return -1;
 					if (s->pad_remaining > 0) {
 						s->recv_state =
 						    RECV_PUSH_PROMISE_PAD;
@@ -1200,7 +1314,13 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 					s->reassembly_type = 1;
 					s->reassembly_stream_id =
 					    s->cur_frame.stream_id;
-					s->recv_state = RECV_FRAME_HEADER;
+					if (s->pad_remaining > 0) {
+						s->recv_state =
+						    RECV_PUSH_PROMISE_PAD;
+					} else {
+						s->recv_state =
+						    RECV_FRAME_HEADER;
+					}
 				}
 			}
 			break;

@@ -104,6 +104,8 @@ int test_h2c_feed_upgrade_headers_fires_callbacks(void);
 int test_server_push_promise(void);
 int test_server_push_response(void);
 int test_push_disabled_by_remote_settings(void);
+int test_client_recv_push_promise(void);
+int test_client_recv_push_promise_refused(void);
 
 /* ------------------------------------------------------------------ */
 /* Shared test infrastructure                                          */
@@ -336,10 +338,14 @@ typedef struct {
 	int goaway_count;
 	int ping_count;
 	int ping_ack_count;
+	int push_promise_count;
+	int push_refuse;
 	int connection_error_count;
 	int connection_error_saw_goaway_queued;
 	int connection_error_hive_err;
 	uint32_t connection_error_h2_err;
+	uint32_t push_stream_id;
+	uint32_t push_promised_stream_id;
 	uint32_t goaway_last_stream_id;
 	uint32_t goaway_error_code;
 	const uint8_t *goaway_debug_data;
@@ -608,6 +614,24 @@ on_ping_ack_cb(hive_session_t *session,
 	cap = user_data;
 	cap->ping_ack_count++;
 	memcpy(cap->ping_ack_opaque, opaque, sizeof(cap->ping_ack_opaque));
+	return HIVE_OK;
+}
+
+static int
+on_push_promise_cb(hive_session_t *session,
+    uint32_t stream_id,
+    uint32_t promised_stream_id,
+    void *user_data)
+{
+	callback_capture_t *cap;
+
+	(void)session;
+	cap = user_data;
+	cap->push_promise_count++;
+	cap->push_stream_id = stream_id;
+	cap->push_promised_stream_id = promised_stream_id;
+	if (cap->push_refuse != 0)
+		return HIVE_ERR_REFUSED_STREAM;
 	return HIVE_OK;
 }
 
@@ -2777,6 +2801,111 @@ test_push_disabled_by_remote_settings(void)
 	ASSERT(hive_submit_push_promise(s, 1u, nva, 4u, &promised) ==
 	    HIVE_ERR_PROTOCOL);
 	ASSERT(hive_stream_get_state(s, 2u) == HIVE_STREAM_IDLE);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_client_recv_push_promise(void)
+{
+	static const uint8_t hpack_get[] = {
+		0x82, 0x86, 0x84, 0x41, 0x0f,
+		'w',  'w',  'w',  '.',  'e',
+		'x',  'a',  'm',  'p',  'l',
+		'e',  '.',  'c',  'o',  'm'};
+	hive_callbacks_t cb;
+	callback_capture_t cap;
+	hive_session_t *s;
+	uint8_t frame[9 + 4 + sizeof(hpack_get)];
+
+	memset(&cb, 0, sizeof(cb));
+	memset(&cap, 0, sizeof(cap));
+	cb.send = send_cb_full;
+	cb.on_push_promise = on_push_promise_cb;
+
+	s = hive_session_client_new(NULL, NULL, &cb, &cap);
+	ASSERT(s != NULL);
+	s->send_iov_count = 0;
+	s->send_buf_used = 0;
+	s->send_partial = 0;
+	s->send_partial_offset = 0;
+	s->recv_state = RECV_FRAME_HEADER;
+	s->preface_count = 0;
+
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+
+	frame_hdr_write_at(frame,
+	    4u + (uint32_t)sizeof(hpack_get),
+	    HIVE_FRAME_PUSH_PROMISE,
+	    HIVE_FLAG_END_HEADERS,
+	    1u);
+	write_u32_be(frame + 9, 2u);
+	memcpy(frame + 13, hpack_get, sizeof(hpack_get));
+
+	ASSERT(hive_session_recv(s, frame, sizeof(frame)) ==
+	    (ssize_t)sizeof(frame));
+	ASSERT(cap.push_promise_count == 1);
+	ASSERT(cap.push_stream_id == 1u);
+	ASSERT(cap.push_promised_stream_id == 2u);
+	ASSERT(hive_stream_get_state(s, 2u) == HIVE_STREAM_RESERVED_REMOTE);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_client_recv_push_promise_refused(void)
+{
+	static const uint8_t hpack_get[] = {
+		0x82, 0x86, 0x84, 0x41, 0x0f,
+		'w',  'w',  'w',  '.',  'e',
+		'x',  'a',  'm',  'p',  'l',
+		'e',  '.',  'c',  'o',  'm'};
+	hive_callbacks_t cb;
+	callback_capture_t cap;
+	hive_session_t *s;
+	frame_hdr_t hdr;
+	const uint8_t *rst;
+	uint8_t frame[9 + 4 + sizeof(hpack_get)];
+
+	memset(&cb, 0, sizeof(cb));
+	memset(&cap, 0, sizeof(cap));
+	cap.push_refuse = 1;
+	cb.send = send_cb_full;
+	cb.on_push_promise = on_push_promise_cb;
+
+	s = hive_session_client_new(NULL, NULL, &cb, &cap);
+	ASSERT(s != NULL);
+	s->send_iov_count = 0;
+	s->send_buf_used = 0;
+	s->send_partial = 0;
+	s->send_partial_offset = 0;
+	s->recv_state = RECV_FRAME_HEADER;
+	s->preface_count = 0;
+
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_OPEN) == HIVE_OK);
+
+	frame_hdr_write_at(frame,
+	    4u + (uint32_t)sizeof(hpack_get),
+	    HIVE_FRAME_PUSH_PROMISE,
+	    HIVE_FLAG_END_HEADERS,
+	    1u);
+	write_u32_be(frame + 9, 2u);
+	memcpy(frame + 13, hpack_get, sizeof(hpack_get));
+
+	ASSERT(hive_session_recv(s, frame, sizeof(frame)) ==
+	    (ssize_t)sizeof(frame));
+	ASSERT(cap.push_promise_count == 1);
+	ASSERT(hive_stream_get_state(s, 2u) == HIVE_STREAM_IDLE);
+	ASSERT(s->send_iov_count == 1);
+
+	rst = (const uint8_t *)s->send_iov[0].iov_base;
+	frame_hdr_parse(rst, &hdr);
+	ASSERT(hdr.type == HIVE_FRAME_RST_STREAM);
+	ASSERT(hdr.stream_id == 2u);
+	ASSERT(hdr.length == 4u);
+	ASSERT(read_u32_be(rst + 9u) == HIVE_H2_REFUSED_STREAM);
 
 	hive_session_free(s);
 	return 1;

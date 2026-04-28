@@ -185,6 +185,8 @@ int test_h2c_feed_upgrade_headers_fires_callbacks(void);
 int test_server_push_promise(void);
 int test_server_push_response(void);
 int test_push_disabled_by_remote_settings(void);
+int test_client_recv_push_promise(void);
+int test_client_recv_push_promise_refused(void);
 
 /* --- test_flow.c ---------------------------------------------------------- */
 int test_window_update_connection(void);
@@ -311,6 +313,10 @@ main(void)
 	RUN(server_push_promise);
 	RUN(server_push_response);
 	RUN(push_disabled_by_remote_settings);
+
+	/* Phase 8.3 — PUSH_PROMISE receive (client role) */
+	RUN(client_recv_push_promise);
+	RUN(client_recv_push_promise_refused);
 
 	/* Phase 5.1 — WINDOW_UPDATE receive */
 	RUN(window_update_connection);

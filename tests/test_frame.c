@@ -88,6 +88,7 @@ test_session_init(hive_session_t *s, uint8_t *reassembly_buf, size_t cap)
 	s->local_settings.max_frame_size = 16384;
 	s->remote_settings.initial_window_size = 65535u;
 	s->opt_max_concurrent_streams = 1u;
+	s->opt_enable_push = 1u;
 	s->opt_max_settings_pending = 3u;
 	s->send_buf = send_buf;
 	s->send_buf_cap = sizeof(send_buf);
@@ -791,6 +792,7 @@ test_recv_split_push_promise_payload(void)
 	size_t n;
 
 	test_session_init(&s, reassembly, sizeof(reassembly));
+	s.role = HIVE_ROLE_CLIENT;
 	n = build_frame(frame, 5, HIVE_FRAME_PUSH_PROMISE, HIVE_FLAG_END_HEADERS, 1,
 	    payload);
 	ASSERT(feed_one_by_one(&s, frame, n) == 1);

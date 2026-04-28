@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-28
 **Current Phase**: Phase 8 — h2c and Server Push
-**Next Task**: 8.3 — PUSH_PROMISE receive (client role)
+**Next Task**: 8.4 — Two-phase GOAWAY: end-to-end test path
 
 ### Phase Summary
 
@@ -17,7 +17,7 @@
 | 5 | Flow Control and DATA | DONE | All Phase 5 tests pass (Linux + OpenBSD) | Receive-side enforcement, WINDOW_UPDATE, DATA delivery |
 | 6 | Submit and Send | DONE | All Phase 6 tests pass (Linux + OpenBSD) | Full send queue, partial-send, response/request submit, new callbacks |
 | 7 | Security Hardening | DONE | All Phase 7 tests pass (Linux + OpenBSD) | Completion criteria confirmed 2026-04-26; flood protection, exhaustion, HTTP messaging validation, buffer lifetime |
-| 8 | h2c and Server Push | IN PROGRESS | Tasks 8.1-8.2 tests pass (Linux + OpenBSD) | h2c Upgrade path and server push done; PUSH_PROMISE receive, GOAWAY end-to-end, client role receive path remain |
+| 8 | h2c and Server Push | IN PROGRESS | Tasks 8.1-8.3 tests pass (Linux + OpenBSD) | h2c Upgrade path, server push, and PUSH_PROMISE receive done; GOAWAY end-to-end and client role receive path remain |
 | 9 | Conformance and Polish | NOT STARTED | — | h2spec, README, API reference, tools |
 
 ### Quality Milestones
@@ -1298,7 +1298,7 @@ stream can be responded to. Two-phase GOAWAY shutdown is tested end-to-end.
   stream ID; stream transitions from RESERVED_LOCAL to HALF_CLOSED_REMOTE
   when HEADERS is sent, then to CLOSED when DATA END_STREAM is sent
 
-**8.3 — PUSH_PROMISE receive (client role)**
+**8.3 — PUSH_PROMISE receive (client role)** ✓ DONE
 - In RECV_PUSH_PROMISE_PAYLOAD: extract 4-byte promised stream ID; validate
   ID is even and > last seen server stream; copy remainder into
   `reassembly_buf`; on END_HEADERS, call `hpack_decode_block()`
@@ -1356,6 +1356,8 @@ File: `tests/test_session.c` (extended)
 
 - [x] h2c Upgrade tests pass; `feed_upgrade_headers()` fires callbacks correctly
 - [x] Server push tests pass; reserved stream state transitions correct
+- [x] PUSH_PROMISE receive tests pass; promised stream opens in RESERVED_REMOTE and
+      `on_push_promise` fires correctly
 - [ ] Two-phase GOAWAY end-to-end test passes
 - [ ] `want_read()` advisory test passes (0 after GOAWAY recv, but no crash
       if caller continues reading)
