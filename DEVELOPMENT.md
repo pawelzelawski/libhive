@@ -3,8 +3,8 @@
 ## Status Overview
 
 **Last Updated**: 2026-04-28
-**Current Phase**: Phase 8 — h2c and Server Push
-**Next Task**: 8.5 — Client role: full request-response
+**Current Phase**: Phase 9 — Conformance and Polish
+**Next Task**: 9.1 — h2spec test server
 
 ### Phase Summary
 
@@ -17,7 +17,7 @@
 | 5 | Flow Control and DATA | DONE | All Phase 5 tests pass (Linux + OpenBSD) | Receive-side enforcement, WINDOW_UPDATE, DATA delivery |
 | 6 | Submit and Send | DONE | All Phase 6 tests pass (Linux + OpenBSD) | Full send queue, partial-send, response/request submit, new callbacks |
 | 7 | Security Hardening | DONE | All Phase 7 tests pass (Linux + OpenBSD) | Completion criteria confirmed 2026-04-26; flood protection, exhaustion, HTTP messaging validation, buffer lifetime |
-| 8 | h2c and Server Push | IN PROGRESS | Tasks 8.1-8.4 tests pass (Linux + OpenBSD) | h2c Upgrade path, server push, PUSH_PROMISE receive, and GOAWAY end-to-end path done; client role receive path remains |
+| 8 | h2c and Server Push | DONE | All Phase 8 tests pass (Linux + OpenBSD) | Tasks 8.1-8.5 complete; client role request-response receive path confirmed; Linux valgrind/tsan/lint/format gates green |
 | 9 | Conformance and Polish | NOT STARTED | — | h2spec, README, API reference, tools |
 
 ### Quality Milestones
@@ -1314,10 +1314,10 @@ stream can be responded to. Two-phase GOAWAY shutdown is tested end-to-end.
   verify streams with ID > last_stream_id are closed with REFUSED_STREAM;
   verify streams with ID <= last_stream_id remain open for in-flight responses
 
-**8.5 — Client role: full request-response**
+**8.5 — Client role: full request-response** ✓ DONE
 - `hive_submit_request()` is implemented in Phase 6. Phase 8 adds the
   complementary client-side receive path: HEADERS response fires
-  `on_begin_headers`, `on_header` × n, `on_headers_complete` in the same
+  `on_begin_headers`, `on_header` x n, `on_headers_complete` in the same
   sequence as on the server side; DATA response fires `on_data_chunk`.
 
 ### Tests for Phase 8
@@ -1361,9 +1361,9 @@ File: `tests/test_session.c` (extended)
 - [x] Two-phase GOAWAY end-to-end test passes
 - [x] `want_read()` advisory test passes (0 after GOAWAY recv, but no crash
       if caller continues reading)
-- [ ] Client role end-to-end test passes
-- [ ] All Phase 8 tests pass on Linux and OpenBSD
-- [ ] Valgrind clean; ASan/UBSan clean on both platforms
+- [x] Client role end-to-end test passes
+- [x] All Phase 8 tests pass on Linux and OpenBSD
+- [x] Valgrind clean; ASan/UBSan clean on both platforms
 
 ---
 

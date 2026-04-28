@@ -109,6 +109,7 @@ int test_client_recv_push_promise_refused(void);
 int test_goaway_two_phase(void);
 int test_goaway_recv_want_read_advisory(void);
 int test_goaway_recv_streams_closed(void);
+int test_client_full_request_response(void);
 
 /* ------------------------------------------------------------------ */
 /* Shared test infrastructure                                          */
@@ -385,6 +386,11 @@ typedef struct {
 	size_t data_len;
 	uint8_t data[32];
 } roundtrip_client_capture_t;
+
+typedef struct {
+	roundtrip_send_capture_t wire;
+	roundtrip_client_capture_t cap;
+} roundtrip_client_ctx_t;
 
 static int
 alloc_should_fail(alloc_track_t *st)
@@ -807,6 +813,86 @@ on_roundtrip_data_chunk(hive_session_t *session,
 	memcpy(cap->data + cap->data_len, data, len);
 	cap->data_len += len;
 	return HIVE_OK;
+}
+
+static ssize_t
+send_cb_roundtrip_client_collect(hive_session_t *session,
+    const struct iovec *iov,
+    int iovcnt,
+    void *user_data)
+{
+	roundtrip_client_ctx_t *ctx;
+	ssize_t total;
+	size_t i;
+
+	(void)session;
+
+	ctx = user_data;
+	total = 0;
+	ctx->wire.calls++;
+	for (i = 0u; i < (size_t)iovcnt; i++) {
+		ASSERT(ctx->wire.len + iov[i].iov_len <= sizeof(ctx->wire.bytes));
+		memcpy(ctx->wire.bytes + ctx->wire.len,
+		    iov[i].iov_base,
+		    iov[i].iov_len);
+		ctx->wire.len += iov[i].iov_len;
+		total += (ssize_t)iov[i].iov_len;
+	}
+
+	return total;
+}
+
+static int
+on_client_roundtrip_begin_headers(hive_session_t *session,
+    uint32_t stream_id,
+    void *user_data)
+{
+	roundtrip_client_ctx_t *ctx;
+
+	ctx = user_data;
+	return on_roundtrip_begin_headers(session, stream_id, &ctx->cap);
+}
+
+static int
+on_client_roundtrip_header(hive_session_t *session,
+    uint32_t stream_id,
+    hive_buf_t *name,
+    hive_buf_t *value,
+    uint8_t flags,
+    void *user_data)
+{
+	roundtrip_client_ctx_t *ctx;
+
+	ctx = user_data;
+	return on_roundtrip_header(session, stream_id, name, value, flags,
+	    &ctx->cap);
+}
+
+static int
+on_client_roundtrip_headers_complete(hive_session_t *session,
+    uint32_t stream_id,
+    uint8_t flags,
+    void *user_data)
+{
+	roundtrip_client_ctx_t *ctx;
+
+	ctx = user_data;
+	return on_roundtrip_headers_complete(session, stream_id, flags, &ctx->cap);
+}
+
+static int
+on_client_roundtrip_data_chunk(hive_session_t *session,
+    uint32_t stream_id,
+    const uint8_t *data,
+    size_t len,
+    uint8_t flags,
+    void *user_data)
+{
+	roundtrip_client_ctx_t *ctx;
+
+	ctx = user_data;
+	return on_roundtrip_data_chunk(session, stream_id, data, len, flags,
+	    &ctx->cap);
 }
 
 static void
@@ -3107,6 +3193,101 @@ test_goaway_recv_streams_closed(void)
 	ASSERT(hive_session_want_read(s) == 0);
 
 	hive_session_free(s);
+	return 1;
+}
+
+int
+test_client_full_request_response(void)
+{
+	static const uint8_t n_method[] = ":method";
+	static const uint8_t n_scheme[] = ":scheme";
+	static const uint8_t n_path[] = ":path";
+	static const uint8_t n_authority[] = ":authority";
+	static const uint8_t v_get[] = "GET";
+	static const uint8_t v_http[] = "http";
+	static const uint8_t v_path[] = "/";
+	static const uint8_t v_authority[] = "www.example.com";
+	hive_callbacks_t server_cb;
+	hive_callbacks_t client_cb;
+	hive_nv_t req_nva[4];
+	roundtrip_client_ctx_t client_ctx;
+	roundtrip_server_ctx_t server_wire;
+	hive_session_t *client;
+	hive_session_t *server;
+	uint32_t stream_id;
+
+	memset(&server_cb, 0, sizeof(server_cb));
+	memset(&client_cb, 0, sizeof(client_cb));
+	memset(&client_ctx, 0, sizeof(client_ctx));
+	memset(&server_wire, 0, sizeof(server_wire));
+
+	server_cb.send = send_cb_roundtrip_collect;
+	server_cb.on_headers_complete = on_headers_complete_submit_response;
+	server = hive_session_server_new(NULL, NULL, &server_cb, &server_wire);
+	ASSERT(server != NULL);
+	server->send_iov_count = 0;
+	server->send_buf_used = 0;
+	server->send_partial = 0;
+	server->send_partial_offset = 0;
+	server->recv_state = RECV_FRAME_HEADER;
+	server->preface_count = 0;
+
+	client_cb.send = send_cb_roundtrip_client_collect;
+	client_cb.on_begin_headers = on_client_roundtrip_begin_headers;
+	client_cb.on_header = on_client_roundtrip_header;
+	client_cb.on_headers_complete = on_client_roundtrip_headers_complete;
+	client_cb.on_data_chunk = on_client_roundtrip_data_chunk;
+	client = hive_session_client_new(NULL, NULL, &client_cb, &client_ctx);
+	ASSERT(client != NULL);
+	client->send_iov_count = 0;
+	client->send_buf_used = 0;
+	client->send_partial = 0;
+	client->send_partial_offset = 0;
+	client->recv_state = RECV_FRAME_HEADER;
+	client->preface_count = 0;
+
+	req_nva[0] = (hive_nv_t){n_method, v_get,
+	    sizeof(n_method) - 1u, sizeof(v_get) - 1u, 0u};
+	req_nva[1] = (hive_nv_t){n_scheme, v_http,
+	    sizeof(n_scheme) - 1u, sizeof(v_http) - 1u, 0u};
+	req_nva[2] = (hive_nv_t){n_path, v_path,
+	    sizeof(n_path) - 1u, sizeof(v_path) - 1u, 0u};
+	req_nva[3] = (hive_nv_t){n_authority, v_authority,
+	    sizeof(n_authority) - 1u, sizeof(v_authority) - 1u, 0u};
+
+	ASSERT(hive_submit_request(client, req_nva, 4u, NULL, &stream_id) == HIVE_OK);
+	ASSERT(stream_id == 1u);
+	ASSERT(hive_session_send(client) == HIVE_OK);
+	ASSERT(client_ctx.wire.calls == 1);
+	ASSERT(client_ctx.wire.len > 9u);
+
+	ASSERT(hive_session_recv(server,
+	    client_ctx.wire.bytes,
+	    client_ctx.wire.len) == (ssize_t)client_ctx.wire.len);
+	ASSERT(server_wire.headers_complete_count == 1);
+	ASSERT(server_wire.submit_count == 1);
+	ASSERT(server_wire.submit_rc == HIVE_OK);
+
+	ASSERT(hive_session_send(server) == HIVE_OK);
+	ASSERT(server_wire.wire.calls == 1);
+	ASSERT(server_wire.wire.len > 18u);
+
+	ASSERT(hive_session_recv(client,
+	    server_wire.wire.bytes,
+	    server_wire.wire.len) == (ssize_t)server_wire.wire.len);
+	ASSERT(client_ctx.cap.begin_count == 1);
+	ASSERT(client_ctx.cap.header_count >= 1);
+	ASSERT(client_ctx.cap.complete_count == 1);
+	ASSERT(client_ctx.cap.data_count == 1);
+	ASSERT(client_ctx.cap.stream_id == stream_id);
+	ASSERT(client_ctx.cap.saw_status_200 == 1);
+	ASSERT((client_ctx.cap.headers_complete_flags & HIVE_FLAG_END_STREAM) == 0u);
+	ASSERT((client_ctx.cap.data_flags & HIVE_FLAG_END_STREAM) != 0u);
+	ASSERT(client_ctx.cap.data_len == 5u);
+	ASSERT(memcmp(client_ctx.cap.data, "hello", 5u) == 0);
+
+	hive_session_free(client);
+	hive_session_free(server);
 	return 1;
 }
 
