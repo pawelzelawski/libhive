@@ -48,7 +48,7 @@ send_queue_reserve_iov(hive_session_t *s, int needed)
 	return HIVE_OK;
 }
 
-static void
+void
 u32_write_be(uint8_t out[4], uint32_t v)
 {
 	out[0] = (uint8_t)((v >> 24) & 0xffu);

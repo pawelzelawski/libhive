@@ -845,6 +845,9 @@ upgrade_apply_settings_param(hive_session_t *s,
 		s->enc_table.has_pending = 1;
 		break;
 	case HIVE_SETTINGS_ENABLE_PUSH:
+		/* SECURITY: RFC 9113 §6.5.2 — ENABLE_PUSH MUST be 0 or 1;
+		 * any other value is a PROTOCOL_ERROR connection error.
+		 */
 		if (param_val > 1u)
 			return HIVE_ERR_PROTOCOL;
 		s->remote_settings.enable_push = param_val;
@@ -853,8 +856,16 @@ upgrade_apply_settings_param(hive_session_t *s,
 		s->remote_settings.max_concurrent_streams = param_val;
 		break;
 	case HIVE_SETTINGS_INITIAL_WINDOW_SIZE:
+		/* SECURITY: RFC 9113 §6.9.2 — values above 2^31-1 are a
+		 * FLOW_CONTROL_ERROR; upgrade_apply_initial_window() enforces
+		 * this and retroactively adjusts existing stream windows.
+		 */
 		return upgrade_apply_initial_window(s, param_val);
 	case HIVE_SETTINGS_MAX_FRAME_SIZE:
+		/* SECURITY: RFC 9113 §6.5.2 — MAX_FRAME_SIZE MUST be in the
+		 * range [16384, 16777215]; values outside this range are a
+		 * PROTOCOL_ERROR connection error.
+		 */
 		if (param_val < 16384u || param_val > 16777215u)
 			return HIVE_ERR_PROTOCOL;
 		s->remote_settings.max_frame_size = param_val;
@@ -1357,15 +1368,6 @@ nv_has_push_required_pseudo(const hive_nv_t *nva, size_t nvlen)
 	return has_method && has_path && has_scheme && has_authority;
 }
 
-static void
-u32_write_be(uint8_t out[4], uint32_t v)
-{
-	out[0] = (uint8_t)((v >> 24) & 0xffu);
-	out[1] = (uint8_t)((v >> 16) & 0xffu);
-	out[2] = (uint8_t)((v >> 8) & 0xffu);
-	out[3] = (uint8_t)(v & 0xffu);
-}
-
 int
 hive_submit_response(hive_session_t *session,
                      uint32_t stream_id,
@@ -1515,6 +1517,11 @@ hive_submit_push_promise(hive_session_t *session,
 	    carry->state != HIVE_STREAM_HALF_CLOSED_REMOTE)
 		return HIVE_ERR_STREAM_CLOSED;
 
+	/* SECURITY: RFC 9113 §8.4 — a server MUST NOT send PUSH_PROMISE if
+	 * the client has disabled push (ENABLE_PUSH == 0).  Doing so is a
+	 * PROTOCOL_ERROR connection error on the client side; reject early
+	 * here to prevent violating the peer's declared constraint.
+	 */
 	if (session->remote_settings.enable_push == 0u)
 		return HIVE_ERR_PROTOCOL;
 	if (session->stream_open_count >= session->opt_max_concurrent_streams)
@@ -1855,24 +1862,29 @@ hive_buf_free(hive_session_t *session, hive_buf_t *buf)
 int32_t
 hive_session_get_remote_window_size(hive_session_t *session)
 {
-	(void)session;
-	return 0;
+	if (session == NULL)
+		return 0;
+	return session->send_window;
 }
 
 hive_settings_t
 hive_session_get_local_settings(hive_session_t *session)
 {
 	hive_settings_t s = {0, 0, 0, 0, 0, 0};
-	(void)session;
-	return s;
+
+	if (session == NULL)
+		return s;
+	return session->local_settings;
 }
 
 hive_settings_t
 hive_session_get_remote_settings(hive_session_t *session)
 {
 	hive_settings_t s = {0, 0, 0, 0, 0, 0};
-	(void)session;
-	return s;
+
+	if (session == NULL)
+		return s;
+	return session->remote_settings;
 }
 
 int

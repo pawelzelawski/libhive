@@ -45,8 +45,6 @@ bytes_equal(const uint8_t *a, const uint8_t *b, size_t n)
 	return 1;
 }
 
-static void u32be_write(uint8_t *p, uint32_t v);
-
 static int
 session_error(hive_session_t *s, int hive_err, uint32_t h2_err)
 {
@@ -60,8 +58,8 @@ session_error(hive_session_t *s, int hive_err, uint32_t h2_err)
 		    s, hive_err, h2_err, s->user_data);
 	}
 	if (s->goaway_sent == 0) {
-		u32be_write(payload, s->last_stream_id_remote & 0x7fffffffu);
-		u32be_write(payload + 4, h2_err);
+		u32_write_be(payload, s->last_stream_id_remote & 0x7fffffffu);
+		u32_write_be(payload + 4, h2_err);
 		(void)send_queue_append_ctrl(
 		    s, HIVE_FRAME_GOAWAY, 0u, 0u, payload, sizeof(payload));
 		s->goaway_sent = 1;
@@ -143,15 +141,6 @@ goaway_close_unprocessed_local_streams(hive_session_t *s,
 	}
 }
 
-static void
-u32be_write(uint8_t *p, uint32_t v)
-{
-	p[0] = (uint8_t)((v >> 24) & 0xffu);
-	p[1] = (uint8_t)((v >> 16) & 0xffu);
-	p[2] = (uint8_t)((v >> 8) & 0xffu);
-	p[3] = (uint8_t)(v & 0xffu);
-}
-
 static int
 stream_error(hive_session_t *s,
              uint32_t stream_id,
@@ -160,7 +149,7 @@ stream_error(hive_session_t *s,
 {
 	uint8_t payload[4];
 
-	u32be_write(payload, h2_err);
+	u32_write_be(payload, h2_err);
 	send_queue_append_ctrl(
 	    s, HIVE_FRAME_RST_STREAM, 0u, stream_id, payload, 4u);
 	s->last_err = hive_err;
@@ -786,8 +775,8 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 						if (restored > 0x7fffffffLL)
 							return flow_control_error(
 							    s);
-						u32be_write(wu_payload,
-						            increment);
+						u32_write_be(wu_payload,
+						             increment);
 						send_queue_append_ctrl(
 						    s,
 						    HIVE_FRAME_WINDOW_UPDATE,
@@ -836,8 +825,8 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 						if (restored > 0x7fffffffLL)
 							return flow_control_error(
 							    s);
-						u32be_write(wu_payload,
-						            increment);
+						u32_write_be(wu_payload,
+						             increment);
 						send_queue_append_ctrl(
 						    s,
 						    HIVE_FRAME_WINDOW_UPDATE,
@@ -900,7 +889,7 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 					           (int64_t)increment;
 					if (restored > 0x7fffffffLL)
 						return flow_control_error(s);
-					u32be_write(wu_payload, increment);
+					u32_write_be(wu_payload, increment);
 					send_queue_append_ctrl(
 					    s,
 					    HIVE_FRAME_WINDOW_UPDATE,
@@ -919,7 +908,7 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 					           (int64_t)increment;
 					if (restored > 0x7fffffffLL)
 						return flow_control_error(s);
-					u32be_write(wu_payload, increment);
+					u32_write_be(wu_payload, increment);
 					send_queue_append_ctrl(
 					    s,
 					    HIVE_FRAME_WINDOW_UPDATE,

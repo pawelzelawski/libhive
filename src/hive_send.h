@@ -98,6 +98,14 @@ int send_queue_append_push_promise(hive_session_t *s,
                                    size_t nvlen);
 
 /*
+ * u32_write_be — write a 32-bit value in big-endian byte order at out[0..3].
+ *
+ * Shared by hive_send.c, hive_frame.c, and hive.c to avoid three identical
+ * private copies.  See CODING_STANDARDS.md §1.1.
+ */
+void u32_write_be(uint8_t out[4], uint32_t v);
+
+/*
  * send_queue_flush_data — drive pending data_source streams into the send
  * queue within flow control limits.
  *

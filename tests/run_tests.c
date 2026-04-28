@@ -182,6 +182,7 @@ int test_on_connection_error_fires_before_goaway(void);
 int test_h2c_upgrade_settings_applied(void);
 int test_h2c_upgrade_stream1_open(void);
 int test_h2c_feed_upgrade_headers_fires_callbacks(void);
+int test_h2c_feed_upgrade_headers_double_call(void);
 int test_server_push_promise(void);
 int test_server_push_response(void);
 int test_push_disabled_by_remote_settings(void);
@@ -312,6 +313,7 @@ main(void)
 	RUN(h2c_upgrade_settings_applied);
 	RUN(h2c_upgrade_stream1_open);
 	RUN(h2c_feed_upgrade_headers_fires_callbacks);
+	RUN(h2c_feed_upgrade_headers_double_call);
 
 	/* Phase 8.2 — server push */
 	RUN(server_push_promise);

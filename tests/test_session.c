@@ -101,6 +101,7 @@ int test_on_connection_error_fires_before_goaway(void);
 int test_h2c_upgrade_settings_applied(void);
 int test_h2c_upgrade_stream1_open(void);
 int test_h2c_feed_upgrade_headers_fires_callbacks(void);
+int test_h2c_feed_upgrade_headers_double_call(void);
 int test_server_push_promise(void);
 int test_server_push_response(void);
 int test_push_disabled_by_remote_settings(void);
@@ -2811,6 +2812,75 @@ test_h2c_feed_upgrade_headers_fires_callbacks(void)
 	    HIVE_ERR_PROTOCOL);
 	hive_session_free(s_limit);
 
+	return 1;
+}
+
+/*
+ * Verify that calling hive_session_feed_upgrade_headers() a second time on
+ * the same session returns HIVE_ERR_INVALID_ARG because the
+ * HIVE_STREAM_FLAG_HEADERS_SEEN guard prevents double-injection.
+ */
+int
+test_h2c_feed_upgrade_headers_double_call(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	hive_nv_t nva[4];
+	headers_capture_t cap;
+	static const uint8_t empty_settings = 0u;
+	static const uint8_t n_method[] = ":method";
+	static const uint8_t v_get[] = "GET";
+	static const uint8_t n_scheme[] = ":scheme";
+	static const uint8_t v_http[] = "http";
+	static const uint8_t n_path[] = ":path";
+	static const uint8_t v_path[] = "/";
+	static const uint8_t n_authority[] = ":authority";
+	static const uint8_t v_authority[] = "www.example.com";
+
+	memset(&cap, 0, sizeof(cap));
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+	cb.on_begin_headers = on_begin_headers_capture;
+	cb.on_header = on_header_capture;
+	cb.on_headers_complete = on_headers_complete_capture;
+
+	s = hive_session_server_upgrade(
+	    NULL, NULL, &cb, &cap, &empty_settings, 0u);
+	ASSERT(s != NULL);
+
+	nva[0].name = n_method;
+	nva[0].value = v_get;
+	nva[0].name_len = sizeof(n_method) - 1u;
+	nva[0].value_len = sizeof(v_get) - 1u;
+	nva[0].flags = 0u;
+	nva[1].name = n_scheme;
+	nva[1].value = v_http;
+	nva[1].name_len = sizeof(n_scheme) - 1u;
+	nva[1].value_len = sizeof(v_http) - 1u;
+	nva[1].flags = 0u;
+	nva[2].name = n_path;
+	nva[2].value = v_path;
+	nva[2].name_len = sizeof(n_path) - 1u;
+	nva[2].value_len = sizeof(v_path) - 1u;
+	nva[2].flags = 0u;
+	nva[3].name = n_authority;
+	nva[3].value = v_authority;
+	nva[3].name_len = sizeof(n_authority) - 1u;
+	nva[3].value_len = sizeof(v_authority) - 1u;
+	nva[3].flags = 0u;
+
+	/* First call must succeed */
+	ASSERT(hive_session_feed_upgrade_headers(s, nva, 4u, 1) == HIVE_OK);
+	ASSERT(cap.begin_count == 1);
+
+	/* Second call must be rejected: HEADERS_SEEN flag is now set */
+	ASSERT(hive_session_feed_upgrade_headers(s, nva, 4u, 1) ==
+	    HIVE_ERR_PROTOCOL);
+
+	/* Callbacks must not have fired a second time */
+	ASSERT(cap.begin_count == 1);
+
+	hive_session_free(s);
 	return 1;
 }
 
