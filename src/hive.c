@@ -787,6 +787,90 @@ settings_param_write(uint8_t *dst, uint16_t id, uint32_t value)
 	dst[5] = (uint8_t)(value & 0xffu);
 }
 
+static uint16_t
+u16be_read(const uint8_t in[2])
+{
+	return (uint16_t)(((uint16_t)in[0] << 8) | (uint16_t)in[1]);
+}
+
+static uint32_t
+u32be_read(const uint8_t in[4])
+{
+	return ((uint32_t)in[0] << 24) | ((uint32_t)in[1] << 16) |
+	       ((uint32_t)in[2] << 8) | (uint32_t)in[3];
+}
+
+static int
+upgrade_apply_initial_window(hive_session_t *s, uint32_t val)
+{
+	int64_t delta;
+	uint32_t i;
+
+	if (val > 0x7fffffffU)
+		return HIVE_ERR_PROTOCOL;
+
+	delta = (int64_t)(int32_t)val -
+	        (int64_t)(int32_t)s->remote_settings.initial_window_size;
+	s->remote_settings.initial_window_size = val;
+
+	for (i = 0; i < s->opt_max_concurrent_streams; i++) {
+		hive_stream_t *st;
+		int64_t new_window;
+
+		st = &s->stream_slots[i];
+		if (st->stream_id == 0)
+			continue;
+
+		new_window = (int64_t)st->send_window + delta;
+		if (new_window > 0x7fffffffLL || new_window < -2147483648LL)
+			return HIVE_ERR_PROTOCOL;
+		st->send_window = (int32_t)new_window;
+	}
+
+	return HIVE_OK;
+}
+
+static int
+upgrade_apply_settings_param(hive_session_t *s,
+                             uint16_t param_id,
+                             uint32_t param_val)
+{
+	switch (param_id) {
+	case HIVE_SETTINGS_HEADER_TABLE_SIZE:
+		s->remote_settings.header_table_size = param_val;
+		if (s->enc_table.has_pending == 0 ||
+		    param_val < s->enc_table.pending_min)
+			s->enc_table.pending_min = param_val;
+		s->enc_table.pending_max = param_val;
+		s->enc_table.has_pending = 1;
+		break;
+	case HIVE_SETTINGS_ENABLE_PUSH:
+		if (param_val > 1u)
+			return HIVE_ERR_PROTOCOL;
+		s->remote_settings.enable_push = param_val;
+		break;
+	case HIVE_SETTINGS_MAX_CONCURRENT_STREAMS:
+		s->remote_settings.max_concurrent_streams = param_val;
+		break;
+	case HIVE_SETTINGS_INITIAL_WINDOW_SIZE:
+		return upgrade_apply_initial_window(s, param_val);
+	case HIVE_SETTINGS_MAX_FRAME_SIZE:
+		if (param_val < 16384u || param_val > 16777215u)
+			return HIVE_ERR_PROTOCOL;
+		s->remote_settings.max_frame_size = param_val;
+		break;
+	case HIVE_SETTINGS_MAX_HEADER_LIST_SIZE:
+		s->remote_settings.max_header_list_size = param_val;
+		break;
+	default:
+		/* Unknown SETTINGS parameters are ignored per RFC 9113 §6.5.2.
+		 */
+		break;
+	}
+
+	return HIVE_OK;
+}
+
 static uint32_t
 session_build_settings_payload(hive_session_t *s, uint8_t out[36])
 {
@@ -996,10 +1080,46 @@ hive_session_server_upgrade(const hive_mem_t *mem,
                             const uint8_t *settings_payload,
                             size_t settings_len)
 {
-	if (settings_payload == NULL && settings_len != 0)
+	hive_session_t *s;
+	size_t off;
+	int ret;
+
+	if (settings_payload == NULL)
 		return NULL;
-	return session_new_common(
+	if ((settings_len % 6u) != 0u)
+		return NULL;
+
+	s = session_new_common(
 	    HIVE_ROLE_SERVER, mem, opt, callbacks, user_data);
+	if (s == NULL)
+		return NULL;
+
+	/* h2c Upgrade skips the HTTP/2 client preface; next bytes are frames.
+	 */
+	s->recv_state = RECV_FRAME_HEADER;
+	s->preface_count = 0;
+
+	for (off = 0; off < settings_len; off += 6u) {
+		uint16_t param_id;
+		uint32_t param_val;
+
+		param_id = u16be_read(settings_payload + off);
+		param_val = u32be_read(settings_payload + off + 2u);
+		ret = upgrade_apply_settings_param(s, param_id, param_val);
+		if (ret != HIVE_OK) {
+			hive_session_free(s);
+			return NULL;
+		}
+	}
+
+	ret = stream_open(s, 1u, HIVE_STREAM_HALF_CLOSED_REMOTE);
+	if (ret != HIVE_OK) {
+		hive_session_free(s);
+		return NULL;
+	}
+	s->last_stream_id_remote = 1u;
+
+	return s;
 }
 
 void
@@ -1518,13 +1638,68 @@ hive_session_feed_upgrade_headers(hive_session_t *session,
                                   size_t nvlen,
                                   int end_stream)
 {
+	const hive_stream_t *stream;
+	size_t used;
+	size_t i;
+	int ret;
+
 	if (session == NULL)
+		return HIVE_ERR_INVALID_ARG;
+	if (session->role != HIVE_ROLE_SERVER)
 		return HIVE_ERR_INVALID_ARG;
 	if (end_stream != 1)
 		return HIVE_ERR_INVALID_ARG;
 	if (nvlen > 0 && nva == NULL)
 		return HIVE_ERR_INVALID_ARG;
-	return HIVE_OK;
+
+	stream = stream_lookup(session, 1u);
+	if (stream == NULL || stream->state != HIVE_STREAM_HALF_CLOSED_REMOTE)
+		return HIVE_ERR_PROTOCOL;
+	if ((stream->flags & HIVE_STREAM_FLAG_HEADERS_SEEN) != 0u)
+		return HIVE_ERR_PROTOCOL;
+
+	used = 0;
+	for (i = 0; i < nvlen; i++) {
+		size_t n;
+
+		if ((nva[i].name_len > 0 && nva[i].name == NULL) ||
+		    (nva[i].value_len > 0 && nva[i].value == NULL))
+			return HIVE_ERR_INVALID_ARG;
+		if (used >= session->opt_max_continuation_size)
+			return HIVE_ERR_NOMEM;
+
+		/* Literal without indexing, new-name form (RFC 7541 §6.2.2). */
+		session->reassembly_buf[used++] = 0x00u;
+		n = hpack_encode_string(nva[i].name,
+		                        nva[i].name_len,
+		                        session->reassembly_buf + used,
+		                        session->opt_max_continuation_size -
+		                            used);
+		if (n == 0)
+			return HIVE_ERR_NOMEM;
+		used += n;
+
+		n = hpack_encode_string(nva[i].value,
+		                        nva[i].value_len,
+		                        session->reassembly_buf + used,
+		                        session->opt_max_continuation_size -
+		                            used);
+		if (n == 0)
+			return HIVE_ERR_NOMEM;
+		used += n;
+	}
+
+	session->reassembly_stream_id = 1u;
+	session->reassembly_end_stream = 1u;
+	session->reassembly_len = (uint32_t)used;
+
+	ret = hpack_decode_block(session, session->reassembly_buf, used, 0, 1u);
+	session->reassembly_len = 0u;
+	if (ret == HIVE_OK)
+		return HIVE_OK;
+	if (ret == HIVE_ERR_NOMEM)
+		return HIVE_ERR_NOMEM;
+	return HIVE_ERR_PROTOCOL;
 }
 
 int

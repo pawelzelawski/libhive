@@ -98,6 +98,9 @@ int test_on_goaway_fires(void);
 int test_on_ping_fires_when_no_auto_ack(void);
 int test_on_ping_ack_fires(void);
 int test_on_connection_error_fires_before_goaway(void);
+int test_h2c_upgrade_settings_applied(void);
+int test_h2c_upgrade_stream1_open(void);
+int test_h2c_feed_upgrade_headers_fires_callbacks(void);
 
 /* ------------------------------------------------------------------ */
 /* Shared test infrastructure                                          */
@@ -2498,6 +2501,149 @@ test_session_client_new_null_alloc(void)
 	ASSERT(p[8] == 0u);
 
 	hive_session_free(s);
+	return 1;
+}
+
+int
+test_h2c_upgrade_settings_applied(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	uint8_t settings_payload[12];
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+
+	settings_payload[0] = 0x00u;
+	settings_payload[1] = (uint8_t)HIVE_SETTINGS_HEADER_TABLE_SIZE;
+	settings_payload[2] = 0x00u;
+	settings_payload[3] = 0x00u;
+	settings_payload[4] = 0x04u;
+	settings_payload[5] = 0x00u; /* 1024 */
+	settings_payload[6] = 0x00u;
+	settings_payload[7] = (uint8_t)HIVE_SETTINGS_MAX_FRAME_SIZE;
+	settings_payload[8] = 0x00u;
+	settings_payload[9] = 0x00u;
+	settings_payload[10] = 0x80u;
+	settings_payload[11] = 0x00u; /* 32768 */
+
+	s = hive_session_server_upgrade(
+	    NULL, NULL, &cb, NULL, settings_payload, sizeof(settings_payload));
+	ASSERT(s != NULL);
+	ASSERT(s->recv_state == RECV_FRAME_HEADER);
+	ASSERT(s->remote_settings.header_table_size == 1024u);
+	ASSERT(s->remote_settings.max_frame_size == 32768u);
+	ASSERT(s->enc_table.has_pending == 1);
+	ASSERT(s->enc_table.pending_min == 1024u);
+	ASSERT(s->enc_table.pending_max == 1024u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_h2c_upgrade_stream1_open(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	static const uint8_t empty_settings = 0u;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+
+	s = hive_session_server_upgrade(
+	    NULL, NULL, &cb, NULL, &empty_settings, 0u);
+	ASSERT(s != NULL);
+	ASSERT(hive_stream_get_state(s, 1u) == HIVE_STREAM_HALF_CLOSED_REMOTE);
+	ASSERT(s->last_stream_id_remote == 1u);
+	ASSERT(s->send_iov_count == 1);
+	ASSERT(s->send_iov[0].iov_len >= 9u);
+	ASSERT(((const uint8_t *)s->send_iov[0].iov_base)[3] ==
+	    HIVE_FRAME_SETTINGS);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_h2c_feed_upgrade_headers_fires_callbacks(void)
+{
+	hive_callbacks_t cb;
+	headers_capture_t cap;
+	hive_session_t *s;
+	hive_nv_t nva[4];
+	hive_options_t *opt;
+	headers_capture_t cap_limit;
+	hive_session_t *s_limit;
+	static const uint8_t empty_settings = 0u;
+	static const uint8_t n_method[] = ":method";
+	static const uint8_t v_get[] = "GET";
+	static const uint8_t n_scheme[] = ":scheme";
+	static const uint8_t v_http[] = "http";
+	static const uint8_t n_path[] = ":path";
+	static const uint8_t v_path[] = "/";
+	static const uint8_t n_authority[] = ":authority";
+	static const uint8_t v_authority[] = "www.example.com";
+
+	memset(&cap, 0, sizeof(cap));
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+	cb.on_begin_headers = on_begin_headers_capture;
+	cb.on_header = on_header_capture;
+	cb.on_headers_complete = on_headers_complete_capture;
+
+	s = hive_session_server_upgrade(
+	    NULL, NULL, &cb, &cap, &empty_settings, 0u);
+	ASSERT(s != NULL);
+
+	nva[0].name = n_method;
+	nva[0].value = v_get;
+	nva[0].name_len = sizeof(n_method) - 1u;
+	nva[0].value_len = sizeof(v_get) - 1u;
+	nva[0].flags = 0u;
+	nva[1].name = n_scheme;
+	nva[1].value = v_http;
+	nva[1].name_len = sizeof(n_scheme) - 1u;
+	nva[1].value_len = sizeof(v_http) - 1u;
+	nva[1].flags = 0u;
+	nva[2].name = n_path;
+	nva[2].value = v_path;
+	nva[2].name_len = sizeof(n_path) - 1u;
+	nva[2].value_len = sizeof(v_path) - 1u;
+	nva[2].flags = 0u;
+	nva[3].name = n_authority;
+	nva[3].value = v_authority;
+	nva[3].name_len = sizeof(n_authority) - 1u;
+	nva[3].value_len = sizeof(v_authority) - 1u;
+	nva[3].flags = 0u;
+
+	ASSERT(hive_session_feed_upgrade_headers(s, nva, 4u, 1) == HIVE_OK);
+	ASSERT(cap.begin_count == 1);
+	ASSERT(cap.header_count == 4);
+	ASSERT(cap.complete_count == 1);
+	ASSERT(cap.stream_id == 1u);
+	ASSERT(cap.headers_complete_flags == HIVE_FLAG_END_STREAM);
+	ASSERT(cap.begin_seq < cap.first_header_seq);
+	ASSERT(cap.last_header_seq < cap.complete_seq);
+	ASSERT(cap.saw_method == 1);
+	ASSERT(cap.saw_scheme == 1);
+	ASSERT(cap.saw_path == 1);
+	ASSERT(cap.saw_authority == 1);
+
+	hive_session_free(s);
+
+	opt = hive_options_new();
+	ASSERT(opt != NULL);
+	ASSERT(hive_options_set_max_header_count(opt, 2u) == HIVE_OK);
+	memset(&cap_limit, 0, sizeof(cap_limit));
+	s_limit = hive_session_server_upgrade(
+	    NULL, opt, &cb, &cap_limit, &empty_settings, 0u);
+	hive_options_free(opt);
+	ASSERT(s_limit != NULL);
+	ASSERT(hive_session_feed_upgrade_headers(s_limit, nva, 3u, 1) ==
+	    HIVE_ERR_PROTOCOL);
+	hive_session_free(s_limit);
+
 	return 1;
 }
 

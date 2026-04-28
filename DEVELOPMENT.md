@@ -2,9 +2,9 @@
 
 ## Status Overview
 
-**Last Updated**: 2026-04-26
+**Last Updated**: 2026-04-28
 **Current Phase**: Phase 8 — h2c and Server Push
-**Next Task**: 8.1 — h2c Upgrade path
+**Next Task**: 8.2 — Server push
 
 ### Phase Summary
 
@@ -17,7 +17,7 @@
 | 5 | Flow Control and DATA | DONE | All Phase 5 tests pass (Linux + OpenBSD) | Receive-side enforcement, WINDOW_UPDATE, DATA delivery |
 | 6 | Submit and Send | DONE | All Phase 6 tests pass (Linux + OpenBSD) | Full send queue, partial-send, response/request submit, new callbacks |
 | 7 | Security Hardening | DONE | All Phase 7 tests pass (Linux + OpenBSD) | Completion criteria confirmed 2026-04-26; flood protection, exhaustion, HTTP messaging validation, buffer lifetime |
-| 8 | h2c and Server Push | NOT STARTED | — | Upgrade path, PUSH_PROMISE, two-phase GOAWAY, client role |
+| 8 | h2c and Server Push | IN PROGRESS | Task 8.1 tests pass (Linux + OpenBSD) | h2c Upgrade path done; PUSH_PROMISE, GOAWAY end-to-end, client role receive path remain |
 | 9 | Conformance and Polish | NOT STARTED | — | h2spec, README, API reference, tools |
 
 ### Quality Milestones
@@ -1276,7 +1276,7 @@ stream can be responded to. Two-phase GOAWAY shutdown is tested end-to-end.
 
 ### Tasks
 
-**8.1 — h2c Upgrade path**
+**8.1 — h2c Upgrade path** ✓ DONE
 - `hive_session_server_upgrade()` per ARCHITECTURE.md §9.7:
   parse `settings_payload` (base64url-decoded bytes) as a SETTINGS body;
   apply to `remote_settings`; initialise stream 1 in HALF_CLOSED_REMOTE
@@ -1354,7 +1354,7 @@ File: `tests/test_session.c` (extended)
 
 ### Phase 8 Completion Criteria
 
-- [ ] h2c Upgrade tests pass; `feed_upgrade_headers()` fires callbacks correctly
+- [x] h2c Upgrade tests pass; `feed_upgrade_headers()` fires callbacks correctly
 - [ ] Server push tests pass; reserved stream state transitions correct
 - [ ] Two-phase GOAWAY end-to-end test passes
 - [ ] `want_read()` advisory test passes (0 after GOAWAY recv, but no crash

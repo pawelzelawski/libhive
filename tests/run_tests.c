@@ -179,6 +179,9 @@ int test_on_goaway_fires(void);
 int test_on_ping_fires_when_no_auto_ack(void);
 int test_on_ping_ack_fires(void);
 int test_on_connection_error_fires_before_goaway(void);
+int test_h2c_upgrade_settings_applied(void);
+int test_h2c_upgrade_stream1_open(void);
+int test_h2c_feed_upgrade_headers_fires_callbacks(void);
 
 /* --- test_flow.c ---------------------------------------------------------- */
 int test_window_update_connection(void);
@@ -295,6 +298,11 @@ main(void)
 	RUN(server_preface_invalid);
 	RUN(client_preface_first_frame_not_settings);
 	RUN(client_preface_settings_with_ack);
+
+	/* Phase 8.1 — h2c Upgrade path */
+	RUN(h2c_upgrade_settings_applied);
+	RUN(h2c_upgrade_stream1_open);
+	RUN(h2c_feed_upgrade_headers_fires_callbacks);
 
 	/* Phase 5.1 — WINDOW_UPDATE receive */
 	RUN(window_update_connection);
