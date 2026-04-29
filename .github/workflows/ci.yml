@@ -30,7 +30,13 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y clang clang-tidy cppcheck valgrind
+          sudo apt-get install -y clang clang-tidy cppcheck valgrind libtls-dev golang-go
+
+      - name: Install h2spec
+        if: matrix.arch == 'amd64'
+        run: |
+          go install github.com/summerwind/h2spec@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: Build (dev)
         run: make dev
@@ -46,6 +52,35 @@ jobs:
 
       - name: Test (Valgrind)
         run: make valgrind
+
+      - name: Conformance (h2spec)
+        if: matrix.arch == 'amd64'
+        run: |
+          set -eu
+          make h2spec-server
+          ./tests/h2spec_server --port 8443 > h2spec_server.log 2>&1 &
+          H2SPEC_SERVER_PID=$!
+          trap 'kill "$H2SPEC_SERVER_PID" 2>/dev/null || true; wait "$H2SPEC_SERVER_PID" 2>/dev/null || true' EXIT
+          sleep 1
+
+          set +e
+          h2spec -h 127.0.0.1 -p 8443 --tls --insecure | tee h2spec.log
+          H2SPEC_RC=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$H2SPEC_RC" -ne 0 ]; then
+            echo "h2spec returned non-zero exit code: $H2SPEC_RC"
+            exit "$H2SPEC_RC"
+          fi
+
+          # Current expected outcome: no failures and one skipped case.
+          # Skipped case ID: HTTP/2 6.9.2/2
+          #   "Sends a SETTINGS frame for window size to be negative"
+          if ! grep -Eq '[0-9]+ tests, [0-9]+ passed, 1 skipped, 0 failed' h2spec.log; then
+            echo "Unexpected h2spec summary (expected: 0 failed, 1 skipped)."
+            tail -n 50 h2spec.log
+            exit 1
+          fi
 
   # ------------------------------------------------------------------ #
   # OpenBSD amd64                                                       #
