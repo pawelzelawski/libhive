@@ -2,9 +2,9 @@
 
 ## Status Overview
 
-**Last Updated**: 2026-04-28
+**Last Updated**: 2026-04-29
 **Current Phase**: Phase 9 — Conformance and Polish
-**Next Task**: 9.1 — h2spec test server
+**Next Task**: 9.2 — h2spec run and fix
 
 ### Phase Summary
 
@@ -1383,7 +1383,7 @@ for embedder use.
 
 ### Tasks
 
-**9.1 — h2spec test server (`tests/h2spec_server.c`)**
+**9.1 — h2spec test server (`tests/h2spec_server.c`)** ✓ DONE
 - Minimal HTTP/2 server built on `libhive.a` using libtls for TLS
 - Handles all h2spec test scenarios: responds with 200 to all valid
   requests, handles RST_STREAM, GOAWAY, PING, SETTINGS exchanges correctly
