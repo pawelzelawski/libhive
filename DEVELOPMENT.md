@@ -3,8 +3,8 @@
 ## Status Overview
 
 **Last Updated**: 2026-04-29
-**Current Phase**: Phase 9 - Conformance and Polish
-**Next Task**: 9.4 - README.md
+**Current Phase**: Phase 9 - Conformance and Polish (DONE)
+**Next Task**: Release workflow (dev -> main, tag v1.0.0, push)
 
 ### Phase Summary
 
@@ -18,7 +18,7 @@
 | 6 | Submit and Send | DONE | All Phase 6 tests pass (Linux + OpenBSD) | Full send queue, partial-send, response/request submit, new callbacks |
 | 7 | Security Hardening | DONE | All Phase 7 tests pass (Linux + OpenBSD) | Completion criteria confirmed 2026-04-26; flood protection, exhaustion, HTTP messaging validation, buffer lifetime |
 | 8 | h2c and Server Push | DONE | All Phase 8 tests pass (Linux + OpenBSD) | Tasks 8.1-8.5 complete; client role request-response receive path confirmed; Linux valgrind/tsan/lint/format gates green |
-| 9 | Conformance and Polish | IN PROGRESS | h2spec full suite: 0 failed (1 skipped) on Linux | Tasks 9.1-9.3 done; README and API reference pending |
+| 9 | Conformance and Polish | DONE | h2spec full suite: 0 failed (1 skipped) on Linux | Tasks 9.1-9.6 done; completion criteria confirmed 2026-04-29 |
 
 ### Quality Milestones
 
@@ -29,13 +29,13 @@
 | M3 | All unit tests pass on OpenBSD | DONE |
 | M4 | Valgrind clean on Linux | DONE |
 | M5 | ASan/UBSan clean on both platforms | DONE |
-| M6 | clang-format clean | NOT STARTED |
-| M7 | clang-tidy clean | NOT STARTED |
+| M6 | clang-format clean | DONE |
+| M7 | clang-tidy clean | DONE |
 | M8 | No direct malloc/free calls in src/ except the NULL-allocator shim | DONE |
 | M9 | Full HPACK test suite passes (encode-decode round-trip) | DONE |
 | M10 | Frame state machine handles split delivery (1 byte at a time) | DONE |
 | M11 | h2spec full suite passes - zero failures | DONE |
-| M12 | Wraith integration: HTTP/2 GET over TLS with arena allocator | NOT STARTED |
+| M12 | Wraith integration: HTTP/2 GET over TLS with arena allocator | DONE |
 
 ---
 
@@ -1407,7 +1407,7 @@ for embedder use.
   no dependency on `hive_session_t`, HPACK, stream table, or allocator
 - `make tools` builds the binary
 
-**9.4 - README.md**
+**9.4 - README.md** ✓ DONE
 - Written for an embedder coming to the project cold
 - Contents: one-paragraph description, requirements (libc only), how to
   build (`make && make install`), minimal integration example (server role:
@@ -1415,7 +1415,7 @@ for embedder use.
   limitations, link to ARCHITECTURE.md for full design
 - The integration example must compile and run correctly
 
-**9.5 - API reference comments in `include/hive.h`**
+**9.5 - API reference comments in `include/hive.h`** ✓ DONE
 - All public functions have complete doc comments per CODING_STANDARDS.md §5.1:
   what it does, parameters, return values, lifetime constraints
 - Review every comment against the final implementation - update any that
@@ -1425,7 +1425,7 @@ for embedder use.
   - `hive_submit_goaway_prepare()` and `hive_submit_goaway_final()` documented
   - `HIVE_OK` vs `HIVE_H2_NO_ERROR` distinction noted
 
-**9.6 - Final quality pass**
+**9.6 - Final quality pass** ✓ DONE
 - `make lint` → zero clang-tidy and cppcheck warnings
 - `make test` → all tests pass
 - `make valgrind` → clean on Linux
@@ -1435,15 +1435,20 @@ for embedder use.
 - Update all status cells in phase summary table
 - Update all quality milestone statuses
 
+Verification status (2026-04-29):
+- Linux: `make lint` pass, `make test` pass (201/201), `make valgrind` clean,
+  README example compile+run verified against `build/rel/libhive.a`
+- OpenBSD: `make clean && make dev && make test` pass (201/201)
+
 ### Phase 9 Completion Criteria
 
 - [x] h2spec: zero failures - quality milestone M11 confirmed
 - [x] `tools/hive_decode` decodes a captured HTTP/2 stream correctly;
       builds standalone from `hive_frame_bare.c` only
-- [ ] README integration example compiles and runs
-- [ ] All quality milestones M1–M12 confirmed
-- [ ] `make lint` zero warnings
-- [ ] All phase status cells updated to DONE
+- [x] README integration example compiles and runs
+- [x] All quality milestones M1–M12 confirmed
+- [x] `make lint` zero warnings
+- [x] All phase status cells updated to DONE
 
 ---
 

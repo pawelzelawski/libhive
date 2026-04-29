@@ -90,11 +90,32 @@ typedef struct hive_mem {
 } hive_mem_t;
 
 /*
- * Data source for submit functions. The read_callback is called repeatedly
- * to drain body data into the send queue. See ARCHITECTURE.md §6.5.
+ * Data source for submit functions.
+ *
+ * read_callback is invoked by hive_session_send() to produce DATA payload
+ * bytes. The callback may either write into *buf (copy path) or set
+ * HIVE_DATA_FLAG_NO_COPY and redirect *buf to caller-owned memory.
+ * See ARCHITECTURE.md §6.5 and §9.4.
  */
 typedef struct hive_data_source hive_data_source_t;
 
+/*
+ * read_callback signature used by hive_data_source_t.
+ *
+ * session:   active session invoking the callback.
+ * stream_id: stream being drained.
+ * buf:       in/out payload pointer; redirect when returning NO_COPY.
+ * length:    max bytes requested for this invocation.
+ * data_flags:
+ *   - set HIVE_DATA_FLAG_EOF on last chunk
+ *   - set HIVE_DATA_FLAG_NO_COPY when *buf points to caller memory
+ * source:    owning data source object.
+ * user_data: session user_data pointer.
+ *
+ * Return value:
+ *   - >= 0 bytes produced (0 allowed)
+ *   - < 0 on callback failure
+ */
 typedef ssize_t (*hive_read_callback_t)(hive_session_t *session,
                                         uint32_t stream_id,
                                         uint8_t **buf,
@@ -189,7 +210,8 @@ typedef struct hive_settings {
  *   - return 0 to continue processing
  *   - return non-zero to abort the current operation and propagate an error
  *
- * See ARCHITECTURE.md §9.6.
+ * on_goaway debug_data and on_data_chunk data pointers are transient and valid
+ * only for the duration of their callback. See ARCHITECTURE.md §9.6.
  */
 typedef struct hive_callbacks {
 	/*
@@ -316,42 +338,117 @@ typedef struct hive_callbacks {
 /* Options API                                                         */
 /* ------------------------------------------------------------------ */
 
-/* Allocate an options object initialised with library defaults. */
+/*
+ * Allocate an options object initialised with library defaults.
+ *
+ * Returns:
+ *   - non-NULL options object on success
+ *   - NULL on allocation failure
+ *
+ * Lifetime: free with hive_options_free().
+ */
 hive_options_t *hive_options_new(void);
-/* Free an options object allocated by hive_options_new(). */
+/*
+ * Free an options object allocated by hive_options_new().
+ *
+ * opt: options object or NULL.
+ */
 void hive_options_free(hive_options_t *opt);
 
-/* Set local SETTINGS_HEADER_TABLE_SIZE advertised to peer. */
+/*
+ * Set local SETTINGS_HEADER_TABLE_SIZE advertised to peer.
+ *
+ * opt: options object from hive_options_new().
+ * v:   value to advertise in outbound SETTINGS.
+ *
+ * Returns HIVE_OK on success, HIVE_ERR_INVALID_ARG on invalid opt/range.
+ */
 int hive_options_set_header_table_size(hive_options_t *opt, uint32_t v);
-/* Set local SETTINGS_ENABLE_PUSH advertised to peer. */
+/*
+ * Set local SETTINGS_ENABLE_PUSH advertised to peer.
+ *
+ * Returns HIVE_OK or HIVE_ERR_INVALID_ARG.
+ */
 int hive_options_set_enable_push(hive_options_t *opt, uint32_t v);
-/* Set local SETTINGS_MAX_CONCURRENT_STREAMS advertised to peer. */
+/*
+ * Set local SETTINGS_MAX_CONCURRENT_STREAMS advertised to peer.
+ *
+ * Returns HIVE_OK or HIVE_ERR_INVALID_ARG.
+ */
 int hive_options_set_max_concurrent_streams(hive_options_t *opt, uint32_t v);
-/* Set local SETTINGS_INITIAL_WINDOW_SIZE advertised to peer. */
+/*
+ * Set local SETTINGS_INITIAL_WINDOW_SIZE advertised to peer.
+ *
+ * Returns HIVE_OK or HIVE_ERR_INVALID_ARG.
+ */
 int hive_options_set_initial_window_size(hive_options_t *opt, uint32_t v);
-/* Set local SETTINGS_MAX_FRAME_SIZE advertised to peer. */
+/*
+ * Set local SETTINGS_MAX_FRAME_SIZE advertised to peer.
+ *
+ * Returns HIVE_OK or HIVE_ERR_INVALID_ARG.
+ */
 int hive_options_set_max_frame_size(hive_options_t *opt, uint32_t v);
-/* Set local SETTINGS_MAX_HEADER_LIST_SIZE advertised to peer. */
+/*
+ * Set local SETTINGS_MAX_HEADER_LIST_SIZE advertised to peer.
+ *
+ * Returns HIVE_OK or HIVE_ERR_INVALID_ARG.
+ */
 int hive_options_set_max_header_list_size(hive_options_t *opt, uint32_t v);
-/* Set max decoded header count per block before protocol rejection. */
+/*
+ * Set max decoded header count per block before protocol rejection.
+ *
+ * Returns HIVE_OK or HIVE_ERR_INVALID_ARG.
+ */
 int hive_options_set_max_header_count(hive_options_t *opt, uint32_t v);
-/* Set max total CONTINUATION bytes accepted for one header block. */
+/*
+ * Set max total CONTINUATION bytes accepted for one header block.
+ *
+ * Returns HIVE_OK or HIVE_ERR_INVALID_ARG.
+ */
 int hive_options_set_max_continuation_size(hive_options_t *opt, uint32_t v);
-/* Set max inbound SETTINGS frames pending local ACK. */
+/*
+ * Set max inbound SETTINGS frames pending local ACK.
+ *
+ * Returns HIVE_OK or HIVE_ERR_INVALID_ARG.
+ */
 int hive_options_set_max_settings_pending(hive_options_t *opt, uint32_t v);
-/* Set per-window RST_STREAM flood threshold for advisory callback. */
+/*
+ * Set per-window RST_STREAM flood threshold for advisory callback.
+ *
+ * Returns HIVE_OK or HIVE_ERR_INVALID_ARG.
+ */
 int hive_options_set_rst_stream_flood_threshold(hive_options_t *opt,
                                                 uint32_t v);
-/* Set RST_STREAM flood accounting window in seconds. */
+/*
+ * Set RST_STREAM flood accounting window in seconds.
+ *
+ * Returns HIVE_OK or HIVE_ERR_INVALID_ARG.
+ */
 int hive_options_set_rst_stream_flood_window_secs(hive_options_t *opt,
                                                   uint32_t v);
-/* Set maximum iovec entries queued for one send operation. */
+/*
+ * Set maximum iovec entries queued for one send operation.
+ *
+ * Returns HIVE_OK or HIVE_ERR_INVALID_ARG.
+ */
 int hive_options_set_max_send_iov(hive_options_t *opt, uint32_t v);
-/* Set maximum decoded header string length accepted by HPACK decode. */
+/*
+ * Set maximum decoded header string length accepted by HPACK decode.
+ *
+ * Returns HIVE_OK or HIVE_ERR_INVALID_ARG.
+ */
 int hive_options_set_max_header_string_size(hive_options_t *opt, uint32_t v);
-/* Disable HTTP messaging validation rules when set to non-zero. */
+/*
+ * Disable HTTP messaging validation rules when set to non-zero.
+ *
+ * Returns HIVE_OK or HIVE_ERR_INVALID_ARG.
+ */
 int hive_options_set_no_http_messaging(hive_options_t *opt, uint32_t v);
-/* Disable automatic PING ACK queuing when set to non-zero. */
+/*
+ * Disable automatic PING ACK queuing when set to non-zero.
+ *
+ * Returns HIVE_OK or HIVE_ERR_INVALID_ARG.
+ */
 int hive_options_set_no_auto_ping_ack(hive_options_t *opt, uint32_t v);
 
 /* ------------------------------------------------------------------ */
@@ -364,7 +461,7 @@ int hive_options_set_no_auto_ping_ack(hive_options_t *opt, uint32_t v);
  * Params:
  *   - mem: allocator callbacks or NULL for system allocator
  *   - opt: options object or NULL for defaults
- *   - callbacks: callback table or NULL
+ *   - callbacks: callback table (must be non-NULL, callbacks->send required)
  *   - user_data: opaque pointer passed to callbacks
  * Returns:
  *   - non-NULL session on success
@@ -381,7 +478,7 @@ hive_session_t *hive_session_server_new(const hive_mem_t *mem,
  * Params:
  *   - mem: allocator callbacks or NULL for system allocator
  *   - opt: options object or NULL for defaults
- *   - callbacks: callback table or NULL
+ *   - callbacks: callback table (must be non-NULL, callbacks->send required)
  *   - user_data: opaque pointer passed to callbacks
  * Returns:
  *   - non-NULL session on success
@@ -406,7 +503,11 @@ hive_session_t *hive_session_server_upgrade(const hive_mem_t *mem,
                                             const uint8_t *settings_payload,
                                             size_t settings_len);
 
-/* Free a session and all resources owned by it. */
+/*
+ * Free a session and all resources owned by it.
+ *
+ * session: session from hive_session_*_new(), or NULL.
+ */
 void hive_session_free(hive_session_t *session);
 
 /* ------------------------------------------------------------------ */
@@ -415,20 +516,40 @@ void hive_session_free(hive_session_t *session);
 
 /*
  * Feed received wire bytes into the session receive state machine.
- * Returns number of bytes consumed, or -1 on fatal error.
+ *
+ * session: target session.
+ * data:    input bytes from transport read path.
+ * len:     number of bytes in data.
+ *
+ * Returns:
+ *   - >= 0: number of bytes consumed from data
+ *   - -1: fatal receive-path failure
  */
 ssize_t
 hive_session_recv(hive_session_t *session, const uint8_t *data, size_t len);
 
 /*
  * Drain queued outbound frames through callbacks.send.
+ *
+ * Calls callbacks.send() at most once per invocation, using a batched iovec.
+ * Partial writes are normal: callbacks.send() returns bytes written and
+ * hive_session_send() retains the unsent tail for the next call.
+ *
  * Returns HIVE_OK on success or a negative HIVE_ERR_* code on failure.
  */
 int hive_session_send(hive_session_t *session);
 
-/* Advisory read-interest flag (0 or 1). */
+/*
+ * Advisory read-interest flag.
+ *
+ * Returns 1 when caller should continue reading, 0 otherwise.
+ */
 int hive_session_want_read(hive_session_t *session);
-/* Advisory write-interest flag (0 or 1). */
+/*
+ * Advisory write-interest flag.
+ *
+ * Returns 1 when queued/partial/pending data exists for send path, 0 otherwise.
+ */
 int hive_session_want_write(hive_session_t *session);
 
 /* ------------------------------------------------------------------ */
@@ -437,6 +558,12 @@ int hive_session_want_write(hive_session_t *session);
 
 /*
  * Queue a final response HEADERS block and optional DATA source for stream.
+ *
+ * session:     server or client session.
+ * stream_id:   target stream.
+ * nva/nvlen:   response headers.
+ * data_source: optional body source; NULL means headers-only response.
+ *
  * Returns HIVE_OK or a negative HIVE_ERR_* code.
  */
 int hive_submit_response(hive_session_t *session,
@@ -445,33 +572,57 @@ int hive_submit_response(hive_session_t *session,
                          size_t nvlen,
                          hive_data_source_t *data_source);
 
-/* Queue trailing headers with END_STREAM for stream_id. */
+/*
+ * Queue trailing headers with END_STREAM for stream_id.
+ *
+ * nva must not include pseudo-headers.
+ * Returns HIVE_OK or a negative HIVE_ERR_* code.
+ */
 int hive_submit_trailers(hive_session_t *session,
                          uint32_t stream_id,
                          const hive_nv_t *nva,
                          size_t nvlen);
 
-/* Queue informational (1xx) response headers for stream_id. */
+/*
+ * Queue informational (1xx) response headers for stream_id.
+ *
+ * Returns HIVE_OK or a negative HIVE_ERR_* code.
+ */
 int hive_submit_interim_response(hive_session_t *session,
                                  uint32_t stream_id,
                                  const hive_nv_t *nva,
                                  size_t nvlen);
 
-/* Queue PUSH_PROMISE and return promised stream ID in output pointer. */
+/*
+ * Queue PUSH_PROMISE and reserve the promised stream.
+ *
+ * promised_stream_id_out receives the allocated stream id on success.
+ * Returns HIVE_OK or a negative HIVE_ERR_* code.
+ */
 int hive_submit_push_promise(hive_session_t *session,
                              uint32_t stream_id,
                              const hive_nv_t *nva,
                              size_t nvlen,
                              uint32_t *promised_stream_id_out);
 
-/* Queue a client request and return allocated stream ID in output pointer. */
+/*
+ * Queue a client request and allocate a new client-initiated stream id.
+ *
+ * stream_id_out receives the allocated stream id on success.
+ * Returns HIVE_OK or a negative HIVE_ERR_* code.
+ */
 int hive_submit_request(hive_session_t *session,
                         const hive_nv_t *nva,
                         size_t nvlen,
                         hive_data_source_t *data_source,
                         uint32_t *stream_id_out);
 
-/* Queue RST_STREAM for stream_id using HTTP/2 wire error code. */
+/*
+ * Queue RST_STREAM for stream_id using HTTP/2 wire error code.
+ *
+ * error_code must be from HIVE_H2_* wire codes.
+ * Returns HIVE_OK or a negative HIVE_ERR_* code.
+ */
 int hive_submit_rst_stream(hive_session_t *session,
                            uint32_t stream_id,
                            uint32_t error_code);
@@ -479,13 +630,17 @@ int hive_submit_rst_stream(hive_session_t *session,
 /*
  * Queue first-phase GOAWAY with last_stream_id=0x7fffffff to stop new work
  * while allowing in-flight streams to complete.
+ *
+ * This does not close the session.
  * Returns HIVE_OK or negative HIVE_ERR_*.
  */
 int hive_submit_goaway_prepare(hive_session_t *session);
 
 /*
  * Queue final GOAWAY with provided HTTP/2 wire error code and optional
- * debug bytes, transitioning to final shutdown state.
+ * debug bytes, transitioning to GOAWAY_SENT state.
+ *
+ * error_code is an HTTP/2 wire code (HIVE_H2_*), not a HIVE_ERR_* code.
  * Returns HIVE_OK or negative HIVE_ERR_*.
  */
 int hive_submit_goaway_final(hive_session_t *session,
@@ -493,12 +648,23 @@ int hive_submit_goaway_final(hive_session_t *session,
                              const uint8_t *debug_data,
                              size_t debug_len);
 
-/* Queue PING (ACK=0) with 8 opaque bytes. */
+/*
+ * Queue PING (ACK=0) with 8 opaque bytes.
+ * Returns HIVE_OK or a negative HIVE_ERR_* code.
+ */
 int hive_submit_ping(hive_session_t *session, const uint8_t opaque[8]);
-/* Queue PING ACK (ACK=1) with 8 opaque bytes. */
+/*
+ * Queue PING ACK (ACK=1) with 8 opaque bytes.
+ * Returns HIVE_OK or a negative HIVE_ERR_* code.
+ */
 int hive_submit_ping_ack(hive_session_t *session, const uint8_t opaque[8]);
 
-/* Inject HTTP/1.1-upgrade request headers into stream 1 callback flow. */
+/*
+ * Inject HTTP/1.1-upgrade request headers into stream 1 callback flow.
+ *
+ * Used with sessions created by hive_session_server_upgrade().
+ * Returns HIVE_OK or a negative HIVE_ERR_* code.
+ */
 int hive_session_feed_upgrade_headers(hive_session_t *session,
                                       const hive_nv_t *nva,
                                       size_t nvlen,
@@ -514,26 +680,54 @@ int hive_session_feed_upgrade_headers(hive_session_t *session,
  * Returns HIVE_OK or a negative HIVE_ERR_* code.
  */
 int hive_buf_retain(hive_session_t *session, hive_buf_t *buf);
-/* Free an owned buffer previously retained with hive_buf_retain(). */
+/*
+ * Free an owned buffer previously retained with hive_buf_retain().
+ *
+ * Safe to call with non-owned or empty buffers; buffer is reset to empty.
+ */
 void hive_buf_free(hive_session_t *session, hive_buf_t *buf);
 
 /* ------------------------------------------------------------------ */
 /* Introspection                                                       */
 /* ------------------------------------------------------------------ */
 
-/* Return current connection-level remote flow-control window. */
+/*
+ * Return current connection-level remote flow-control window.
+ *
+ * Returns 0 if session is NULL.
+ */
 int32_t hive_session_get_remote_window_size(hive_session_t *session);
-/* Return current local SETTINGS values. */
+/*
+ * Return current local SETTINGS values.
+ *
+ * Returns zeroed settings when session is NULL.
+ */
 hive_settings_t hive_session_get_local_settings(hive_session_t *session);
-/* Return current remote SETTINGS values. */
+/*
+ * Return current remote SETTINGS values.
+ *
+ * Returns zeroed settings when session is NULL.
+ */
 hive_settings_t hive_session_get_remote_settings(hive_session_t *session);
-/* Return stream state enum for stream_id, or HIVE_STREAM_IDLE if absent. */
+/*
+ * Return stream state value for stream_id.
+ *
+ * Returns HIVE_STREAM_IDLE when session/stream is absent.
+ */
 int hive_stream_get_state(hive_session_t *session, uint32_t stream_id);
-/* Attach opaque user pointer to an open stream. */
+/*
+ * Attach opaque user pointer to an open stream.
+ *
+ * Returns HIVE_OK or HIVE_ERR_STREAM_CLOSED.
+ */
 int hive_stream_set_user_data(hive_session_t *session,
                               uint32_t stream_id,
                               void *user_data);
-/* Get stream user pointer, or NULL if stream does not exist. */
+/*
+ * Get stream user pointer.
+ *
+ * Returns NULL if session/stream does not exist.
+ */
 void *hive_stream_get_user_data(hive_session_t *session, uint32_t stream_id);
 
 /* ------------------------------------------------------------------ */
@@ -546,20 +740,35 @@ typedef struct hive_hpack_decoder hive_hpack_decoder_t;
 #define HIVE_HPACK_DECODE_EMIT 1
 #define HIVE_HPACK_DECODE_DONE 2
 
-/* Create a standalone HPACK encoder with max dynamic table size. */
+/*
+ * Create a standalone HPACK encoder with max dynamic table size.
+ *
+ * enc receives a new encoder on success.
+ * Returns HIVE_OK or a negative HIVE_ERR_* code.
+ */
 int hive_hpack_encoder_new(hive_hpack_encoder_t **enc, size_t max_table_size);
-/* Free standalone HPACK encoder. */
+/* Free standalone HPACK encoder (NULL-safe). */
 void hive_hpack_encoder_free(hive_hpack_encoder_t *enc);
-/* Encode `nvlen` header fields from `nva` into `out` with in/out length. */
+/*
+ * Encode nvlen header fields from nva into out.
+ *
+ * out_len is input/output: capacity on entry, bytes written on success.
+ * Returns HIVE_OK or a negative HIVE_ERR_* code.
+ */
 int hive_hpack_encode(hive_hpack_encoder_t *enc,
                       const hive_nv_t *nva,
                       size_t nvlen,
                       uint8_t *out,
                       size_t *out_len);
 
-/* Create a standalone HPACK decoder with max dynamic table size. */
+/*
+ * Create a standalone HPACK decoder with max dynamic table size.
+ *
+ * dec receives a new decoder on success.
+ * Returns HIVE_OK or a negative HIVE_ERR_* code.
+ */
 int hive_hpack_decoder_new(hive_hpack_decoder_t **dec, size_t max_table_size);
-/* Free standalone HPACK decoder. */
+/* Free standalone HPACK decoder (NULL-safe). */
 void hive_hpack_decoder_free(hive_hpack_decoder_t *dec);
 /*
  * Limitations of the standalone API vs the session decode path:
