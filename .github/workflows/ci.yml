@@ -30,13 +30,15 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y clang clang-tidy cppcheck valgrind libtls-dev golang-go
+          sudo apt-get install -y clang clang-tidy cppcheck valgrind libtls-dev
 
       - name: Install h2spec
         if: matrix.arch == 'amd64'
         run: |
-          go install github.com/summerwind/h2spec@latest
-          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          curl -fsSL https://github.com/summerwind/h2spec/releases/latest/download/h2spec_linux_amd64.tar.gz \
+            | tar -xz
+          chmod +x h2spec
+          sudo mv h2spec /usr/local/bin/h2spec
 
       - name: Build (dev)
         run: make dev
