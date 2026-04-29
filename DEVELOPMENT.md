@@ -1398,7 +1398,7 @@ for embedder use.
 - Target: zero failures across all h2spec test groups
 - Verification (Linux): `make h2spec` → 146 tests, 145 passed, 1 skipped, 0 failed
 
-**9.3 — Frame decoder tool (`tools/hive_decode.c`)**
+**9.3 — Frame decoder tool (`tools/hive_decode.c`)** ✓ DONE
 - Implement per TECH_STACK.md §7.8:
   reads raw HTTP/2 bytes from file or stdin;
   pretty-prints each frame: type name, flags, stream ID, length, and known

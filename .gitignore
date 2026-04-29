@@ -5,6 +5,9 @@
 # All intermediate and output build artifacts live under build/.
 build/
 
+# Explicit tool output path (already covered by build/, kept for clarity).
+build/tools/hive_decode
+
 # Top-level library copy (produced by make dev / make release).
 libhive.a
 
@@ -79,4 +82,3 @@ TAGS
 *.rej
 core
 core.*
-
