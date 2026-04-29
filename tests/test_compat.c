@@ -1,9 +1,8 @@
 /*
- * test_compat.c — platform compat layer tests (strlcpy, strlcat)
+ * test_compat.c - platform compat layer tests (strlcpy, strlcat)
  *
  * On Linux: tests the compat_str.c implementations linked from libhive.a.
  * On OpenBSD: tests the libc implementations (same behaviour expected).
- * See DEVELOPMENT.md Phase 1 §1.3.
  */
 
 #include <stddef.h>
@@ -36,7 +35,7 @@ int	test_strlcat_basic(void);
 int	test_strlcat_full_dst(void);
 
 /*
- * test_strlcpy_basic — copies up to dstsize-1 bytes, always NUL-terminates.
+ * test_strlcpy_basic - copies up to dstsize-1 bytes, always NUL-terminates.
  */
 int
 test_strlcpy_basic(void)
@@ -54,7 +53,7 @@ test_strlcpy_basic(void)
 }
 
 /*
- * test_strlcpy_truncation — source longer than dst → truncated,
+ * test_strlcpy_truncation - source longer than dst → truncated,
  * NUL-terminated, returns full source length.
  */
 int
@@ -73,7 +72,7 @@ test_strlcpy_truncation(void)
 }
 
 /*
- * test_strlcpy_empty_src — empty source → dst = "", returns 0.
+ * test_strlcpy_empty_src - empty source → dst = "", returns 0.
  */
 int
 test_strlcpy_empty_src(void)
@@ -90,7 +89,7 @@ test_strlcpy_empty_src(void)
 }
 
 /*
- * test_strlcat_basic — appends src to dst up to remaining space.
+ * test_strlcat_basic - appends src to dst up to remaining space.
  */
 int
 test_strlcat_basic(void)
@@ -107,7 +106,7 @@ test_strlcat_basic(void)
 }
 
 /*
- * test_strlcat_full_dst — dst already full → no write,
+ * test_strlcat_full_dst - dst already full → no write,
  * returns combined length (strlen(dst) + strlen(src)).
  */
 int

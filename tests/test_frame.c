@@ -136,10 +136,10 @@ feed_one_by_one(hive_session_t *s, const uint8_t *buf, size_t len)
  * DATA frame: stream_id=1, length=100 (0x000064), flags=0x01 (END_STREAM).
  *
  * Expected wire bytes (RFC 9113 §4.1):
- *   [0x00, 0x00, 0x64]  — length 100, big-endian 24-bit
- *   [0x00]              — type DATA (0x0)
- *   [0x01]              — flags END_STREAM
- *   [0x00, 0x00, 0x00, 0x01] — stream_id 1, 31-bit big-endian (R=0)
+ *   [0x00, 0x00, 0x64]  - length 100, big-endian 24-bit
+ *   [0x00]              - type DATA (0x0)
+ *   [0x01]              - flags END_STREAM
+ *   [0x00, 0x00, 0x00, 0x01] - stream_id 1, 31-bit big-endian (R=0)
  */
 int
 test_frame_hdr_write_data(void)
@@ -161,10 +161,10 @@ test_frame_hdr_write_data(void)
  * SETTINGS ACK frame: stream_id=0, length=0, flags=0x01 (ACK).
  *
  * Expected wire bytes:
- *   [0x00, 0x00, 0x00]  — length 0
- *   [0x04]              — type SETTINGS (0x4)
- *   [0x01]              — flags ACK
- *   [0x00, 0x00, 0x00, 0x00] — stream_id 0 (connection-level)
+ *   [0x00, 0x00, 0x00]  - length 0
+ *   [0x04]              - type SETTINGS (0x4)
+ *   [0x01]              - flags ACK
+ *   [0x00, 0x00, 0x00, 0x00] - stream_id 0 (connection-level)
  */
 int
 test_frame_hdr_write_settings(void)
@@ -186,10 +186,10 @@ test_frame_hdr_write_settings(void)
  * HEADERS frame: stream_id=3, length=20 (0x000014), flags=END_HEADERS(0x04).
  *
  * Expected wire bytes:
- *   [0x00, 0x00, 0x14]  — length 20
- *   [0x01]              — type HEADERS (0x1)
- *   [0x04]              — flags END_HEADERS
- *   [0x00, 0x00, 0x00, 0x03] — stream_id 3
+ *   [0x00, 0x00, 0x14]  - length 20
+ *   [0x01]              - type HEADERS (0x1)
+ *   [0x04]              - flags END_HEADERS
+ *   [0x00, 0x00, 0x00, 0x03] - stream_id 3
  */
 int
 test_frame_hdr_write_headers(void)
@@ -301,9 +301,9 @@ test_recv_data_full(void)
  * pad-length byte = 6 bytes total payload, PADDED flag set.
  *
  * Wire layout (9-byte header + payload):
- *   [0x02]              — pad_length = 2
- *   [0x61, 0x62, 0x63]  — data bytes "abc"
- *   [0x00, 0x00]        — 2 padding bytes
+ *   [0x02]              - pad_length = 2
+ *   [0x61, 0x62, 0x63]  - data bytes "abc"
+ *   [0x00, 0x00]        - 2 padding bytes
  *
  * on_data_chunk must fire with pointer to the first data byte (frame+10,
  * i.e. one byte past the pad_length field) and length 3.
@@ -359,9 +359,9 @@ test_recv_headers_end_headers(void)
  * HEADERS frame with PRIORITY flag (5-byte prefix) + END_HEADERS.
  *
  * Payload layout (9 bytes total):
- *   [0x00, 0x00, 0x00, 0x05, 0x00] — 5-byte PRIORITY prefix
+ *   [0x00, 0x00, 0x00, 0x05, 0x00] - 5-byte PRIORITY prefix
  *                                     (exclusive=0, dep=5, weight=0)
- *   [0x82, 0x86, 0x84, 0x41]       — 4-byte HPACK-encoded header block
+ *   [0x82, 0x86, 0x84, 0x41]       - 4-byte HPACK-encoded header block
  *
  * The state machine must skip the 5-byte PRIORITY prefix via
  * priority_payload_len and copy only the 4 header-block bytes into

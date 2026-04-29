@@ -1,7 +1,7 @@
 /*
- * hive_frame_bare.h — standalone frame header serialisation and parsing
+ * hive_frame_bare.h - standalone frame header serialisation and parsing
  *
- * Declares frame_hdr_write_at() and frame_hdr_parse() — functions with
+ * Declares frame_hdr_write_at() and frame_hdr_parse() - functions with
  * no dependency on hive_session_t, callbacks, or stream state.  Used by
  * both libhive.a (via hive_frame.c and hive_send.c) and the standalone
  * tools/hive_decode binary.
@@ -10,7 +10,7 @@
  * logic that frame_hdr_write_at() implements.
  * RFC 9113 §4.1: https://www.rfc-editor.org/rfc/rfc9113#section-4.1
  *
- * Not included by embedders — internal to the library only.
+ * Not included by embedders - internal to the library only.
  */
 
 #ifndef HIVE_FRAME_BARE_H
@@ -21,7 +21,7 @@
 #include "hive_frame.h"
 
 /*
- * frame_hdr_write_at — serialise a 9-byte HTTP/2 frame header into dst.
+ * frame_hdr_write_at - serialise a 9-byte HTTP/2 frame header into dst.
  *
  * Wire layout written (RFC 9113 §4.1):
  *   dst[0..2] : 24-bit payload length, big-endian
@@ -44,11 +44,11 @@ void frame_hdr_write_at(uint8_t *dst,
                         uint32_t stream_id);
 
 /*
- * frame_hdr_parse — parse a 9-byte HTTP/2 frame header from src into *out.
+ * frame_hdr_parse - parse a 9-byte HTTP/2 frame header from src into *out.
  *
  * src must point to exactly 9 readable bytes.
  * The reserved R bit in the stream_id field is masked off.
- * No validation is performed — the caller must validate the parsed fields
+ * No validation is performed - the caller must validate the parsed fields
  * (length, type, stream_id parity, etc.) per the receive state machine in
  * ARCHITECTURE.md §3.3.
  */

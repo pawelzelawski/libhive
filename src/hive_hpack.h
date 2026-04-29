@@ -1,5 +1,5 @@
 /*
- * hive_hpack.h — HPACK internal types and declarations
+ * hive_hpack.h - HPACK internal types and declarations
  *
  * Covers the static table (RFC 7541 Appendix A), Huffman decode table
  * (RFC 7541 Appendix B, 256-entry), and Huffman encode table (257 entries).
@@ -7,7 +7,7 @@
  *
  * See ARCHITECTURE.md §4.3 (static table), §4.4 (Huffman decode),
  * §4.8 (Huffman encode) for design rationale.
- * Not included by embedders — internal to the library only.
+ * Not included by embedders - internal to the library only.
  */
 
 #ifndef HIVE_HPACK_H
@@ -55,7 +55,7 @@
 /* ------------------------------------------------------------------ */
 
 /*
- * hpack_entry_t — single contiguous allocation for one dynamic table entry.
+ * hpack_entry_t - single contiguous allocation for one dynamic table entry.
  *
  * Layout:  [ hpack_entry_t (8 bytes) | name bytes | value bytes ]
  *
@@ -104,7 +104,7 @@ typedef struct {
 	uint8_t has_pending;  /* 1 = encoder must emit size update prefix */
 	uint8_t _pad[3];
 
-	/* hash index — NULL when max_size <= HPACK_LINEAR_THRESHOLD */
+	/* hash index - NULL when max_size <= HPACK_LINEAR_THRESHOLD */
 	hpack_hash_slot_t *hash;
 	uint32_t hash_mask;
 } hpack_table_t;
@@ -115,7 +115,7 @@ typedef struct {
 /* ------------------------------------------------------------------ */
 
 /*
- * HPACK_INT_OVERFLOW — sentinel returned by hpack_decode_int() on
+ * HPACK_INT_OVERFLOW - sentinel returned by hpack_decode_int() on
  * truncated input or integer overflow.  UINT32_MAX is not a valid
  * decoded value because all HPACK integer uses are bounded well below
  * that limit (table sizes, indices, string lengths).  Callers must
@@ -128,7 +128,7 @@ typedef struct {
 /* ------------------------------------------------------------------ */
 
 /*
- * hpack_table_init — allocate and initialise a dynamic table.
+ * hpack_table_init - allocate and initialise a dynamic table.
  *
  * Allocates the ring pointer array via mem->calloc.  The hash index is
  * allocated lazily when the table first operates above
@@ -141,7 +141,7 @@ int
 hpack_table_init(hpack_table_t *t, const hive_mem_t *mem, uint32_t max_size);
 
 /*
- * hpack_table_free — free all live entries and the ring array.
+ * hpack_table_free - free all live entries and the ring array.
  *
  * After this call *t is zeroed.  Callers must not use *t again without
  * a fresh call to hpack_table_init().
@@ -149,7 +149,7 @@ hpack_table_init(hpack_table_t *t, const hive_mem_t *mem, uint32_t max_size);
 void hpack_table_free(hpack_table_t *t, const hive_mem_t *mem);
 
 /*
- * hpack_table_evict_to — evict oldest entries until size <= new_max.
+ * hpack_table_evict_to - evict oldest entries until size <= new_max.
  *
  * No-op if size is already within new_max.  Used both by insert (to
  * make room) and by the dynamic table size update path.
@@ -158,7 +158,7 @@ void
 hpack_table_evict_to(hpack_table_t *t, const hive_mem_t *mem, uint32_t new_max);
 
 /*
- * hpack_table_insert — copy and insert a new entry into the table.
+ * hpack_table_insert - copy and insert a new entry into the table.
  *
  * Evicts oldest entries as needed.  If rfc_size > max_size, the entire
  * table is evicted and the entry is NOT inserted (RFC 7541 §4.4).
@@ -178,7 +178,7 @@ int hpack_table_insert(hpack_table_t *t,
                        uint32_t value_len);
 
 /*
- * hpack_table_lookup — dynamic table lookup for name/value.
+ * hpack_table_lookup - dynamic table lookup for name/value.
  *
  * Uses the hash index when active (hash != NULL and
  * max_size > HPACK_LINEAR_THRESHOLD), otherwise scans linearly from
@@ -197,7 +197,7 @@ int hpack_table_lookup(const hpack_table_t *t,
                        uint32_t *out_dyn_idx);
 
 /*
- * hpack_table_get — retrieve entry at 0-based dynamic index from newest.
+ * hpack_table_get - retrieve entry at 0-based dynamic index from newest.
  *
  * 0 = newest, count-1 = oldest.  Caller must ensure dyn_idx < count.
  * Returns a pointer into the allocated entry (do not free directly).
@@ -205,12 +205,12 @@ int hpack_table_lookup(const hpack_table_t *t,
 const hpack_entry_t *hpack_table_get(const hpack_table_t *t, uint32_t dyn_idx);
 
 /* ------------------------------------------------------------------ */
-/* Integer varint encode/decode — Task 3.2                            */
+/* Integer varint encode/decode - Task 3.2                            */
 /* See ARCHITECTURE.md §4.7.                                          */
 /* ------------------------------------------------------------------ */
 
 /*
- * hpack_decode_int — decode an HPACK varint from src[0..len).
+ * hpack_decode_int - decode an HPACK varint from src[0..len).
  *
  * prefix_bits: number of low-order bits in src[0] used for the value
  * (N in RFC 7541 §5.1; 1..8).  The upper (8 - prefix_bits) bits of
@@ -233,7 +233,7 @@ uint32_t hpack_decode_int(const uint8_t *src,
                           size_t *consumed);
 
 /*
- * hpack_encode_int — encode val with an N-bit prefix into out[0..out_cap).
+ * hpack_encode_int - encode val with an N-bit prefix into out[0..out_cap).
  *
  * prefix_top: the upper (8 - prefix_bits) bits to OR into the first
  * byte (e.g., 0x80 for indexed, 0x40 for literal with indexing, 0x20
@@ -253,12 +253,12 @@ size_t hpack_encode_int(uint8_t *out,
                         uint32_t val);
 
 /* ------------------------------------------------------------------ */
-/* String encode/decode — Task 3.3                                     */
+/* String encode/decode - Task 3.3                                     */
 /* See ARCHITECTURE.md §4.6.                                           */
 /* ------------------------------------------------------------------ */
 
 /*
- * hpack_decode_string — decode one HPACK string field.
+ * hpack_decode_string - decode one HPACK string field.
  *
  * src:        points to the first byte of the encoded string (the
  *             byte that carries the Huffman flag and the 7-bit length
@@ -271,7 +271,7 @@ size_t hpack_encode_int(uint8_t *out,
  * out:        filled on success; out->data and out->len are set.
  *             For Huffman strings, out->data points into scratch.
  *             For literal strings, out->data points directly into src
- *             (no copy — pointer into the source buffer).
+ *             (no copy - pointer into the source buffer).
  *             out->flags is set to HIVE_BUF_VALID on success.
  * consumed:   set to the total bytes read from src (header + string).
  *
@@ -287,7 +287,7 @@ int hpack_decode_string(const uint8_t *src,
                         size_t *consumed);
 
 /*
- * hpack_encode_string — encode one string into an HPACK wire block.
+ * hpack_encode_string - encode one string into an HPACK wire block.
  *
  * Huffman-encodes the string when the result is strictly shorter than
  * the literal form; otherwise emits a literal.  Writes the 7-bit length
@@ -297,7 +297,7 @@ int hpack_decode_string(const uint8_t *src,
  * out, out_cap: output buffer.
  *
  * Returns the number of bytes written (>= 1) on success, or 0 if
- * out_cap is insufficient (caller must size the buffer appropriately —
+ * out_cap is insufficient (caller must size the buffer appropriately -
  * worst case: 6 header bytes for a 32-bit length varint + string bytes).
  *
  * See ARCHITECTURE.md §4.8.
@@ -308,12 +308,12 @@ size_t hpack_encode_string(const uint8_t *src,
                            size_t out_cap);
 
 /* ------------------------------------------------------------------ */
-/* Full HPACK block decode — Task 3.4                                 */
+/* Full HPACK block decode - Task 3.4                                 */
 /* See ARCHITECTURE.md §4.5 and §8.2.                                 */
 /* ------------------------------------------------------------------ */
 
 /*
- * hpack_decode_block — decode one complete HPACK header block.
+ * hpack_decode_block - decode one complete HPACK header block.
  *
  * suppress_callbacks:
  *   0 = fire on_begin_headers/on_header/on_headers_complete callbacks.
@@ -333,12 +333,12 @@ int hpack_decode_block(hive_session_t *s,
                        uint32_t error_stream_id);
 
 /* ------------------------------------------------------------------ */
-/* Full HPACK block encode — Task 3.5                                 */
+/* Full HPACK block encode - Task 3.5                                 */
 /* See ARCHITECTURE.md §4.8.                                           */
 /* ------------------------------------------------------------------ */
 
 /*
- * hpack_encode_block — encode one complete header block.
+ * hpack_encode_block - encode one complete header block.
  *
  * table points to the encoder dynamic table (session enc_table or
  * standalone encoder table). mem is used for dynamic table insertions.
@@ -356,13 +356,13 @@ int hpack_encode_block(hpack_table_t *table,
 
 /* ------------------------------------------------------------------ */
 /* Huffman decode table entry.                                         */
-/* 4 bytes per entry — 256 entries = 1 KB total.                      */
+/* 4 bytes per entry - 256 entries = 1 KB total.                      */
 /* See ARCHITECTURE.md §4.4 and CODING_STANDARDS.md §1.3.             */
 /* ------------------------------------------------------------------ */
 
 /*
  * Huffman decode table entry.
- * 4 bytes per entry — 256 entries = 1 KB total.
+ * 4 bytes per entry - 256 entries = 1 KB total.
  * See ARCHITECTURE.md §4.4 and CODING_STANDARDS.md §1.3.
  */
 typedef struct {
@@ -374,7 +374,7 @@ typedef struct {
 
 _Static_assert(
     sizeof(huff_entry_t) == 4,
-    "huff_entry_t size changed — Huffman table is 1KB at 4 bytes per entry");
+    "huff_entry_t size changed - Huffman table is 1KB at 4 bytes per entry");
 
 /*
  * Huffman encode table entry.
@@ -390,12 +390,12 @@ typedef struct {
 #define HPACK_STATIC_TABLE_SIZE 61
 
 /*
- * HPACK static table — 61 entries, indices 1–61.
+ * HPACK static table - 61 entries, indices 1–61.
  * Array index i holds static table index (i + 1).
  *
  * Convention for entries with no default value (e.g. ":authority",
  * "accept-charset", "www-authenticate"): `value == NULL` and
- * `value_len == 0`. Consumers must treat these as "name only — caller
+ * `value_len == 0`. Consumers must treat these as "name only - caller
  * supplies value at encode/lookup time"; do NOT dereference `value`
  * in that case. The static-table tests in tests/test_hpack.c assert
  * this convention for indices 1, 15, 17–61.
@@ -403,7 +403,7 @@ typedef struct {
 extern const hive_nv_t hpack_static_table[HPACK_STATIC_TABLE_SIZE];
 
 /*
- * huff_decode — Huffman decode src into scratch buffer.
+ * huff_decode - Huffman decode src into scratch buffer.
  *
  * src may be NULL when src_len == 0 (zero-length decode succeeds with
  * *out_len == 0). When src_len > 0, src must be non-NULL. scratch and
@@ -423,11 +423,11 @@ int huff_decode(const uint8_t *src,
                 size_t *out_len);
 
 /*
- * huff_encode — Huffman encode src into out buffer.
+ * huff_encode - Huffman encode src into out buffer.
  *
  * Returns HIVE_OK on success, HIVE_ERR_NOMEM if out_cap is insufficient
  * (output-buffer-too-small; the caller must size `out` for the worst
- * case — every input byte expanding to up to 30/8 ≈ 4 output bytes
+ * case - every input byte expanding to up to 30/8 ≈ 4 output bytes
  * worst case for the longest Huffman codes), HIVE_ERR_INVALID_ARG on
  * NULL out/out_len. On success, *out_len is set to the number of bytes
  * written.

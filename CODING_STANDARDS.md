@@ -25,7 +25,7 @@ stream_open(hive_session_t *s, uint32_t stream_id, uint8_t state)
 	return stream_hash_insert(s, stream_id, slot, state);
 }
 
-/* Wrong — spaces used for indentation */
+/* Wrong - spaces used for indentation */
 static int
 stream_open(hive_session_t *s, uint32_t stream_id, uint8_t state)
 {
@@ -155,7 +155,7 @@ static ssize_t hive_session_recv(hive_session_t *session,
 **Public header** (`include/hive.h`):
 
 The public header exposes only what embedders need. Internal types and
-functions are never declared here. The header is self-contained — an
+functions are never declared here. The header is self-contained - an
 embedder includes only `hive.h` and nothing else.
 
 ```c
@@ -163,7 +163,7 @@ embedder includes only `hive.h` and nothing else.
 #define HIVE_H
 
 /*
- * hive.h — HTTP/2 library public API
+ * hive.h - HTTP/2 library public API
  *
  * Create a session with hive_session_server_new() or hive_session_client_new().
  * Feed incoming bytes with hive_session_recv().
@@ -190,7 +190,7 @@ embedder includes only `hive.h` and nothing else.
 #define HIVE_FRAME_H
 
 /*
- * hive_frame.h — frame parser and serialiser (internal)
+ * hive_frame.h - frame parser and serialiser (internal)
  * See ARCHITECTURE.md §3 for the receive state machine.
  * See ARCHITECTURE.md §6 for frame header serialisation.
  */
@@ -206,7 +206,7 @@ embedder includes only `hive.h` and nothing else.
 **Source files** (`.c`):
 ```c
 /*
- * hive_hpack.c — HPACK encoder and decoder
+ * hive_hpack.c - HPACK encoder and decoder
  *
  * See ARCHITECTURE.md §4 for dynamic table design and entry layout.
  * See ARCHITECTURE.md §8.1 for the always-copy security requirement.
@@ -219,10 +219,10 @@ embedder includes only `hive.h` and nothing else.
 #include "hive_hpack.h"
 #include "hive_internal.h"
 
-/* Static table — RFC 7541 Appendix A */
+/* Static table - RFC 7541 Appendix A */
 static const hive_nv_t hpack_static_table[61] = { /* ... */ };
 
-/* Huffman decode table — RFC 7541 Appendix B, 256 entries */
+/* Huffman decode table - RFC 7541 Appendix B, 256 entries */
 static const huff_entry_t huff_table[256] = { /* ... */ };
 ```
 
@@ -254,21 +254,21 @@ static const huff_entry_t huff_table[256] = { /* ... */ };
 ### 1.3 Static Assertions
 
 Use `_Static_assert` to catch layout changes at compile time. These must
-not be removed — they are the first line of defence against silent struct
+not be removed - they are the first line of defence against silent struct
 size changes that would break memory budget calculations and pre-allocation.
 
 ```c
 /* In hive_internal.h */
 _Static_assert(sizeof(hive_stream_t) == 64,
-    "hive_stream_t size changed — update ARCHITECTURE.md §5.3 and §11");
+    "hive_stream_t size changed - update ARCHITECTURE.md §5.3 and §11");
 _Static_assert(sizeof(stream_hash_entry_t) == 8,
-    "stream_hash_entry_t size changed — update ARCHITECTURE.md §5.2");
+    "stream_hash_entry_t size changed - update ARCHITECTURE.md §5.2");
 _Static_assert(sizeof(hpack_entry_t) == 8,
-    "hpack_entry_t size changed — update ARCHITECTURE.md §4.2");
+    "hpack_entry_t size changed - update ARCHITECTURE.md §4.2");
 _Static_assert(sizeof(hive_settings_t) == 24,
-    "hive_settings_t size changed — update ARCHITECTURE.md §2.5");
+    "hive_settings_t size changed - update ARCHITECTURE.md §2.5");
 _Static_assert(sizeof(huff_entry_t) == 4,
-    "huff_entry_t size changed — Huffman table is 1KB at 4 bytes per entry");
+    "huff_entry_t size changed - Huffman table is 1KB at 4 bytes per entry");
 ```
 
 ---
@@ -286,14 +286,14 @@ the library source, except in the NULL-allocator shim.**
 Every allocation must go through the session's allocator interface:
 
 ```c
-/* Correct — allocate via session allocator */
+/* Correct - allocate via session allocator */
 entry = (hpack_entry_t *)s->mem.malloc(
     sizeof(hpack_entry_t) + name_len + value_len,
     s->mem.ctx);
 if (entry == NULL)
 	return HIVE_ERR_NOMEM;
 
-/* Wrong — direct malloc */
+/* Wrong - direct malloc */
 entry = malloc(sizeof(hpack_entry_t) + name_len + value_len);
 ```
 
@@ -302,7 +302,7 @@ one place `malloc` appears by name in the library is in `hive.c`, in the
 shim that wraps system malloc when the caller passes NULL:
 
 ```c
-/* hive.c — NULL allocator shim.
+/* hive.c - NULL allocator shim.
  * This is the ONLY permitted direct use of malloc/free/calloc/realloc
  * in the library source. All other src/ files use s->mem.* exclusively. */
 static void *
@@ -346,26 +346,26 @@ of what allocator the caller provided.
 All structural per-session memory is pre-allocated at session creation.
 The pre-allocated blocks are:
 
-- `stream_hash` — stream lookup hash table entries
-- `stream_slots` — stream state objects
-- `stream_free_stack` — free slot index array
-- `send_iov` — iovec array
-- `send_buf` — frame serialisation buffer
-- `reassembly_buf` — HEADERS+CONTINUATION reassembly
-- `hpack_scratch_name` — Huffman decode scratch for header names
-- `hpack_scratch_value` — Huffman decode scratch for header values
-- `enc_table.ring` — encoder ring buffer pointer array
-- `dec_table.ring` — decoder ring buffer pointer array
-- `pending_settings` — outbound SETTINGS pending ring
+- `stream_hash` - stream lookup hash table entries
+- `stream_slots` - stream state objects
+- `stream_free_stack` - free slot index array
+- `send_iov` - iovec array
+- `send_buf` - frame serialisation buffer
+- `reassembly_buf` - HEADERS+CONTINUATION reassembly
+- `hpack_scratch_name` - Huffman decode scratch for header names
+- `hpack_scratch_value` - Huffman decode scratch for header values
+- `enc_table.ring` - encoder ring buffer pointer array
+- `dec_table.ring` - decoder ring buffer pointer array
+- `pending_settings` - outbound SETTINGS pending ring
 
 Two additional allocation categories occur during normal protocol operation
 after session creation:
 
-1. **HPACK dynamic table entries** — one `mem.malloc` per header inserted
+1. **HPACK dynamic table entries** - one `mem.malloc` per header inserted
    into the dynamic table, one `mem.free` per eviction. With an arena
    allocator, free is a no-op and insertions are free-list pops.
 
-2. **`hive_buf_retain()` calls** — one `mem.malloc` per retained header
+2. **`hive_buf_retain()` calls** - one `mem.malloc` per retained header
    value, freed explicitly by the caller via `hive_buf_free()`.
 
 Both go through the session allocator. Both are expected. Neither violates
@@ -441,7 +441,7 @@ Rules:
   (what we advertised to the peer) before transitioning to any payload state.
   Do **not** use `remote_settings.max_frame_size` for inbound validation.
   See ARCHITECTURE.md §2.5 for the SETTINGS directionality rules.
-- `remote_settings.max_frame_size` governs outbound frame sizing — the
+- `remote_settings.max_frame_size` governs outbound frame sizing - the
   maximum size of frames we send, which the peer told us it can accept.
 - Validate `stream_id` rules (parity, monotonicity, zero-vs-nonzero) before
   creating or looking up stream state. See ARCHITECTURE.md §3.4.
@@ -461,7 +461,7 @@ on its own line before the guarded code.
 ```c
 /*
  * SECURITY: enforce reassembly cap before writing into reassembly_buf.
- * Connection error (GOAWAY) per RFC 9113 §4.3 — NOT a stream error.
+ * Connection error (GOAWAY) per RFC 9113 §4.3 - NOT a stream error.
  * Changing this to RST_STREAM would leave the connection vulnerable.
  * Do not remove or defer this check. See ARCHITECTURE.md §8.3.
  */
@@ -471,11 +471,11 @@ if (s->reassembly_len + n > s->opt_max_continuation_size)
 
 /*
  * SECURITY: enforce HPACK bomb limit incrementally.
- * Stream error (RST_STREAM) — session continues after this.
+ * Stream error (RST_STREAM) - session continues after this.
  * Checked after each header, before on_header fires.
  * Size per RFC 7541 §4.1: name_len + value_len + 32 per entry.
  * Do NOT return early here. Set stream_error_pending and continue
- * decoding to the end of the block — aborting mid-block desynchronizes
+ * decoding to the end of the block - aborting mid-block desynchronizes
  * the dynamic table (RFC 7541 §2.3.2), corrupting all subsequent HPACK
  * on this connection. RST_STREAM is sent after the full block is consumed.
  * See ARCHITECTURE.md §4.5 and §8.2.
@@ -512,7 +512,7 @@ for overflow before arithmetic on values from network input.
 uint8_t  frame_type;
 uint32_t stream_id;
 uint32_t payload_length;   /* 24-bit on wire, promoted to uint32_t */
-int32_t  send_window;      /* signed — window can temporarily go negative */
+int32_t  send_window;      /* signed - window can temporarily go negative */
 
 /* Big-endian conversion is mandatory for all multi-byte wire fields */
 
@@ -534,13 +534,13 @@ stream->send_window += (int32_t)increment;
 
 Never read a multi-byte integer from a wire buffer without byte-order
 conversion. Use `memcpy` to move bytes into a local variable before
-conversion — never dereference an unaligned pointer from the wire buffer.
+conversion - never dereference an unaligned pointer from the wire buffer.
 
 ### 3.4 Memory Safety
 
 **No unsafe string functions**:
 ```c
-/* BANNED — never use these */
+/* BANNED - never use these */
 strcpy(dst, src);         /* use strlcpy */
 strcat(dst, src);         /* use strlcat */
 sprintf(buf, fmt, ...);   /* use snprintf */
@@ -556,7 +556,7 @@ if (n < 0 || (size_t)n >= sizeof(buf))
 	return HIVE_ERR_INVALID_ARG;   /* truncation is an error */
 ```
 
-**Null pointer on every allocator call** — see §2.4.
+**Null pointer on every allocator call** - see §2.4.
 
 **NULL after free**:
 ```c
@@ -564,7 +564,7 @@ s->mem.free(entry, s->mem.ctx);
 entry = NULL;   /* prevent accidental use-after-free */
 ```
 
-**Bounds before memcpy** — never copy from a network buffer without
+**Bounds before memcpy** - never copy from a network buffer without
 verifying that `offset + n ≤ buffer_len` first:
 ```c
 if (offset + name_len > buf_len)
@@ -578,7 +578,7 @@ offset += name_len;
 The `hive_buf_t` lifetime contract is enforced at two levels: contractual
 in all builds, and mechanically in `HIVE_DEBUG` builds via ASan.
 
-**`on_header` receives `hive_buf_t *` — handles passed by pointer**:
+**`on_header` receives `hive_buf_t *` - handles passed by pointer**:
 
 ```c
 int (*on_header)(hive_session_t *session,
@@ -595,7 +595,7 @@ to those objects. After the callback returns, the library clears
 /*
  * SECURITY: invalidate hive_buf_t handles on callback return.
  * Operates on the library's own objects via the pointers passed to the
- * callback — not on copies. Any stale pointer the callback retained now
+ * callback - not on copies. Any stale pointer the callback retained now
  * dereferences an invalidated handle (HIVE_BUF_VALID cleared).
  * In HIVE_DEBUG builds, the underlying data is also ASan-poisoned.
  * See ARCHITECTURE.md §8.8.
@@ -608,7 +608,7 @@ HIVE_ASAN_POISON(value->data, value->len);  /* only for non-indexed data */
 
 **Why by-pointer matters**: if `on_header` took `hive_buf_t name,
 hive_buf_t value` (by value), the callback would hold its own copies of the
-structs — clearing the library's local copy after the call would have no
+structs - clearing the library's local copy after the call would have no
 effect on the caller's copies. By passing pointers to library-owned objects,
 flag invalidation is effective. This is a fundamental design constraint; do
 not change the callback signature to pass by value.
@@ -616,19 +616,19 @@ not change the callback signature to pass by value.
 **What the callback may and may not do**:
 
 ```c
-/* Correct — read within the callback */
+/* Correct - read within the callback */
 static int
 my_on_header(hive_session_t *s, uint32_t sid,
     hive_buf_t *name, hive_buf_t *value, uint8_t flags, void *ud)
 {
-	/* Read directly — valid within callback */
+	/* Read directly - valid within callback */
 	if (name->len == 5 && memcmp(name->data, ":path", 5) == 0) {
 		/* process path... */
 	}
 	return HIVE_OK;
 }
 
-/* Correct — retain for use beyond the callback */
+/* Correct - retain for use beyond the callback */
 static int
 my_on_header(hive_session_t *s, uint32_t sid,
     hive_buf_t *name, hive_buf_t *value, uint8_t flags, void *ud)
@@ -638,18 +638,18 @@ my_on_header(hive_session_t *s, uint32_t sid,
 		/* hive_buf_retain() copies data to arena memory */
 		if (hive_buf_retain(s, value) != HIVE_OK)
 			return HIVE_ERR_NOMEM;
-		req->path_buf = *value;   /* copy the struct — now HIVE_BUF_OWNED */
+		req->path_buf = *value;   /* copy the struct - now HIVE_BUF_OWNED */
 	}
 	return HIVE_OK;
 }
 
-/* WRONG — storing raw data pointer without retaining */
+/* WRONG - storing raw data pointer without retaining */
 static int
 my_on_header(hive_session_t *s, uint32_t sid,
     hive_buf_t *name, hive_buf_t *value, uint8_t flags, void *ud)
 {
 	my_request_t *req = (my_request_t *)ud;
-	req->path = value->data;   /* WRONG — dangling pointer after callback */
+	req->path = value->data;   /* WRONG - dangling pointer after callback */
 	return HIVE_OK;
 }
 ```
@@ -663,7 +663,7 @@ stale pointer after callback return produces an immediate ASan
 `heap-use-after-poison` abort.
 
 For indexed headers (pointers into the static table or live dynamic table
-entries), the data must **not** be poisoned — those regions are reused
+entries), the data must **not** be poisoned - those regions are reused
 across many callbacks. The `HIVE_BUF_VALID` flag clearing is sufficient
 enforcement for indexed data.
 
@@ -715,7 +715,7 @@ cleanup:
 
 This pattern is mandatory for session creation. If any pre-allocation fails,
 all previously allocated sub-buffers are freed before returning NULL to the
-caller — no partial initialisation is leaked.
+caller - no partial initialisation is leaked.
 
 ---
 
@@ -795,10 +795,10 @@ stream_error(hive_session_t *s, uint32_t stream_id,
 
 RFC 9113 §5.4 determines which errors are connection errors and which are
 stream errors. When in doubt, the RFC takes precedence. Do not promote
-stream errors to connection errors — that terminates the entire connection
+stream errors to connection errors - that terminates the entire connection
 unnecessarily and will cause h2spec conformance failures.
 
-**Classification table** — errors that are commonly misclassified:
+**Classification table** - errors that are commonly misclassified:
 
 | Condition | Error class | Reason |
 |---|---|---|
@@ -820,12 +820,12 @@ programmer errors (invariants that must hold given correct internal logic),
 not for protocol violations from peers.
 
 ```c
-/* Correct — internal invariant: programmer error if violated */
+/* Correct - internal invariant: programmer error if violated */
 if (s->frame_hdr_count > 9) {
 	assert(0 && "frame_hdr_count > 9: impossible internal state");
 }
 
-/* Correct — protocol violation from peer: error return, not assert */
+/* Correct - protocol violation from peer: error return, not assert */
 if (stream_id == 0 && frame_type == HIVE_FRAME_DATA) {
 	/* DATA on stream 0 is invalid per RFC 9113 §6.1 */
 	return session_error(s, HIVE_ERR_PROTOCOL,
@@ -862,7 +862,7 @@ function name is entirely self-explanatory.
  * Returns HIVE_ERR_COMPRESSION on fatal HPACK error (GOAWAY sent).
  * Returns HIVE_ERR_PROTOCOL if bomb limit exceeded (RST_STREAM sent).
  *
- * Not thread-safe — called only within hive_session_recv().
+ * Not thread-safe - called only within hive_session_recv().
  */
 static int
 hpack_decode_block(hive_session_t *s, const uint8_t *data, size_t len)
@@ -875,7 +875,7 @@ section of ARCHITECTURE.md and the RFC.
 
 ```c
 /*
- * CONTINUATION frame lockout — connection error per RFC 9113 §4.3.
+ * CONTINUATION frame lockout - connection error per RFC 9113 §4.3.
  * Uses reassembly_active, not reassembly_len, to correctly handle
  * zero-length HEADERS blocks. See ARCHITECTURE.md §3.5.
  */
@@ -913,11 +913,11 @@ See §3.2 for the `/* SECURITY: ... */` comment convention. Every security
 check in the protocol path must have one. These comments must not be removed
 without understanding why the check exists and verifying the RFC permits it.
 
-### 5.4 TODO and FIXME
+### 5.4 Deferred-Work Comment Markers
 
 ```c
-/* TODO: hash index for large HPACK tables (see ARCHITECTURE.md §4.9) */
-/* NOTE: send_window is int32_t — can temporarily go negative after
+/* NOTE: hash index for large HPACK tables (see ARCHITECTURE.md §4.9) */
+/* NOTE: send_window is int32_t - can temporarily go negative after
  *       retroactive adjustment on SETTINGS_INITIAL_WINDOW_SIZE change */
 /* NOTE: HIVE_OK == 0 and HIVE_H2_NO_ERROR == 0x0 share the same value
  *       but serve different purposes: HIVE_OK is a library return code,
@@ -937,7 +937,7 @@ Before every commit:
 - [ ] ASan/UBSan clean on both platforms (`make dev && make test`)
 - [ ] clang-format clean (`make lint`)
 - [ ] No direct `malloc`/`free`/`calloc`/`realloc` calls in `src/` except
-      the NULL-allocator shim in `hive.c` — verify with:
+      the NULL-allocator shim in `hive.c` - verify with:
       `grep -n "malloc\|calloc\|realloc\|free" src/*.c | grep -v null_alloc`
 - [ ] Every allocator call checks for NULL return
 - [ ] `SECURITY:` comment present on every new security check
@@ -947,21 +947,21 @@ Before every commit:
       not `session_error()`
 - [ ] Inbound frame `length` validated against `local_settings.max_frame_size`;
       outbound frame sizing respects `remote_settings.max_frame_size`
-      (see ARCHITECTURE.md §2.5 — getting these backwards is a protocol bug)
+      (see ARCHITECTURE.md §2.5 - getting these backwards is a protocol bug)
 - [ ] New protocol validation uses `session_error()` or `stream_error()`
       with the correct error class per §4.2 classification table
 - [ ] No `assert()` on any condition reachable via network input
 - [ ] `on_header` callback signature uses `hive_buf_t *name, hive_buf_t *value`
-      (by pointer, not by value) — do not store `name->data` or `value->data`
+      (by pointer, not by value) - do not store `name->data` or `value->data`
       beyond callback without calling `hive_buf_retain()` first
 - [ ] `send` callback correctly returns `ssize_t` (bytes written, 0..total),
-      not `int` — partial writes are normal, not errors
+      not `int` - partial writes are normal, not errors
 - [ ] `HIVE_OK` used for library success returns; `HIVE_H2_NO_ERROR` used for
-      wire error code argument to GOAWAY/RST_STREAM — never mix
+      wire error code argument to GOAWAY/RST_STREAM - never mix
 - [ ] Big-endian conversion on every multi-byte wire field read and write
 - [ ] `_Static_assert` in place for any new struct whose size matters
 - [ ] New public functions have doc comment blocks
 - [ ] New protocol logic has ARCHITECTURE.md section cross-reference
-- [ ] No `FIXME` added without a comment explaining the issue
+- [ ] No deferred-work marker added without a comment explaining the issue
 
 **See Also**: PROJECT.md, ARCHITECTURE.md, TECH_STACK.md, DEVELOPMENT.md

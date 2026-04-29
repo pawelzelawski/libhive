@@ -1,10 +1,9 @@
 /*
- * hive_internal.h — internal shared types and forward declarations
+ * hive_internal.h - internal shared types and forward declarations
  *
  * Not included by embedders. Internal to the library only.
  * See ARCHITECTURE.md §2 for the full session struct layout (regions A–J).
  * See ARCHITECTURE.md §5 for the stream table types.
- * See CODING_STANDARDS.md §1.3 for the _Static_assert policy.
  */
 
 #ifndef HIVE_INTERNAL_H
@@ -95,7 +94,7 @@ typedef enum {
 #define HIVE_STREAM_FLAG_HEADERS_SEEN 0x01u
 
 /*
- * Per-stream state object — pool-allocated from stream_slots[].
+ * Per-stream state object - pool-allocated from stream_slots[].
  * stream_id == 0 means the slot is not in use.
  * See ARCHITECTURE.md §5.3.
  *
@@ -105,7 +104,7 @@ typedef struct hive_stream {
 	uint32_t stream_id;               /* 0 = slot not in use         */
 	uint8_t state;                    /* hive_stream_state_t         */
 	uint8_t flags;                    /* HIVE_STREAM_FLAG_* (Phase 5+)*/
-	uint8_t weight;                   /* PRIORITY weight — stored    */
+	uint8_t weight;                   /* PRIORITY weight - stored    */
 	uint8_t _pad;                     /* padding to uint32_t align   */
 	int32_t send_window;              /* stream-level send window    */
 	int32_t recv_window;              /* stream-level recv window    */
@@ -119,18 +118,18 @@ typedef struct hive_stream {
 
 /* ------------------------------------------------------------------ */
 /* Compile-time struct size checks (CODING_STANDARDS.md §1.3).        */
-/* These must not be removed — they guard against silent layout drift. */
+/* These must not be removed - they guard against silent layout drift. */
 /* ------------------------------------------------------------------ */
 
 _Static_assert(sizeof(hive_stream_t) == 64,
-               "hive_stream_t size changed — update ARCHITECTURE.md §5.3");
+               "hive_stream_t size changed - update ARCHITECTURE.md §5.3");
 _Static_assert(
     sizeof(stream_hash_entry_t) == 8,
-    "stream_hash_entry_t size changed — update ARCHITECTURE.md §5.2");
+    "stream_hash_entry_t size changed - update ARCHITECTURE.md §5.2");
 _Static_assert(sizeof(hpack_entry_t) == 8,
-               "hpack_entry_t size changed — update ARCHITECTURE.md §4.2");
+               "hpack_entry_t size changed - update ARCHITECTURE.md §4.2");
 _Static_assert(sizeof(hive_settings_t) == 24,
-               "hive_settings_t size changed — update ARCHITECTURE.md §2.5");
+               "hive_settings_t size changed - update ARCHITECTURE.md §2.5");
 /* huff_entry_t size check is active in src/hive_hpack.h next to the type. */
 
 /* ------------------------------------------------------------------ */
@@ -159,22 +158,22 @@ struct hive_options {
 };
 
 /* ------------------------------------------------------------------ */
-/* Full hive_session_t — all 10 regions (ARCHITECTURE.md §2.1–2.10)  */
+/* Full hive_session_t - all 10 regions (ARCHITECTURE.md §2.1–2.10)  */
 /* ------------------------------------------------------------------ */
 
 struct hive_session {
 
 	/* ------------------------------------------------------------ */
-	/* Region A — Identity and Callbacks (read-only after init)     */
+	/* Region A - Identity and Callbacks (read-only after init)     */
 	/* ARCHITECTURE.md §2.1                                         */
 	/* ------------------------------------------------------------ */
-	hive_mem_t mem; /* allocator — copied at creation              */
-	hive_callbacks_t callbacks; /* event callbacks — copied at creation */
+	hive_mem_t mem; /* allocator - copied at creation              */
+	hive_callbacks_t callbacks; /* event callbacks - copied at creation */
 	void *user_data; /* passed unchanged to every callback          */
 	uint8_t role;    /* HIVE_ROLE_SERVER or HIVE_ROLE_CLIENT        */
 
 	/* ------------------------------------------------------------ */
-	/* Region B — Options (flat copies from hive_options_t)         */
+	/* Region B - Options (flat copies from hive_options_t)         */
 	/* ARCHITECTURE.md §2.2                                         */
 	/* ------------------------------------------------------------ */
 	uint32_t
@@ -202,7 +201,7 @@ struct hive_session {
 	uint8_t opt_no_auto_ping_ack;  /* 0 = auto-ACK PING frames	*/
 
 	/* ------------------------------------------------------------ */
-	/* Region C — Connection State                                   */
+	/* Region C - Connection State                                   */
 	/* ARCHITECTURE.md §2.3                                         */
 	/* ------------------------------------------------------------ */
 	uint8_t session_state; /* hive_session_state_t enum value         */
@@ -219,7 +218,7 @@ struct hive_session {
 	uint32_t goaway_error_code_recv; /* error_code from peer's GOAWAY */
 
 	/* ------------------------------------------------------------ */
-	/* Region D — Connection-Level Flow Control                      */
+	/* Region D - Connection-Level Flow Control                      */
 	/* ARCHITECTURE.md §2.4                                         */
 	/* ------------------------------------------------------------ */
 	int32_t send_window; /* our send budget; decrements as we send DATA */
@@ -228,7 +227,7 @@ struct hive_session {
 	    recv_consumed; /* bytes received, not yet ACK'd via WINDOW_UPDATE */
 
 	/* ------------------------------------------------------------ */
-	/* Region E — SETTINGS State                                     */
+	/* Region E - SETTINGS State                                     */
 	/* ARCHITECTURE.md §2.5                                         */
 	/* ------------------------------------------------------------ */
 	hive_settings_t local_settings;  /* our current effective SETTINGS  */
@@ -241,7 +240,7 @@ struct hive_session {
 	uint8_t inbound_settings_count; /* inbound SETTINGS not yet ACK'd */
 
 	/* ------------------------------------------------------------ */
-	/* Region F — RST_STREAM Flood Detection                         */
+	/* Region F - RST_STREAM Flood Detection                         */
 	/* ARCHITECTURE.md §2.6                                         */
 	/* ------------------------------------------------------------ */
 	uint32_t rst_flood_count; /* RST_STREAM frames in current window */
@@ -249,7 +248,7 @@ struct hive_session {
 	                                    started */
 
 	/* ------------------------------------------------------------ */
-	/* Region G — Frame Receive State Machine                        */
+	/* Region G - Frame Receive State Machine                        */
 	/* ARCHITECTURE.md §2.7                                         */
 	/* ------------------------------------------------------------ */
 	uint8_t frame_hdr_buf[9];    /* 9-byte frame header staging           */
@@ -279,7 +278,7 @@ struct hive_session {
 	uint8_t priority_payload_len; /* PRIORITY prefix bytes remaining */
 
 	/* ------------------------------------------------------------ */
-	/* Region H — HPACK State                                        */
+	/* Region H - HPACK State                                        */
 	/* ARCHITECTURE.md §2.8                                         */
 	/* ------------------------------------------------------------ */
 	hpack_table_t enc_table; /* encoder dynamic table                   */
@@ -290,7 +289,7 @@ struct hive_session {
 	hive_buf_t hpack_value_handle; /* handle passed to on_header (value) */
 
 	/* ------------------------------------------------------------ */
-	/* Region I — Stream Table                                       */
+	/* Region I - Stream Table                                       */
 	/* ARCHITECTURE.md §2.9                                         */
 	/* ------------------------------------------------------------ */
 	stream_hash_entry_t
@@ -305,7 +304,7 @@ struct hive_session {
 	uint32_t closes_since_compact; /* closes since last compaction      */
 
 	/* ------------------------------------------------------------ */
-	/* Region J — Send Queue and Partial Send State                  */
+	/* Region J - Send Queue and Partial Send State                  */
 	/* ARCHITECTURE.md §2.10                                        */
 	/* ------------------------------------------------------------ */
 	struct iovec *send_iov; /* iovec array, opt_max_send_iov entries    */

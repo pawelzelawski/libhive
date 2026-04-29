@@ -1,7 +1,7 @@
 /*
  * test_security.c -- Phase 7 security tests
  *
- * Task 7.2 -- SETTINGS flood protection (§8.4)
+ * SETTINGS flood protection (ARCHITECTURE.md §8.4)
  */
 
 #include <stddef.h>

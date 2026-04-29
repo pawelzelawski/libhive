@@ -1,8 +1,8 @@
 /*
  * hive_frame.c -- Phase 2 receive state machine
  *
- * Implements DEVELOPMENT.md Tasks 2.3/2.4 with the minimal Phase 2
- * internal session layout from Task 2.5.
+ * Implements the Phase 2 receive state machine with the minimal internal
+ * session layout used by frame parsing.
  */
 
 #include "hive_frame.h"
@@ -524,7 +524,7 @@ frame_header_validate(hive_session_t *s)
 
 	/* SECURITY: Inbound frame length must not exceed what we advertised
 	 * in our local SETTINGS (local_settings.max_frame_size). Validating
-	 * against local_settings — not remote_settings — is the correct
+	 * against local_settings - not remote_settings - is the correct
 	 * directionality: local_settings governs frames we are willing to
 	 * receive; remote_settings governs frames we are permitted to send.
 	 * See ARCHITECTURE.md §2.5 and CODING_STANDARDS.md §3.1. */
@@ -536,7 +536,7 @@ frame_header_validate(hive_session_t *s)
 	case HIVE_FRAME_SETTINGS:
 		/* SECURITY: A SETTINGS frame with the ACK flag must carry
 		 * zero payload (RFC 9113 §6.5); a non-ACK SETTINGS payload
-		 * must be an exact multiple of 6 bytes — one 6-byte
+		 * must be an exact multiple of 6 bytes - one 6-byte
 		 * parameter record per entry. Any other length is a
 		 * FRAME_SIZE_ERROR connection error. */
 		if ((f->flags & HIVE_FLAG_ACK) != 0) {
@@ -716,7 +716,7 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			 * Set the preface_count=1 sentinel so RECV_FRAME_HEADER
 			 * enforces that the first received frame must be a
 			 * non-ACK SETTINGS (RFC 9113 §3.4).  No bytes are
-			 * consumed here — the state transitions immediately so
+			 * consumed here - the state transitions immediately so
 			 * the incoming bytes are processed by RECV_FRAME_HEADER
 			 * on the very next loop iteration.
 			 */

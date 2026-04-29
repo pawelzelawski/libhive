@@ -1,18 +1,18 @@
 /*
- * hive_hpack.c — HPACK static table and Huffman tables
+ * hive_hpack.c - HPACK static table and Huffman tables
  *
- * Implements compile-time tables for Phase 1.4:
+ * Implements compile-time tables:
  *   - HPACK static table (RFC 7541 Appendix A, 61 entries)
  *   - Huffman decode table (256-entry, RFC 7541 Appendix B)
  *   - Huffman encode table (257 entries including EOS)
- *   - huff_decode() — iterative bit-accumulator Huffman decoder
- *   - huff_encode() — Huffman encoder
+ *   - huff_decode() - iterative bit-accumulator Huffman decoder
+ *   - huff_encode() - Huffman encoder
  *
  * All tables are compile-time constants. No runtime initialisation.
- * No direct malloc/free — this file uses no allocator at all.
+ * No direct malloc/free - this file uses no allocator at all.
  *
  * See ARCHITECTURE.md §4.3 (static table), §4.4 (Huffman decode),
- * §4.8 (Huffman encode), and CODING_STANDARDS.md §2.
+ * and §4.8 (Huffman encode).
  */
 
 #include <stddef.h>
@@ -24,7 +24,7 @@
 #include "hive_hpack.h"
 
 /* ------------------------------------------------------------------ */
-/* HPACK static table — RFC 7541 Appendix A                            */
+/* HPACK static table - RFC 7541 Appendix A                            */
 /* Array index i corresponds to static table index (i + 1).           */
 /* Empty values are represented as NULL with value_len == 0.          */
 /* ------------------------------------------------------------------ */
@@ -100,7 +100,7 @@ const hive_nv_t hpack_static_table[HPACK_STATIC_TABLE_SIZE] = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Huffman decode table — RFC 7541 Appendix B                          */
+/* Huffman decode table - RFC 7541 Appendix B                          */
 /* 256 entries, 8-bit indexed, 4 bytes per entry = 1 KB total.        */
 /* Entry[i] gives the longest complete code starting with bit pattern  */
 /* i (8 bits). Entries 0xfe and 0xff have complete=0 (need more       */
@@ -367,7 +367,7 @@ static const huff_entry_t huff_decode_table[256] = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Huffman encode table — RFC 7541 Appendix B                          */
+/* Huffman encode table - RFC 7541 Appendix B                          */
 /* 257 entries: symbols 0–255 plus EOS (symbol 256).                  */
 /* Each entry: { code, bits, _pad }.                                   */
 /* ------------------------------------------------------------------ */
@@ -876,12 +876,12 @@ huff_encode(const uint8_t *src,
 }
 
 /* ------------------------------------------------------------------ */
-/* Dynamic table — Task 3.1                                            */
+/* Dynamic table - Task 3.1                                            */
 /* See ARCHITECTURE.md §4.1, §4.2, §8.1.                              */
 /* ------------------------------------------------------------------ */
 
 /*
- * hpack_ring_cap — compute ring buffer capacity from max_size.
+ * hpack_ring_cap - compute ring buffer capacity from max_size.
  *
  * Returns next_power_of_two(max_size / 32), minimum 4.
  * The minimum 4 avoids degenerate tables at very small max_size values.
@@ -1206,7 +1206,7 @@ hpack_table_insert(hpack_table_t *t,
 
 	/*
 	 * SECURITY: always copy name and value bytes into the allocated entry.
-	 * Never store a pointer into caller memory — the source may be
+	 * Never store a pointer into caller memory - the source may be
 	 * reassembly_buf, a stack scratch buffer, or a static table region
 	 * that is invalidated or reused after this call returns.
 	 * See ARCHITECTURE.md §8.1 and CODING_STANDARDS.md §3.2.
@@ -1325,11 +1325,11 @@ hpack_table_lookup(const hpack_table_t *t,
 		if (memcmp(HPACK_ENTRY_NAME(e), name, name_len) != 0)
 			continue;
 
-		/* Name matches — check value */
+		/* Name matches - check value */
 		if (e->value_len == value_len &&
 		    (value_len == 0 ||
 		     memcmp(HPACK_ENTRY_VALUE(e), value, value_len) == 0)) {
-			/* Exact match — return immediately (newest preferred)
+			/* Exact match - return immediately (newest preferred)
 			 */
 			*out_dyn_idx = i;
 			return HPACK_LOOKUP_EXACT;
@@ -1358,12 +1358,12 @@ hpack_table_get(const hpack_table_t *t, uint32_t dyn_idx)
 }
 
 /* ------------------------------------------------------------------ */
-/* Integer varint encode/decode — Task 3.2                            */
+/* Integer varint encode/decode - Task 3.2                            */
 /* See ARCHITECTURE.md §4.7 and RFC 7541 §5.1.                        */
 /* ------------------------------------------------------------------ */
 
 /*
- * hpack_decode_int — decode HPACK varint from src[0..len).
+ * hpack_decode_int - decode HPACK varint from src[0..len).
  *
  * See ARCHITECTURE.md §4.7 for the exact algorithm.
  * Returns the decoded value, or HPACK_INT_OVERFLOW on any error
@@ -1392,7 +1392,7 @@ hpack_decode_int(const uint8_t *src,
 	*consumed = 1;
 
 	if (val < prefix_max)
-		return val; /* fits in prefix — single byte */
+		return val; /* fits in prefix - single byte */
 
 	/* Multi-byte continuation */
 	m = 0;
@@ -1408,15 +1408,15 @@ hpack_decode_int(const uint8_t *src,
 		val = (uint32_t)tmp;
 		m += 7;
 		if (!(b & 0x80u))
-			return val; /* complete — continuation bit clear */
+			return val; /* complete - continuation bit clear */
 		if (m > 28)
 			return HPACK_INT_OVERFLOW; /* overflow guard */
 	}
-	return HPACK_INT_OVERFLOW; /* truncated — ran out of input bytes */
+	return HPACK_INT_OVERFLOW; /* truncated - ran out of input bytes */
 }
 
 /*
- * hpack_encode_int — encode val with N-bit prefix into out[0..out_cap).
+ * hpack_encode_int - encode val with N-bit prefix into out[0..out_cap).
  *
  * See RFC 7541 §5.1.  prefix_top provides the upper (8 - prefix_bits)
  * bits that are ORed into the first byte without modification.
@@ -1440,7 +1440,7 @@ hpack_encode_int(uint8_t *out,
 	pos = 0;
 
 	if (val < prefix_max) {
-		/* Value fits in the prefix — single byte */
+		/* Value fits in the prefix - single byte */
 		out[pos++] = prefix_top | (uint8_t)val;
 		return pos;
 	}
@@ -1462,12 +1462,12 @@ hpack_encode_int(uint8_t *out,
 }
 
 /* ------------------------------------------------------------------ */
-/* String decode — Task 3.3                                            */
+/* String decode - Task 3.3                                            */
 /* See ARCHITECTURE.md §4.6.                                           */
 /* ------------------------------------------------------------------ */
 
 /*
- * hpack_decode_string — decode one HPACK string field.
+ * hpack_decode_string - decode one HPACK string field.
  *
  * Detects the Huffman flag in bit 7 of the first byte, decodes the
  * 7-bit string length prefix, validates that the claimed bytes are
@@ -1489,7 +1489,7 @@ hpack_decode_string(const uint8_t *src,
 	int is_huffman;
 
 	if (src_len < 1)
-		return HIVE_ERR_COMPRESSION; /* truncated — no length byte */
+		return HIVE_ERR_COMPRESSION; /* truncated - no length byte */
 
 	is_huffman = (src[0] >> 7) & 1;
 
@@ -1529,7 +1529,7 @@ hpack_decode_string(const uint8_t *src,
 	} else {
 		/*
 		 * Non-Huffman: return a direct pointer into the source
-		 * buffer — no copy.  The caller must not modify the
+		 * buffer - no copy.  The caller must not modify the
 		 * source buffer while this hive_buf_t is in use.
 		 * See ARCHITECTURE.md §4.6.
 		 */
@@ -2058,7 +2058,7 @@ hpack_decode_block(hive_session_t *s,
 		decoded_size += name_buf->len + value_buf->len + 32u;
 		decoded_count++;
 		/*
-		 * SECURITY: HPACK bomb protection — decoded header list size
+		 * SECURITY: HPACK bomb protection - decoded header list size
 		 * limit.
 		 *
 		 * Why: a peer can send a pathologically large header block
@@ -2077,7 +2077,7 @@ hpack_decode_block(hive_session_t *s,
 		 * list size definition: name_len + value_len + 32 per
 		 * entry).
 		 *
-		 * Error class: stream error (RST_STREAM PROTOCOL_ERROR) —
+		 * Error class: stream error (RST_STREAM PROTOCOL_ERROR) -
 		 * not a connection error. Decoding continues for remaining
 		 * entries to maintain dynamic table consistency with the
 		 * peer encoder (RFC 7541 §2.3.2).
@@ -2152,12 +2152,12 @@ hpack_decode_block(hive_session_t *s,
 }
 
 /* ------------------------------------------------------------------ */
-/* String encode — Task 3.3                                            */
+/* String encode - Task 3.3                                            */
 /* See ARCHITECTURE.md §4.8.                                           */
 /* ------------------------------------------------------------------ */
 
 /*
- * hpack_encode_string — encode one string into an HPACK wire block.
+ * hpack_encode_string - encode one string into an HPACK wire block.
  *
  * Computes the Huffman-encoded byte length by summing bit-lengths from
  * the encode table, then Huffman-encodes if strictly shorter, otherwise
@@ -2187,7 +2187,7 @@ hpack_encode_string(const uint8_t *src,
 
 	if (huff_len < (uint32_t)src_len) {
 		/*
-		 * Huffman encoding is strictly shorter — use it.
+		 * Huffman encoding is strictly shorter - use it.
 		 * Encode the length with the Huffman flag (bit 7 = 1).
 		 */
 		size_t enc_len;
@@ -2214,7 +2214,7 @@ hpack_encode_string(const uint8_t *src,
 	}
 
 	/*
-	 * Literal form — no Huffman.
+	 * Literal form - no Huffman.
 	 * Encode the length with the Huffman flag cleared (bit 7 = 0).
 	 */
 	hdr_len = hpack_encode_int(
@@ -2277,7 +2277,7 @@ hpack_static_lookup(const hive_nv_t *nv,
 }
 
 /* ------------------------------------------------------------------ */
-/* Full HPACK block encode — Task 3.5                                 */
+/* Full HPACK block encode - Task 3.5                                 */
 /* See ARCHITECTURE.md §4.8 and RFC 7541 §6.1/§6.2/§6.3.             */
 /* ------------------------------------------------------------------ */
 

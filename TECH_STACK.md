@@ -10,7 +10,7 @@ Hive is written in C11. No C++, no scripting languages, no code generation.
 
 **Why C11 over C99**:
 - `_Static_assert` for compile-time checks on struct sizes, protocol
-  constants, and buffer dimensions — for example, verifying that
+  constants, and buffer dimensions - for example, verifying that
   `sizeof(hive_stream_t) == 64` does not silently change
 - `_Alignas` / `_Alignof` for aligned iovec and arena declarations
 - Anonymous structs and unions for frame header parsing
@@ -22,7 +22,7 @@ _POSIX_C_SOURCE=200809L   /* POSIX.1-2008 */
 _XOPEN_SOURCE=700         /* XSI extensions */
 ```
 
-Do not define `_GNU_SOURCE` — it pulls in non-portable extensions and
+Do not define `_GNU_SOURCE` - it pulls in non-portable extensions and
 breaks OpenBSD builds.
 
 ---
@@ -58,8 +58,8 @@ down `hive_session_t`, orchestrates `hive_session_recv()` and
 **Responsibilities**:
 - Session struct allocation and pre-allocation of all sub-buffers
 - Session creation for server role, client role, and h2c Upgrade
-- `hive_session_recv()` entry point — drives the receive state machine
-- `hive_session_send()` entry point — drives the DATA flush and send callback
+- `hive_session_recv()` entry point - drives the receive state machine
+- `hive_session_send()` entry point - drives the DATA flush and send callback
 - `hive_buf_retain()` and `hive_buf_free()`
 - `hive_session_want_read()` and `hive_session_want_write()`
 - Introspection functions
@@ -140,7 +140,7 @@ the receive state machine that consumes DATA frames.
 **Purpose**: Scatter-gather iovec accumulation and drain.
 
 **Responsibilities**:
-- `frame_hdr_write()` — write 9-byte frame header into `send_buf`
+- `frame_hdr_write()` - write 9-byte frame header into `send_buf`
 - Control frame queuing: SETTINGS, SETTINGS ACK, PING ACK, RST_STREAM,
   WINDOW_UPDATE, GOAWAY (ARCHITECTURE.md §6.3)
 - HEADERS frame queuing with HPACK encode and CONTINUATION splitting
@@ -170,7 +170,7 @@ Phase 7. There is no separate security module.
 
 Note: the HPACK always-copy rule (ARCHITECTURE.md §8.1) is enforced inside
 `hive_hpack.c` at every dynamic table insertion. It is not a security module
-function — it is a property of the table implementation itself.
+function - it is a property of the table implementation itself.
 
 ---
 
@@ -186,9 +186,9 @@ installation.
 #include <stddef.h>    /* offsetof, NULL, size_t */
 #include <string.h>    /* memcpy, memset, memcmp */
 #include <stdlib.h>    /* malloc, free, calloc (system allocator path only) */
-#include <time.h>      /* clock_gettime — RST_STREAM flood window timing */
-#include <sys/uio.h>   /* struct iovec — send callback and scatter-gather */
-#include <errno.h>     /* EINVAL, ENOMEM — error returns */
+#include <time.h>      /* clock_gettime - RST_STREAM flood window timing */
+#include <sys/uio.h>   /* struct iovec - send callback and scatter-gather */
+#include <errno.h>     /* EINVAL, ENOMEM - error returns */
 ```
 
 `malloc`, `free`, `calloc`, and `realloc` are called only in one place: the
@@ -205,10 +205,10 @@ direct enforcement mechanism for the no-direct-malloc coding standard.
 `clock_gettime(CLOCK_MONOTONIC, ...)` is used exclusively for the RST_STREAM
 flood rate window (ARCHITECTURE.md §8.5). `CLOCK_MONOTONIC` is correct here
 because we need elapsed seconds, not wall-clock time. No persistence, no
-cross-process coordination — monotonicity is the only requirement.
+cross-process coordination - monotonicity is the only requirement.
 
 No other clock usage exists in the library. Hive does not implement
-timeouts — those are the caller's responsibility.
+timeouts - those are the caller's responsibility.
 
 ### 4.3 String Safety
 
@@ -265,7 +265,7 @@ and `_Static_assert` in all required positions.
 CC     = clang
 CSTD   = -std=c11
 
-# Warnings — all treated as errors in CI
+# Warnings - all treated as errors in CI
 CWARN  = -Wall -Wextra -Wpedantic    \
          -Wshadow                     \
          -Wformat=2                   \
@@ -275,7 +275,7 @@ CWARN  = -Wall -Wextra -Wpedantic    \
          -Wmissing-prototypes         \
          -Wold-style-definition
 
-# Development build — sanitizers, debug symbols, no optimisation
+# Development build - sanitizers, debug symbols, no optimisation
 CFLAGS_DEV = $(CSTD) $(CWARN)               \
              -g -O0                          \
              -fsanitize=address,undefined    \
@@ -283,7 +283,7 @@ CFLAGS_DEV = $(CSTD) $(CWARN)               \
              -DDEBUG                         \
              -DHIVE_DEBUG=1
 
-# Release build — optimised, hardened
+# Release build - optimised, hardened
 CFLAGS_REL = $(CSTD) $(CWARN)               \
              -O2                             \
              -DNDEBUG                        \
@@ -369,7 +369,7 @@ libhive.a: $(LIB_OBJ)
 ```
 
 Stream table (§3.4), flow control (§3.5), and security (§3.7) logic are
-implemented directly in `hive.c` and `hive_frame.c` — there are no separate
+implemented directly in `hive.c` and `hive_frame.c` - there are no separate
 `hive_stream.c`, `hive_flow.c`, or `hive_security.c` files.
 
 ### 5.6 Test Binary Structure
@@ -389,7 +389,7 @@ $(TEST_BIN): $(TEST_SRC) libhive.a
         -I include/ $(TEST_SRC) libhive.a -o $@
 ```
 
-`tests/test_harness.h` is a header included by each test file — it is not
+`tests/test_harness.h` is a header included by each test file - it is not
 a compiled source file and must not appear in TEST_SRC.
 
 Stream table tests are in `tests/test_session.c` (not a separate
@@ -439,7 +439,7 @@ if it exits non-zero.
 
 ### 6.2 Byte Stream Injection
 
-Hive's zero-I/O design makes unit testing straightforward — test code
+Hive's zero-I/O design makes unit testing straightforward - test code
 constructs raw HTTP/2 byte sequences and feeds them directly to
 `hive_session_recv()`. No sockets, no threads, no timing.
 
@@ -454,7 +454,7 @@ feed_bytes(hive_session_t *s, const uint8_t *data, size_t len)
     while (pos < len) {
         consumed = hive_session_recv(s, data + pos, len - pos);
         if (consumed < 0)
-            return;  /* session error — test will fail on next assert */
+            return;  /* session error - test will fail on next assert */
         pos += (size_t)consumed;
     }
 }
@@ -499,7 +499,7 @@ test_on_header(hive_session_t *s, uint32_t sid,
 
 ### 7.1 Valgrind (Linux only)
 
-**Purpose**: Memory error detection — leaks, use-after-free, uninitialised
+**Purpose**: Memory error detection - leaks, use-after-free, uninitialised
 reads.
 
 **Installation**: `apt install valgrind`
@@ -516,7 +516,7 @@ valgrind --leak-check=full          \
 
 Hive has no external library dependencies, so no suppression file is needed.
 All code must pass Valgrind clean. Run on Linux before every commit.
-Valgrind is not available on OpenBSD — use the ASan build there.
+Valgrind is not available on OpenBSD - use the ASan build there.
 
 ### 7.2 AddressSanitizer + UndefinedBehaviorSanitizer
 
@@ -546,7 +546,7 @@ non-ASan builds.
 
 ### 7.3 ThreadSanitizer (Linux only)
 
-**Purpose**: Data race detection. TSAN and ASan are mutually exclusive —
+**Purpose**: Data race detection. TSAN and ASan are mutually exclusive -
 TSAN runs as a separate target.
 
 **Usage**:
@@ -564,7 +564,7 @@ TSAN is not a per-commit gate. Run at phase boundaries and before release.
 
 **Purpose**: Static analysis.
 
-**Installation**: `apt install clang-tidy` (Linux) — included with Clang on
+**Installation**: `apt install clang-tidy` (Linux) - included with Clang on
 OpenBSD.
 
 **Usage**:
@@ -634,10 +634,10 @@ responses. It uses libtls from LibreSSL for TLS, because h2spec requires
 TLS by default (ALPN `h2` negotiation). This is the only development
 dependency beyond the C toolchain.
 
-**libtls installation** (for the test server only — not linked into
+**libtls installation** (for the test server only - not linked into
 `libhive.a`):
 ```sh
-# OpenBSD — included in base system
+# OpenBSD - included in base system
 # No installation required
 
 # Debian/Ubuntu
@@ -653,7 +653,7 @@ All h2spec tests must pass before Hive v1 is considered complete. There are
 no documented planned exceptions. If a test case requires a behaviour that
 Hive implements differently from h2spec's expectation, the discrepancy must
 be diagnosed against the RFC before concluding that Hive is correct and
-h2spec is wrong — that conclusion requires explicit documentation and
+h2spec is wrong - that conclusion requires explicit documentation and
 is not the default assumption.
 
 See TESTING.md §4 for the full conformance test strategy.
@@ -664,7 +664,7 @@ See TESTING.md §4 for the full conformance test strategy.
 raw HTTP/2 bytes from a file or stdin and pretty-prints each frame.
 Useful when diagnosing unexpected frames from real clients or servers.
 
-**Built from**: `tools/hive_decode.c` and `src/hive_frame_bare.c` only — no
+**Built from**: `tools/hive_decode.c` and `src/hive_frame_bare.c` only - no
 dependency on the session, HPACK, stream, or send modules.
 
 **Usage**:
@@ -701,7 +701,7 @@ stream:   1
 length:   8192 bytes
 ```
 
-`hive_decode` does not decode HPACK — it shows raw compressed bytes for
+`hive_decode` does not decode HPACK - it shows raw compressed bytes for
 HEADERS frames. It is an offline protocol debugging tool, not a full
 HTTP/2 analyser.
 
@@ -727,7 +727,7 @@ HTTP/2 analyser.
 - Valgrind (Linux only)
 - clang-tidy, cppcheck
 - h2spec binary
-- libtls (LibreSSL) — for the h2spec test server only
+- libtls (LibreSSL) - for the h2spec test server only
 
 libtls is **not** linked into `libhive.a`. It is used only in
 `tests/h2spec_server.c`. Embedders who do not run h2spec do not need

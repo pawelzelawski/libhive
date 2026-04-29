@@ -1,5 +1,5 @@
 /*
- * hive_send.c — send queue helpers
+ * hive_send.c - send queue helpers
  *
  * Implements frame_hdr_write(), send_queue_append_ctrl(), and the
  * Phase 5 flow-control-gated send_queue_flush_data().
@@ -131,7 +131,7 @@ send_queue_append_ctrl(hive_session_t *s,
 }
 
 /*
- * Phase 6.1 — HEADERS queueing with CONTINUATION splitting.
+ * Phase 6.1 - HEADERS queueing with CONTINUATION splitting.
  *
  * Encodes the header block contiguously, then emits either:
  *   - single iov (HEADERS header + full payload), or
@@ -386,7 +386,7 @@ send_queue_flush_data(hive_session_t *s)
 		stream_id = st->stream_id;
 
 		/*
-		 * SECURITY: send-window gating — skip this stream if either
+		 * SECURITY: send-window gating - skip this stream if either
 		 * the connection-level or stream-level send window is zero
 		 * or negative.  This enforces flow control limits advertised
 		 * by the peer.  See ARCHITECTURE.md §6.5.

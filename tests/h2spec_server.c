@@ -1,5 +1,5 @@
 /*
- * h2spec_server.c — minimal TLS HTTP/2 conformance server for h2spec.
+ * h2spec_server.c - minimal TLS HTTP/2 conformance server for h2spec.
  *
  * Built on libhive.a and libtls. The server accepts HTTP/2-over-TLS (ALPN h2),
  * feeds decrypted bytes to hive_session_recv(), and drains queued frames via

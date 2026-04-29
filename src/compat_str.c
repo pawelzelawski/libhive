@@ -1,9 +1,8 @@
 /*
- * compat_str.c — portable strlcpy() and strlcat() implementations
+ * compat_str.c - portable strlcpy() and strlcat() implementations
  *
  * Compiled on Linux only via $(COMPAT_SRC) in the Makefile.
- * Not compiled on OpenBSD — libc provides these.
- * See TECH_STACK.md §4.3.
+ * Not compiled on OpenBSD - libc provides these.
  */
 
 #include <stddef.h>
@@ -12,7 +11,7 @@
 #include "compat_str.h"
 
 /*
- * strlcpy — copy at most dstsize-1 bytes from src to dst, always
+ * strlcpy - copy at most dstsize-1 bytes from src to dst, always
  * NUL-terminating dst. Returns strlen(src) (the full source length),
  * which allows the caller to detect truncation: truncation occurred if
  * the return value >= dstsize.
@@ -48,7 +47,7 @@ strlcpy(char *dst, const char *src, size_t dstsize)
 }
 
 /*
- * strlcat — append src to dst. Appends at most dstsize - strlen(dst) - 1
+ * strlcat - append src to dst. Appends at most dstsize - strlen(dst) - 1
  * bytes, always NUL-terminating the result. Returns the total length
  * that would have been created (strlen(dst_initial) + strlen(src)),
  * which allows the caller to detect truncation.

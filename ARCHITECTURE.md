@@ -6,7 +6,7 @@
 
 Hive is a protocol engine, not an I/O library. It owns no sockets, no file
 descriptors, no threads, and no TLS state. The caller owns all of those. The
-library owns HTTP/2 protocol processing — frame parsing, HPACK compression,
+library owns HTTP/2 protocol processing - frame parsing, HPACK compression,
 stream state management, flow control, and frame serialisation.
 
 ```
@@ -21,12 +21,12 @@ hive_session_recv(session, buf, n)
         ├── HEADERS frame ──► hpack_decode_block()
         │       ├── on_begin_headers(session, stream_id, user_data)
         │       ├── on_header(session, stream_id, &name, &value, flags, user_data)
-        │       │       (one call per decoded header pair — handles passed by pointer)
+        │       │       (one call per decoded header pair - handles passed by pointer)
         │       └── on_headers_complete(session, stream_id, end_stream, user_data)
         │
         ├── DATA frame ─────► on_data_chunk(session, stream_id, data, len, user_data)
-        │       (fires for available bytes — may fire multiple times per frame)
-        │       (data pointer is into caller's buf — zero copy)
+        │       (fires for available bytes - may fire multiple times per frame)
+        │       (data pointer is into caller's buf - zero copy)
         │
         ├── SETTINGS frame ──► apply peer settings; queue SETTINGS ACK
         │       ├── on_settings(session, user_data)  [after ACK queued]
@@ -53,13 +53,13 @@ hive_session_recv(session, buf, n)
 caller calls hive_submit_response(session, stream_id, nva, nvlen, &data_source)
         │
         └── HEADERS frame serialised into send_buf; iovec entries added
-            data_source stored in stream slot — read_callback called during send
+            data_source stored in stream slot - read_callback called during send
 
 hive_session_send(session)
         │
         ├── drives pending data_source streams (within flow control limits)
         │
-        └── fires send(session, iov, iovcnt, user_data) — once per call
+        └── fires send(session, iov, iovcnt, user_data) - once per call
                 │
                 └── returns ssize_t bytes_written
                     library retains any unsent tail for next call
@@ -119,20 +119,20 @@ The struct is partitioned into logical regions for clarity. Fields marked
 with `*` are pointers to separately allocated arena blocks; all others are
 embedded directly in the struct.
 
-### 2.1 Region A — Identity and Callbacks (read-only after init)
+### 2.1 Region A - Identity and Callbacks (read-only after init)
 
 ```c
-hive_mem_t        mem;           /* allocator — copied from caller at creation */
+hive_mem_t        mem;           /* allocator - copied from caller at creation */
 hive_callbacks_t  callbacks;     /* copied from caller at creation */
 void             *user_data;     /* passed unchanged to every callback */
 uint8_t           role;          /* HIVE_ROLE_SERVER or HIVE_ROLE_CLIENT */
 ```
 
 These fields are set at session creation and never modified. The allocator
-and callbacks structs are copied by value — the caller does not need to keep
+and callbacks structs are copied by value - the caller does not need to keep
 them alive after `hive_session_*_new()` returns.
 
-### 2.2 Region B — Options
+### 2.2 Region B - Options
 
 All option values are copied from the `hive_options_t` at session creation
 and stored as flat fields. Changing a `hive_options_t` after session creation
@@ -163,7 +163,7 @@ will treat that as a connection error PROTOCOL_ERROR. Server-role sessions
 must never include this parameter in their outbound SETTINGS frame regardless
 of the opt_enable_push value.
 
-### 2.3 Region C — Connection State
+### 2.3 Region C - Connection State
 
 ```c
 uint8_t  session_state;               /* hive_session_state_t enum */
@@ -188,11 +188,11 @@ typedef enum {
 } hive_session_state_t;
 ```
 
-### 2.4 Region D — Connection-Level Flow Control
+### 2.4 Region D - Connection-Level Flow Control
 
 ```c
-int32_t  send_window;    /* our send budget — peer's recv window; decrements as we send DATA */
-int32_t  recv_window;    /* peer's send budget — our recv window; decrements as peer sends DATA */
+int32_t  send_window;    /* our send budget - peer's recv window; decrements as we send DATA */
+int32_t  recv_window;    /* peer's send budget - our recv window; decrements as peer sends DATA */
 uint32_t recv_consumed;  /* bytes received but not yet acknowledged via WINDOW_UPDATE */
 ```
 
@@ -207,7 +207,7 @@ coalescing (§7.7): a WINDOW_UPDATE is queued when it exceeds `recv_window / 2`.
 queued into the send buffer (queue-time restoration). See §7.7 for the
 coalescing implementation and the rationale for this timing choice.
 
-### 2.5 Region E — SETTINGS State
+### 2.5 Region E - SETTINGS State
 
 ```c
 hive_settings_t  local_settings;     /* our current effective SETTINGS (24 bytes) */
@@ -249,17 +249,17 @@ typedef struct {
 
 **SETTINGS directionality**:
 - `local_settings` = what we have advertised to the peer. Incoming frames are
-  validated against `local_settings.max_frame_size` — the limit we told the
+  validated against `local_settings.max_frame_size` - the limit we told the
   peer we can accept.
 - `remote_settings` = what the peer has advertised to us. Outgoing frames are
-  sized to honor `remote_settings.max_frame_size` — the limit the peer told
+  sized to honor `remote_settings.max_frame_size` - the limit the peer told
   us it can accept.
 - `remote_settings.header_table_size` bounds our **encoder** dynamic table
   (`enc_table.max_size`): we must not produce a table the peer cannot decode.
 - `local_settings.header_table_size` bounds our **decoder** dynamic table
   (`dec_table.max_size`): this is the limit we advertised the peer must respect.
 
-### 2.6 Region F — RST_STREAM Flood Detection
+### 2.6 Region F - RST_STREAM Flood Detection
 
 ```c
 uint32_t rst_flood_count;          /* RST_STREAM frames received in current window */
@@ -268,7 +268,7 @@ uint64_t rst_flood_window_start;   /* monotonic seconds (CLOCK_MONOTONIC) when w
 
 Updated on every received RST_STREAM. See §8.5 for the flood detection logic.
 
-### 2.7 Region G — Frame Receive State Machine
+### 2.7 Region G - Frame Receive State Machine
 
 ```c
 uint8_t       frame_hdr_buf[9];      /* 9-byte frame header staging */
@@ -365,11 +365,11 @@ but callback delivery is suppressed via `stream_error_pending`. When END_HEADERS
 arrives, the stored code drives the RST_STREAM and stream_close(). Zero means no
 error. Reset to 0 after the error is processed.
 0 = HEADERS, 1 = PUSH_PROMISE. Set when reassembly_active is set. Used in
-RECV_CONTINUATION_PAYLOAD to choose the correct END_HEADERS completion path —
+RECV_CONTINUATION_PAYLOAD to choose the correct END_HEADERS completion path -
 HEADERS fires on_headers_complete; PUSH_PROMISE fires on_push_promise with
 reassembly_promised_stream_id.
 
-### 2.8 Region H — HPACK State
+### 2.8 Region H - HPACK State
 
 ```c
 hpack_table_t  enc_table;          /* encoder dynamic table */
@@ -381,9 +381,9 @@ uint8_t       *hpack_scratch_value;/* Huffman decode scratch for header value, o
 Both tables are embedded directly in the session struct. See §4 for the
 full `hpack_table_t` layout and operation.
 
-`enc_table.max_size` is bounded by `remote_settings.header_table_size` —
+`enc_table.max_size` is bounded by `remote_settings.header_table_size` -
 the encoder must not exceed the table size the peer can handle.
-`dec_table.max_size` is bounded by `local_settings.header_table_size` —
+`dec_table.max_size` is bounded by `local_settings.header_table_size` -
 the decoder's table matches what we advertised.
 
 Two separate Huffman decode scratch buffers are required because a single
@@ -393,7 +393,7 @@ callback fires. Using a single buffer would cause the name decode to be
 overwritten when the value is decoded. Each buffer is `opt_max_header_string_size`
 bytes; the default is 8192 bytes per buffer.
 
-### 2.9 Region I — Stream Table
+### 2.9 Region I - Stream Table
 
 ```c
 stream_hash_entry_t *stream_hash;        /* hash table, hash_table_size entries */
@@ -411,7 +411,7 @@ uint32_t             closes_since_compact; /* stream closes since last compactio
 `peer_stream_open_count` tracks only streams initiated by the peer (odd IDs
 for server role, even IDs for client role) that are in OPEN or either
 HALF_CLOSED state. This is what is compared against `opt_max_concurrent_streams`
-when the peer opens a new stream — RFC 9113 §5.1.2 specifies that
+when the peer opens a new stream - RFC 9113 §5.1.2 specifies that
 SETTINGS_MAX_CONCURRENT_STREAMS is directional and constrains only the peer's
 ability to open streams, not locally initiated streams.
 
@@ -427,7 +427,7 @@ true bidirectional concurrency at the RFC maximum must set
 
 See §5 for the full two-layer stream table design.
 
-### 2.10 Region J — Send Queue and Partial Send State
+### 2.10 Region J - Send Queue and Partial Send State
 
 ```c
 struct iovec *send_iov;           /* iovec array, opt_max_send_iov entries */
@@ -558,7 +558,7 @@ hive_session_recv(session, data, len):
               return session_error(HIVE_ERR_PROTOCOL, ...)
             preface_count = 0
 
-          /* CONTINUATION lockout — checked before anything else */
+          /* CONTINUATION lockout - checked before anything else */
           /* Uses reassembly_active, not reassembly_len, to handle zero-length blocks */
           if reassembly_active &&
               (cur_frame.type != HIVE_FRAME_CONTINUATION ||
@@ -634,11 +634,11 @@ hive_session_recv(session, data, len):
           else:
             is_idle = (cur_frame.stream_id > last_stream_id_remote)
           if is_idle:
-            /* DATA on idle stream — connection error per RFC 9113 §5.1 */
+            /* DATA on idle stream - connection error per RFC 9113 §5.1 */
             return session_error(s, HIVE_ERR_PROTOCOL,
                 HIVE_H2_PROTOCOL_ERROR, 0)
           else:
-            /* Recently closed — RST_STREAM STREAM_CLOSED.
+            /* Recently closed - RST_STREAM STREAM_CLOSED.
              * RFC 9113 §6.9.1: still account payload against connection window
              * since bytes were received on the wire. No per-stream accounting. */
             session->recv_window   -= cur_frame.length
@@ -710,10 +710,10 @@ hive_session_recv(session, data, len):
         stream->content_length_received += n
 
         cb_ret = fire on_data_chunk(session, stream_id, data + consumed, n, user_data)
-        /* data + consumed is directly in caller's buffer — zero copy */
+        /* data + consumed is directly in caller's buffer - zero copy */
         /* on_data_chunk return value handling:
          * - HIVE_OK: continue normally
-         * - any HIVE_ERR_*: stream error — send RST_STREAM CANCEL, reset stream.
+         * - any HIVE_ERR_*: stream error - send RST_STREAM CANCEL, reset stream.
          *   The current DATA frame bytes are already consumed; remaining payload
          *   bytes in this frame are skipped before transitioning. */
         if cb_ret != HIVE_OK:
@@ -775,7 +775,7 @@ hive_session_recv(session, data, len):
           transition RECV_FRAME_HEADER
 
       RECV_HEADERS_PAYLOAD:
-        /* Stream state legality check — before padding extraction.
+        /* Stream state legality check - before padding extraction.
          * RFC 9113 §5.1/§5.1.1: HEADERS is valid in OPEN, HALF_CLOSED_LOCAL,
          * and RESERVED_REMOTE. All other states are stream errors.
          *
@@ -785,7 +785,7 @@ hive_session_recv(session, data, len):
          * the peer encoder per RFC 7541 §2.3.2. Skipping raw bytes would
          * desynchronize the table and corrupt all subsequent HEADERS.
          * Additionally, if END_HEADERS is absent, we must set reassembly_active
-         * so that subsequent CONTINUATION frames are consumed correctly — if we
+         * so that subsequent CONTINUATION frames are consumed correctly - if we
          * do not, the CONTINUATION lockout check would escalate a stream error
          * into a connection error. */
         stream = lookup(cur_frame.stream_id)
@@ -805,11 +805,11 @@ hive_session_recv(session, data, len):
           else:
             is_idle = (cur_frame.stream_id > last_stream_id_remote)
           if is_idle:
-            /* Idle stream — connection error per RFC 9113 §5.1 */
+            /* Idle stream - connection error per RFC 9113 §5.1 */
             return session_error(s, HIVE_ERR_PROTOCOL,
                 HIVE_H2_PROTOCOL_ERROR, 0)
           else:
-            /* Recently closed — decode with suppressed callbacks then RST */
+            /* Recently closed - decode with suppressed callbacks then RST */
             stream_error_pending_for_stream = cur_frame.stream_id
             stream_error_code               = HIVE_H2_STREAM_CLOSED
             /* Fall through to reassembly/decode below */
@@ -825,7 +825,7 @@ hive_session_recv(session, data, len):
           /* Fall through to normal payload reassembly below.
            * RST_STREAM and stream_close() happen after hpack_decode_block()
            * completes. See end of unfragmented/fragmented paths below. */
-          /* else: OPEN, HALF_CLOSED_LOCAL, RESERVED_REMOTE — proceed normally */
+          /* else: OPEN, HALF_CLOSED_LOCAL, RESERVED_REMOTE - proceed normally */
 
         /* Extract pad_length from first payload byte if PADDED flag set */
         if (cur_frame.flags & HIVE_FLAG_PADDED) && !pad_length_received:
@@ -835,7 +835,7 @@ hive_session_recv(session, data, len):
           /* NOTE: pad_length validation must be deferred until after the
            * PRIORITY prefix is consumed (if PRIORITY flag is also set), since
            * the fixed-field bytes reduce available space for data and padding.
-           * Do NOT validate here — validate after priority_payload_len is zero. */
+           * Do NOT validate here - validate after priority_payload_len is zero. */
 
         /* Skip PRIORITY prefix if PRIORITY flag was set (5 bytes: stream dep + weight) */
         if priority_payload_len > 0:
@@ -855,7 +855,7 @@ hive_session_recv(session, data, len):
           pad_validated = 1
 
         n = min(payload_remaining - pad_remaining, len - consumed)
-        /* SECURITY: CONTINUATION flood — connection error, not stream error */
+        /* SECURITY: CONTINUATION flood - connection error, not stream error */
         if reassembly_len + n > opt_max_continuation_size:
           return session_error(s, HIVE_ERR_PROTOCOL,
               HIVE_H2_PROTOCOL_ERROR, 0)
@@ -894,16 +894,16 @@ hive_session_recv(session, data, len):
               /* For normal (non-suppress) errors: RST_STREAM sent and stream
                * closed inside hpack_decode_block targeting error_stream_id.
                * For suppress errors: caller handles RST via stream_error_pending_for_stream
-               * block above — hpack_decode_block returned HIVE_ERR_PROTOCOL without
+               * block above - hpack_decode_block returned HIVE_ERR_PROTOCOL without
                * sending RST. Both paths transition back to RECV_FRAME_HEADER. */
               if pad_remaining > 0: transition RECV_HEADERS_PAD
               else: transition RECV_FRAME_HEADER
               break
-            /* State transition on END_STREAM — use cur_frame.flags directly. */
+            /* State transition on END_STREAM - use cur_frame.flags directly. */
             if cur_frame.flags & HIVE_FLAG_END_STREAM:
               stream = lookup(cur_frame.stream_id)
               if stream == NULL:
-                /* Stale stream — closed during hpack_decode_block callbacks */
+                /* Stale stream - closed during hpack_decode_block callbacks */
                 if pad_remaining > 0: transition RECV_HEADERS_PAD
                 else: transition RECV_FRAME_HEADER
                 break
@@ -935,7 +935,7 @@ hive_session_recv(session, data, len):
             else: transition RECV_FRAME_HEADER
           else:
             /* Header block continues in CONTINUATION frames.
-             * Transition to RECV_FRAME_HEADER — the next bytes on the wire
+             * Transition to RECV_FRAME_HEADER - the next bytes on the wire
              * are a new 9-byte CONTINUATION frame header, not payload bytes.
              * The CONTINUATION lockout in RECV_FRAME_HEADER enforces that the
              * next frame must be CONTINUATION for the same stream_id. */
@@ -956,7 +956,7 @@ hive_session_recv(session, data, len):
         n = min(pad_remaining, len - consumed)
         consumed += n; pad_remaining -= n
         if pad_remaining == 0:
-          /* Always return to RECV_FRAME_HEADER — the next frame (CONTINUATION
+          /* Always return to RECV_FRAME_HEADER - the next frame (CONTINUATION
            * or otherwise) starts with a 9-byte header, not payload bytes.
            * If reassembly_active == 1, the CONTINUATION lockout in
            * RECV_FRAME_HEADER enforces that the next frame is CONTINUATION. */
@@ -996,7 +996,7 @@ hive_session_recv(session, data, len):
             transition RECV_FRAME_HEADER
             break
           if reassembly_type == 0:
-            /* HEADERS reassembly — apply END_STREAM state transition */
+            /* HEADERS reassembly - apply END_STREAM state transition */
             if reassembly_end_stream:
               stream = lookup(reassembly_stream_id)
               if stream != NULL:
@@ -1024,21 +1024,21 @@ hive_session_recv(session, data, len):
                   fire on_stream_close(...)
                   stream_close(session, stream)
             else:
-              /* No END_STREAM — check reserved(remote) transition */
+              /* No END_STREAM - check reserved(remote) transition */
               stream = lookup(reassembly_stream_id)
               if stream != NULL && stream->state == RESERVED_REMOTE:
                 /* Fragmented push-response HEADERS without END_STREAM:
                  * reserved(remote) → half-closed(local) per RFC 9113 §5.1.1 */
                 stream->state = HALF_CLOSED_LOCAL
           else:
-            /* PUSH_PROMISE reassembly — fire on_push_promise with promised ID.
+            /* PUSH_PROMISE reassembly - fire on_push_promise with promised ID.
              * The promised-request headers were delivered to on_header under
              * reassembly_stream_id (the carrying stream). on_push_promise
              * provides the promised_stream_id so the caller can correlate. */
             cb_ret = fire on_push_promise(session, reassembly_stream_id,
                 reassembly_promised_stream_id, user_data)
             if cb_ret == HIVE_ERR_REFUSED_STREAM:
-              /* Caller rejected the push — close the reserved stream */
+              /* Caller rejected the push - close the reserved stream */
               send RST_STREAM REFUSED_STREAM for reassembly_promised_stream_id
               stream = lookup(reassembly_promised_stream_id)
               if stream != NULL:
@@ -1069,7 +1069,7 @@ hive_session_recv(session, data, len):
           pad_length_received = 1
           /* NOTE: pad_length validation deferred until after the 4-byte
            * promised stream ID is consumed, since that fixed field reduces
-           * available space. Do NOT validate here — validate after ctrl_staging
+           * available space. Do NOT validate here - validate after ctrl_staging
            * accumulation is complete. */
 
         /* First 4 bytes: reserved bit + promised stream_id */
@@ -1094,13 +1094,13 @@ hive_session_recv(session, data, len):
            * Same rules as §3.4 new-stream validation apply to push streams.
            * peer_stream_open_count covers server-initiated streams (pushes). */
           if peer_stream_open_count >= opt_max_concurrent_streams:
-            /* Peer's push stream limit exceeded — RST the promised stream */
+            /* Peer's push stream limit exceeded - RST the promised stream */
             send RST_STREAM REFUSED_STREAM for promised_stream_id
             /* Skip remaining payload bytes then return to RECV_FRAME_HEADER */
             [skip remainder into reassembly_buf; discard on END_HEADERS]
             break
           if stream_open_count >= opt_max_concurrent_streams:
-            /* Total slot pool exhausted — RST the promised stream */
+            /* Total slot pool exhausted - RST the promised stream */
             send RST_STREAM REFUSED_STREAM for promised_stream_id
             [skip remainder into reassembly_buf; discard on END_HEADERS]
             break
@@ -1179,7 +1179,7 @@ hive_session_recv(session, data, len):
             if param_val > 1:
               return session_error(s, HIVE_ERR_PROTOCOL, HIVE_H2_PROTOCOL_ERROR, 0)
             /* A client receiving SETTINGS_ENABLE_PUSH=1 from a server is an error */
-            /* (Servers must never send this parameter — see §2.2 and B-13) */
+            /* (Servers must never send this parameter - see §2.2 and B-13) */
             if role == HIVE_ROLE_CLIENT && param_val == 1:
               return session_error(s, HIVE_ERR_PROTOCOL, HIVE_H2_PROTOCOL_ERROR, 0)
             remote_settings.enable_push = param_val
@@ -1272,7 +1272,7 @@ hive_session_recv(session, data, len):
             if is_idle:
               return session_error(s, HIVE_ERR_PROTOCOL,
                   HIVE_H2_PROTOCOL_ERROR, 0)
-            /* else: recently closed — silently ignore per grace period */
+            /* else: recently closed - silently ignore per grace period */
           else:
             fire on_stream_close(session, stream_id, error_code, user_data)
             stream_close(session, stream)
@@ -1289,7 +1289,7 @@ hive_session_recv(session, data, len):
                   HIVE_H2_PROTOCOL_ERROR, 0)  /* connection error */
             else:
               return stream_error(s, cur_frame.stream_id, HIVE_ERR_PROTOCOL,
-                  HIVE_H2_PROTOCOL_ERROR)  /* stream error — return, do not fall through */
+                  HIVE_H2_PROTOCOL_ERROR)  /* stream error - return, do not fall through */
           if cur_frame.stream_id == 0:
             /* Use int64_t to avoid false overflow from negative int32_t send_window */
             if (int64_t)session->send_window + increment > 0x7FFFFFFF:
@@ -1310,7 +1310,7 @@ hive_session_recv(session, data, len):
               if is_idle:
                 return session_error(s, HIVE_ERR_PROTOCOL,
                     HIVE_H2_PROTOCOL_ERROR, 0)
-              /* else: recently closed — silently ignore per grace period */
+              /* else: recently closed - silently ignore per grace period */
             else:
               if (int64_t)stream->send_window + increment > 0x7FFFFFFF:
                 return stream_error(...RST_STREAM FLOW_CONTROL_ERROR...)
@@ -1331,7 +1331,7 @@ hive_session_recv(session, data, len):
            * initiated by the RECEIVER of this GOAWAY (i.e., our locally-initiated
            * streams). Only locally-initiated streams with ID > last_stream_id
            * were not processed; peer-initiated streams (push streams the sender
-           * promised) are not subject to this — the sender controls its own
+           * promised) are not subject to this - the sender controls its own
            * push streams and is responsible for their handling separately.
            * Implementation: close locally-initiated streams with id > last_stream_id
            * (REFUSED_STREAM). Peer-initiated streams with id > last_stream_id
@@ -1370,7 +1370,7 @@ hive_session_recv(session, data, len):
 
       RECV_PRIORITY_PAYLOAD:
         accumulate 5 bytes into ctrl_staging; discard; transition RECV_FRAME_HEADER
-        [PRIORITY is deprecated by RFC 9113 — accept and ignore]
+        [PRIORITY is deprecated by RFC 9113 - accept and ignore]
 
       RECV_SKIP_PAYLOAD:
         n = min(payload_remaining, len - consumed)
@@ -1397,7 +1397,7 @@ When `RECV_FRAME_HEADER` determines a HEADERS frame opens a new stream:
    Non-monotonic or reuse of a closed stream: PROTOCOL_ERROR.
 3. `peer_stream_open_count` must be less than `opt_max_concurrent_streams`.
    Exceeded: RST_STREAM REFUSED_STREAM. Additionally, `stream_open_count` must
-   be less than `opt_max_concurrent_streams` (the total slot pool cap — see
+   be less than `opt_max_concurrent_streams` (the total slot pool cap - see
    §2.9). If the total is at capacity, RST_STREAM REFUSED_STREAM regardless of
    direction.
 4. If `stream_id > (0x7FFFFFFFu - 1000u)`: initiate auto-GOAWAY (§8.6).
@@ -1458,7 +1458,7 @@ typedef struct {
                                   * encoder emits pending_min first if != pending_max */
     uint8_t         has_pending; /* 1 = encoder must emit size update prefix */
 
-    /* hash index — allocated only when max_size > HPACK_LINEAR_THRESHOLD */
+    /* hash index - allocated only when max_size > HPACK_LINEAR_THRESHOLD */
     hpack_hash_slot_t *hash;     /* NULL when using linear scan */
     uint32_t           hash_mask;
 } hpack_table_t;
@@ -1488,7 +1488,7 @@ has applied our new limit). It represents the maximum table size the decoder
 will accept from inbound size updates. Inbound size updates larger than
 `dec_table.pending_max` are a COMPRESSION_ERROR (connection error).
 
-`HPACK_LINEAR_THRESHOLD` is 16384 — a compile-time constant. Below this
+`HPACK_LINEAR_THRESHOLD` is 16384 - a compile-time constant. Below this
 threshold, lookup is a linear scan from newest entry backward (temporal
 locality). Above it, an auxiliary hash index is allocated from the session
 arena. For the RFC default table size of 4096 bytes, `hash` is always NULL.
@@ -1497,7 +1497,7 @@ At default `opt_header_table_size = 4096`:
 - Maximum entries: 4096 / 32 = 128
 - `ring_cap` = 128 (power of two)
 - Ring pointer array: 128 × 8 bytes = 1 KB per table
-- `hash` = NULL — the null check is on the hot path, never taken at defaults
+- `hash` = NULL - the null check is on the hot path, never taken at defaults
 
 ### 4.2 Entry Layout
 
@@ -1539,11 +1539,11 @@ Evict oldest entries until `size + new_rfc_size <= max_size`.
 the eviction loop will empty the table entirely (since size never drops below
 zero). After eviction, `size == 0` but `rfc_size > max_size` still, so the
 entry is **not inserted**. The table remains empty. This is correct per the
-RFC and must be implemented explicitly — do not skip the check after eviction.
+RFC and must be implemented explicitly - do not skip the check after eviction.
 
 **Eviction**: oldest entry is at `ring[(ring_head - count) & (ring_cap - 1)]`.
 Free the allocation via session allocator. With an arena allocator the free
-is a no-op — memory is reclaimed when the session closes. With system malloc,
+is a no-op - memory is reclaimed when the session closes. With system malloc,
 individual entries are freed normally. Decrement `count`, subtract from `size`.
 
 When the HPACK hash index is active (max_size > HPACK_LINEAR_THRESHOLD), the
@@ -1577,13 +1577,13 @@ static const hive_nv_t hpack_static_table[61] = {
 HPACK uses a canonical Huffman code (RFC 7541 Appendix B) where code lengths
 range from 5 to 30 bits. The decode strategy is two-tier:
 
-1. **Fast path** — a 256-entry table of 4 bytes per entry (1 KB total) covers
+1. **Fast path** - a 256-entry table of 4 bytes per entry (1 KB total) covers
    every 8-bit input pattern. Symbols whose Huffman code is ≤ 8 bits decode in
    one lookup. Indices `0xfe` and `0xff` (i.e. patterns starting with the
    prefix `1111 1110` or `1111 1111`) carry `complete = 0`; every code longer
    than 8 bits begins with one of these two prefixes, so a fast-path miss
    uniquely identifies a code requiring the slow path.
-2. **Slow path** — `huff_decode_long()` linear-scans the 257-entry encode
+2. **Slow path** - `huff_decode_long()` linear-scans the 257-entry encode
    table looking for the unique code of length L (10 ≤ L ≤ 30) whose top L
    bits match the accumulator. Because canonical Huffman codes are prefix-free
    the first match at any L is *the* match; longer codes cannot share an
@@ -1608,7 +1608,7 @@ static const huff_entry_t huff_table[256];  /* initialised at compile time */
 ```
 
 **Decode loop** (writes decoded bytes into `hpack_scratch_name` or
-`hpack_scratch_value` as appropriate — see §4.6):
+`hpack_scratch_value` as appropriate - see §4.6):
 
 ```c
 /* Huffman decode of src[0..src_len] into scratch[0..max_len].
@@ -1640,7 +1640,7 @@ huff_decode(const uint8_t *src, size_t src_len,
                 scratch[out++] = e->sym;
                 nbits -= e->bits_consumed;
             } else {
-                /* Slow path: prefix is 0xfe/0xff — code is > 8 bits */
+                /* Slow path: prefix is 0xfe/0xff - code is > 8 bits */
                 uint8_t sym;
                 int bits = huff_decode_long(acc, nbits, &sym);
                 if (bits < 0)
@@ -1672,7 +1672,7 @@ huff_decode(const uint8_t *src, size_t src_len,
 }
 
 /* Slow-path linear scan over the 257-entry encode table.
- * Invoked only when the fast-path entry has complete == 0 — i.e. the
+ * Invoked only when the fast-path entry has complete == 0 - i.e. the
  * accumulator's top 8 bits are 0xfe or 0xff and the next symbol is one
  * of the 116 codes longer than 8 bits (including EOS).
  * Returns L > 0 on match (bits consumed), 0 if more input is needed
@@ -1690,21 +1690,21 @@ bits remain in the accumulator for the next iteration. The accumulator is
 trailing-padding bits plus a partial accumulated byte easily exceeds 32 bits
 in transient state. Fast path is L1 cache resident after the first HEADERS
 frame. The slow path is exercised only when input contains symbols whose
-Huffman code is longer than 8 bits — uncommon in typical HTTP/2 header
-traffic — so its O(257 × 21) worst-case scan is not on the hot path.
+Huffman code is longer than 8 bits - uncommon in typical HTTP/2 header
+traffic - so its O(257 × 21) worst-case scan is not on the hot path.
 
 ### 4.5 Decode Block Processing
 
 `hpack_decode_block(session, data, len, suppress_callbacks, error_stream_id)` processes
 a complete compressed header block (from `reassembly_buf`). It enforces bomb
 protection and fires the header callbacks. When `suppress_callbacks == 1`, all
-callbacks are suppressed and `stream_error_pending` starts as 1 — but the full
+callbacks are suppressed and `stream_error_pending` starts as 1 - but the full
 block is still decoded and all dynamic table updates applied. The caller uses
 `suppress_callbacks = 1` when the HEADERS block arrived on an illegal-state stream.
 `error_stream_id` specifies which stream to send RST_STREAM on and close when a
 stream error occurs. For HEADERS blocks this is `reassembly_stream_id` (the stream
 carrying the HEADERS). For PUSH_PROMISE blocks this is `reassembly_promised_stream_id`
-(the promised stream) — the carrying stream is unaffected by HPACK decode errors.
+(the promised stream) - the carrying stream is unaffected by HPACK decode errors.
 
 Size updates (bit pattern `0x20`) are only valid at the beginning of a header
 block, before any header field representations. After the first header field
@@ -1738,7 +1738,7 @@ hpack_decode_block(session, data, len, suppress_callbacks, error_stream_id):
     cb_ret = fire on_begin_headers(session, reassembly_stream_id, user_data)
     /* on_begin_headers return value handling:
      * - HIVE_OK:               continue normally
-     * - HIVE_ERR_COMPRESSION:  connection error — COMPRESSION_ERROR GOAWAY,
+     * - HIVE_ERR_COMPRESSION:  connection error - COMPRESSION_ERROR GOAWAY,
      *                           return immediately (table state is still valid
      *                           since no entries were decoded yet)
      * - any other HIVE_ERR_*:  set stream_error_pending = 1, continue decoding
@@ -1770,7 +1770,7 @@ hpack_decode_block(session, data, len, suppress_callbacks, error_stream_id):
       /* Literal with Incremental Indexing (RFC 7541 §6.2.1) */
       size_update_phase = 0
       decode name and value (§4.6)
-      insert copy into dec_table dynamic table (always copy — §8.1)
+      insert copy into dec_table dynamic table (always copy - §8.1)
       name_buf / value_buf → decoded strings
 
     else if first_byte & 0x20:
@@ -1791,7 +1791,7 @@ hpack_decode_block(session, data, len, suppress_callbacks, error_stream_id):
       no table insertion
       if never_indexed: flags |= HIVE_NV_FLAG_NO_INDEX
 
-    /* Bomb protection — enforced incrementally (Security decision 2) */
+    /* Bomb protection - enforced incrementally (Security decision 2) */
     /* Size per RFC 7541 §4.1: name_len + value_len + 32 per entry */
     decoded_size += name_buf.len + value_buf.len + 32
     decoded_count += 1
@@ -1823,14 +1823,14 @@ hpack_decode_block(session, data, len, suppress_callbacks, error_stream_id):
       validate TE header: only "trailers" value permitted
 
     if !stream_error_pending:
-      /* Invalidate hive_buf_t handles after callback — before next iteration */
+      /* Invalidate hive_buf_t handles after callback - before next iteration */
       cb_ret = fire on_header(session, stream_id, &name_buf, &value_buf,
                               flags, user_data)
       name_buf.flags  &= ~HIVE_BUF_VALID  /* clear in library's own objects */
       value_buf.flags &= ~HIVE_BUF_VALID
       /* on_header return value handling:
        * - HIVE_OK:               continue normally
-       * - HIVE_ERR_COMPRESSION:  connection error — COMPRESSION_ERROR GOAWAY;
+       * - HIVE_ERR_COMPRESSION:  connection error - COMPRESSION_ERROR GOAWAY;
        *                           dynamic table is still consistent at this
        *                           point (entry already inserted above), so
        *                           GOAWAY is safe to send immediately
@@ -1870,21 +1870,21 @@ hpack_decode_block(session, data, len, suppress_callbacks, error_stream_id):
     /* Normal stream error: RST targets error_stream_id.
      * For HEADERS: error_stream_id == reassembly_stream_id (the HEADERS stream).
      * For PUSH_PROMISE: error_stream_id == reassembly_promised_stream_id
-     * (the promised stream — the carrying stream is unaffected). */
+     * (the promised stream - the carrying stream is unaffected). */
     stream = lookup_stream(session, error_stream_id)
     if stream != NULL:
       fire on_stream_close(session, error_stream_id,
           HIVE_H2_PROTOCOL_ERROR, user_data)
       stream_close(session, stream)
     send RST_STREAM PROTOCOL_ERROR for error_stream_id
-    /* Do NOT fire on_headers_complete — the stream is being reset. */
+    /* Do NOT fire on_headers_complete - the stream is being reset. */
     return HIVE_ERR_PROTOCOL
 
   cb_ret = fire on_headers_complete(session, stream_id, end_stream, user_data)
   /* on_headers_complete return value handling:
    * - HIVE_OK:               done
-   * - HIVE_ERR_COMPRESSION:  connection error — COMPRESSION_ERROR GOAWAY
-   * - any other HIVE_ERR_*:  stream error — RST_STREAM PROTOCOL_ERROR */
+   * - HIVE_ERR_COMPRESSION:  connection error - COMPRESSION_ERROR GOAWAY
+   * - any other HIVE_ERR_*:  stream error - RST_STREAM PROTOCOL_ERROR */
   if cb_ret == HIVE_ERR_COMPRESSION:
     return session_error(s, HIVE_ERR_COMPRESSION, HIVE_H2_COMPRESSION_ERROR, 0)
   else if cb_ret != HIVE_OK:
@@ -1909,7 +1909,7 @@ both the decoded name and decoded value are available simultaneously when the
 length would exceed `opt_max_header_string_size` or if the encoded string
 length field claims more bytes than remain in the header block (truncated
 string). These are HPACK decoding errors and must surface as connection errors
-of type COMPRESSION_ERROR per RFC 9113 §4.3 — not stream errors. On success,
+of type COMPRESSION_ERROR per RFC 9113 §4.3 - not stream errors. On success,
 `hive_buf_t.data` points to the appropriate scratch buffer.
 
 **Non-Huffman strings**: return a direct pointer into the source buffer
@@ -1961,7 +1961,7 @@ hpack_decode_int(const uint8_t *src, size_t len, int prefix_bits,
         if (m > 28)
             return HPACK_INT_OVERFLOW; /* overflow guard */
     }
-    return HPACK_INT_OVERFLOW;      /* truncated — ran out of input bytes */
+    return HPACK_INT_OVERFLOW;      /* truncated - ran out of input bytes */
 }
 ```
 
@@ -1983,13 +1983,13 @@ hpack_encode_block(hpack_table_t *table,
 If `enc_table.has_pending == 1`, the encoder emits dynamic table size update
 representation(s) as the first bytes of the output block before any header
 fields. If `enc_table.pending_min != enc_table.pending_max`, emit
-`pending_min` first then `pending_max` (RFC 7541 §6.3 — the lowest value
+`pending_min` first then `pending_max` (RFC 7541 §6.3 - the lowest value
 reached must be emitted when an intermediate decrease occurred). If
 `pending_min == pending_max`, emit a single size update. After emitting:
 
 1. Evict to `pending_min` first: `hpack_table_evict_to(&enc_table, pending_min)`.
    This synchronizes the encoder's table with the decoder's state at the
-   intermediate minimum — the decoder already evicted to this limit when it
+   intermediate minimum - the decoder already evicted to this limit when it
    processed the corresponding size update from our encoder output.
 2. Set `enc_table.max_size = pending_min`.
 3. If `pending_max != pending_min`: evict to `pending_max`:
@@ -2018,7 +2018,7 @@ When `max_size > HPACK_LINEAR_THRESHOLD (16384)`:
 typedef struct {
     uint32_t name_hash;   /* FNV-1a 32-bit hash of name bytes */
     uint32_t value_hash;  /* FNV-1a 32-bit hash of value bytes */
-    uint32_t ring_idx;    /* index into ring[] — HPACK_HASH_EMPTY or HPACK_HASH_TOMBSTONE */
+    uint32_t ring_idx;    /* index into ring[] - HPACK_HASH_EMPTY or HPACK_HASH_TOMBSTONE */
 } hpack_hash_slot_t;
 ```
 
@@ -2051,7 +2051,7 @@ probe from name_hash & hash_mask:
     compare full name bytes for collision safety
     if name matches:
       if slot.value_hash == query_value_hash:
-        compare full value bytes — exact match candidate
+        compare full value bytes - exact match candidate
       else:
         name-only match candidate (lower priority)
   continue probing until EMPTY or all slots scanned
@@ -2070,9 +2070,9 @@ same-name entries would require enumerating the entire probe cluster.
 ### 5.1 Two-Layer Layout
 
 ```
-stream_hash:       stream_hash_entry_t[hash_table_size]      — Layer 1
-stream_slots:      hive_stream_t[opt_max_concurrent_streams]  — Layer 2
-stream_free_stack: uint32_t[opt_max_concurrent_streams]       — free slot indices
+stream_hash:       stream_hash_entry_t[hash_table_size]      - Layer 1
+stream_slots:      hive_stream_t[opt_max_concurrent_streams]  - Layer 2
+stream_free_stack: uint32_t[opt_max_concurrent_streams]       - free slot indices
 ```
 
 Both layers are pre-allocated from the session arena at creation.
@@ -2102,7 +2102,7 @@ typedef struct {
     uint32_t             stream_id;                 /* 0 = slot not in use */
     uint8_t              state;                     /* hive_stream_state_t */
     uint8_t              flags;                     /* HIVE_STREAM_FLAG_* */
-    uint8_t              weight;                    /* priority weight — retained, not used */
+    uint8_t              weight;                    /* priority weight - retained, not used */
     uint8_t              _pad;
     int32_t              send_window;               /* stream-level send window */
     int32_t              recv_window;               /* stream-level recv window */
@@ -2237,7 +2237,7 @@ opened) is a stream error STREAM_CLOSED; for `stream_id > last_stream_id_remote`
 (never opened / idle) it is a connection error PROTOCOL_ERROR.
 
 †† PUSH_PROMISE on half-closed(local): valid per RFC 9113 §6.6. The stream is
-half-closed from the receiver's (client's) perspective — the client has sent
+half-closed from the receiver's (client's) perspective - the client has sent
 END_STREAM but the server may still send PUSH_PROMISE on the associated stream
 before the response completes. RECV_PUSH_PROMISE_PAYLOAD explicitly allows
 both OPEN and HALF_CLOSED_LOCAL carrying streams.
@@ -2253,8 +2253,8 @@ Notes on corrected cells:
   transitions to half-closed (local) per RFC 9113 §5.1.1.
 - `reserved (local) | HEADERS received → error`: the table shows received
   frames. Receiving HEADERS on a reserved (local) stream is a stream error
-  PROTOCOL_ERROR. Sending HEADERS on reserved (local) — which is not shown
-  here — transitions to half-closed (remote).
+  PROTOCOL_ERROR. Sending HEADERS on reserved (local) - which is not shown
+  here - transitions to half-closed (remote).
 - `half-closed (remote) | WINDOW_UPDATE → valid`: RFC 9113 §5.1 explicitly
   lists WINDOW_UPDATE as valid in this state.
 - `reserved (local) | WINDOW_UPDATE → valid`: the peer in reserved (remote)
@@ -2424,7 +2424,7 @@ if end_stream:
             fire on_stream_close(session, stream_id, HIVE_H2_NO_ERROR, user_data)
             stream_close(session, stream)
 else:
-    /* No END_STREAM — handle RESERVED_LOCAL non-final push response HEADERS.
+    /* No END_STREAM - handle RESERVED_LOCAL non-final push response HEADERS.
      * RFC 9113 §5.1.1: sending HEADERS on RESERVED_LOCAL (push response
      * headers with body to follow) transitions to HALF_CLOSED_REMOTE. */
     stream = lookup(stream_id)
@@ -2461,7 +2461,7 @@ data_source.read_callback(session, stream_id,
  * Discard the reserved iov entry (undo the 9-byte header reservation),
  * clear stream->data_source.read_callback = NULL so send_queue_flush_data
  * skips this stream on subsequent calls (data_source is an embedded struct,
- * not a pointer — clear the callback field to mark it inactive), and return
+ * not a pointer - clear the callback field to mark it inactive), and return
  * without queuing any DATA frame. The caller must then call
  * hive_submit_trailers() to send the trailer HEADERS frame with END_STREAM. */
 if bytes_written == 0 && !(data_flags & HIVE_DATA_FLAG_EOF):
@@ -2479,22 +2479,22 @@ else:
     send_iov[send_iov_count++] = {send_buf + send_buf_used, bytes_written}
     send_buf_used += bytes_written
 
-/* Write DATA frame header — length now known */
+/* Write DATA frame header - length now known */
 hdr_flags = 0
 if data_flags & HIVE_DATA_FLAG_EOF:
     hdr_flags |= 0x01   /* END_STREAM */
     /* Correct state transition depends on current stream state */
     if stream->state == OPEN:
         stream->state = HALF_CLOSED_LOCAL
-        /* Stream stays live — decrement windows after frame_hdr_write_at below */
+        /* Stream stays live - decrement windows after frame_hdr_write_at below */
     else if stream->state == HALF_CLOSED_REMOTE:
         stream->state = CLOSED
-        /* Decrement send windows BEFORE stream_close() — stream_close() returns
+        /* Decrement send windows BEFORE stream_close() - stream_close() returns
          * the slot to the free pool. Any field access after stream_close() is a
          * stale-slot read regardless of what the memory contains. */
         session->send_window -= bytes_written
         stream->send_window  -= bytes_written
-        /* Fire on_stream_close immediately — the stream is logically closed
+        /* Fire on_stream_close immediately - the stream is logically closed
          * once END_STREAM is queued locally. The callback fires before
          * transmission; callers must not interpret it as "peer confirmed".
          * See §9.11 for the documented timing contract. */
@@ -2515,7 +2515,7 @@ if stream != NULL:
 
 ### 6.6 Drain and Partial Send
 
-The send callback returns `ssize_t` — the number of bytes it actually wrote.
+The send callback returns `ssize_t` - the number of bytes it actually wrote.
 The library retains any unsent portion and resumes on the next call.
 
 ```c
@@ -2568,7 +2568,7 @@ hive_session_send(hive_session_t *session)
         session->user_data);
 
     if (written < 0) {
-        /* Fatal error — session is dead */
+        /* Fatal error - session is dead */
         session->session_state = HIVE_SESSION_CLOSED;
         return HIVE_ERR_PROTOCOL;
     }
@@ -2576,13 +2576,13 @@ hive_session_send(hive_session_t *session)
     session->send_partial_offset += (size_t)written;
 
     if (session->send_partial_offset >= total) {
-        /* All bytes sent — reset queue */
+        /* All bytes sent - reset queue */
         session->send_iov_count      = 0;
         session->send_buf_used       = 0;
         session->send_partial_offset = 0;
         session->send_partial        = 0;
     } else {
-        /* Partial write — retain unsent tail */
+        /* Partial write - retain unsent tail */
         session->send_partial = 1;
         /* hive_session_want_write() will return 1 */
     }
@@ -2608,7 +2608,7 @@ if send_iov_count + needed_entries > opt_max_send_iov:
   hive_session_send(session)   /* may be a partial flush */
   if send_partial:             /* previous send was itself partial */
     return HIVE_ERR_WOULDBLOCK /* cannot queue more until fully drained */
-  /* Queue is now empty — proceed */
+  /* Queue is now empty - proceed */
   continue queuing
 ```
 
@@ -2634,12 +2634,12 @@ Copy count on the receive hot path:
 
 | Frame / Header type | Copies |
 |---|---|
-| DATA frame body | 0 — callback receives pointer into caller's buffer |
-| Indexed HPACK header | 0 — pointer into static or dynamic table |
-| Huffman-encoded header name | 1 — decode into hpack_scratch_name |
-| Huffman-encoded header value | 1 — decode into hpack_scratch_value |
-| HPACK dynamic table entry | 1 — copy into arena on insert |
-| HEADERS reassembly | 1 — copy into reassembly_buf |
+| DATA frame body | 0 - callback receives pointer into caller's buffer |
+| Indexed HPACK header | 0 - pointer into static or dynamic table |
+| Huffman-encoded header name | 1 - decode into hpack_scratch_name |
+| Huffman-encoded header value | 1 - decode into hpack_scratch_value |
+| HPACK dynamic table entry | 1 - copy into arena on insert |
+| HEADERS reassembly | 1 - copy into reassembly_buf |
 
 ### 7.2 hive_buf_t: Explicit Retain (by-pointer delivery)
 
@@ -2649,7 +2649,7 @@ not copies. The library clears `HIVE_BUF_VALID` in the actual handles
 immediately after the callback returns, making any stale pointer
 immediately detectable in debug builds.
 
-The caller calls `hive_buf_retain()` only for headers it needs to keep —
+The caller calls `hive_buf_retain()` only for headers it needs to keep -
 typically 3–4 per request for a server (`:method`, `:path`, `host`,
 `content-type`). In a debug build, ASan poisons the data regions after
 callback return, catching accidental retain-after-return immediately.
@@ -2665,7 +2665,7 @@ all share the same iovec; no intermediate buffering or copying between them.
 ### 7.4 HPACK Table Lookup
 
 Linear scan for `max_size ≤ 16384`: scan from `ring_head - 1` backward
-through `count` live entries. Most-recently-inserted first — common headers
+through `count` live entries. Most-recently-inserted first - common headers
 repeat across requests and are found early. L1 cache resident. 5–30 ns at
 default 4096-byte table.
 
@@ -2725,7 +2725,7 @@ if (session->recv_consumed > session->recv_window / 2) {
 **Flow-control accounting note**: The pseudocode above decrements `recv_window`
 and increments `recv_consumed` by `cur_frame.length` (the full frame payload
 including padding) when the first bytes of the DATA frame are processed, before
-any partial delivery to the callback. This is correct — the window is consumed
+any partial delivery to the callback. This is correct - the window is consumed
 by the frame's arrival, not by callback delivery. `recv_window` is restored
 when the WINDOW_UPDATE is queued via `send_queue_window_update()`.
 
@@ -2744,10 +2744,10 @@ avoids tracking a separate "pending credit" field in the session struct.
 ### 8.1 HPACK Dynamic Table: Always Copy
 
 Header strings entering the HPACK dynamic table are always copied into
-library-owned arena memory. This is a correctness and security requirement —
+library-owned arena memory. This is a correctness and security requirement -
 the dynamic table persists for the connection lifetime. Storing pointers into
 the caller's input buffer would cause silent corruption on buffer reuse. The
-copy uses the session allocator — near-zero cost with an arena.
+copy uses the session allocator - near-zero cost with an arena.
 
 This is enforced unconditionally. There is no option to disable it.
 
@@ -2755,14 +2755,14 @@ This is enforced unconditionally. There is no option to disable it.
 
 Two independent limits, enforced incrementally in `hpack_decode_block()`:
 
-**Limit 1 — Decoded header list size**: configurable via
+**Limit 1 - Decoded header list size**: configurable via
 `hive_options_set_max_header_list_size()`, default 65536 bytes. Running sum
 of `name_len + value_len + 32` for each decoded header (RFC 7541 §4.1 defines
 the size of a header field as name_len + value_len + 32). Exceeded: RST_STREAM
 PROTOCOL_ERROR. Decoding continues for the remainder of the block to maintain
 dynamic table consistency.
 
-**Limit 2 — Header count**: configurable via
+**Limit 2 - Header count**: configurable via
 `hive_options_set_max_header_count()`, default 100. Running count of decoded
 headers. Exceeded: RST_STREAM PROTOCOL_ERROR. Same continued-decoding
 requirement.
@@ -2785,7 +2785,7 @@ flood attacks before HPACK decoding begins.
 ```c
 if (session->reassembly_len + n > session->opt_max_continuation_size) {
     /*
-     * SECURITY: CONTINUATION flood — connection error per RFC 9113 §4.3.
+     * SECURITY: CONTINUATION flood - connection error per RFC 9113 §4.3.
      * This is intentionally a GOAWAY, not RST_STREAM.
      */
     return session_error(session, HIVE_ERR_PROTOCOL,
@@ -2813,7 +2813,7 @@ if (session->inbound_settings_count > session->opt_max_settings_pending)
 ```
 
 `inbound_settings_count` is decremented when the SETTINGS ACK is queued into
-the send buffer (not when received, not when transmitted — when queued). The
+the send buffer (not when received, not when transmitted - when queued). The
 fixed-size design prevents unbounded accumulation. With the default of
 `opt_max_settings_pending = 3`, at most 3 inbound SETTINGS may be awaiting
 ACK at any time.
@@ -2839,7 +2839,7 @@ session->rst_flood_count++;
 if (session->rst_flood_count > session->opt_rst_flood_threshold) {
     /*
      * SECURITY: RST_STREAM flood threshold exceeded.
-     * Library does not act unilaterally — caller decides response.
+     * Library does not act unilaterally - caller decides response.
      */
     if (session->callbacks.on_rst_stream_flood != NULL)
         session->callbacks.on_rst_stream_flood(session,
@@ -2875,7 +2875,7 @@ If the peer sends DATA in excess of the receive window, the violation is caught
 on the first entry to `RECV_DATA_PAYLOAD` for that frame:
 
 ```c
-/* SECURITY: receive-side flow control enforcement — once per frame */
+/* SECURITY: receive-side flow control enforcement - once per frame */
 if (!fc_accounted) {
     if ((uint32_t)cur_frame.length > (uint32_t)stream->recv_window)
         return stream_error(session, stream_id, HIVE_ERR_FLOW_CONTROL,
@@ -2902,7 +2902,7 @@ underlying data regions (`hpack_scratch_name`, `hpack_scratch_value`,
 `reassembly_buf`) are poisoned via `HIVE_ASAN_POISON`. Any access to a stale
 pointer after callback return produces an immediate ASan abort.
 
-`hive_buf_retain()` must be called only within the callback — it copies
+`hive_buf_retain()` must be called only within the callback - it copies
 the data to arena memory and sets `HIVE_BUF_OWNED`. The copy is not poisoned.
 Attempting to call `hive_buf_retain()` after callback return asserts in debug
 builds.
@@ -2986,7 +2986,7 @@ typedef struct {
     uint8_t        flags;
 } hive_nv_t;
 
-#define HIVE_NV_FLAG_NO_INDEX  0x01u  /* never-indexed — do not store in HPACK table */
+#define HIVE_NV_FLAG_NO_INDEX  0x01u  /* never-indexed - do not store in HPACK table */
 ```
 
 ### 9.4 Data Source
@@ -3012,7 +3012,7 @@ struct hive_data_source {
 #define HIVE_DATA_FLAG_NO_COPY  0x02u  /* callback redirected *buf to caller-owned memory */
 ```
 
-The `read_callback` receives `uint8_t **buf` — a pointer to a pointer.
+The `read_callback` receives `uint8_t **buf` - a pointer to a pointer.
 
 **Copy path** (default): the library sets `*buf` to point into `send_buf`.
 The callback writes body bytes into `**buf` and returns bytes written. The
@@ -3027,7 +3027,7 @@ without copying.
 `hive_session_want_write()` returns 0 after a `hive_session_send()` call
 that fully drains the batch containing this NO_COPY entry. The memory must
 remain valid across an arbitrary number of partial-send cycles. It is NOT
-sufficient to release the buffer after the first send callback invocation —
+sufficient to release the buffer after the first send callback invocation -
 partial sends leave the iovec referenced across multiple `hive_session_send()`
 calls. Releasing the buffer after a partial send causes use-after-free when
 the library resends the unsent tail.
@@ -3047,7 +3047,7 @@ void            hive_options_free(hive_options_t *);
 ```
 
 `hive_options_new()` always uses system malloc regardless of any custom
-allocator — options are created once at startup, not per connection.
+allocator - options are created once at startup, not per connection.
 
 Option ranges marked with † are deliberate implementation limits narrower than
 the protocol allows; the rationale is noted.
@@ -3065,7 +3065,7 @@ the protocol allows; the rationale is noted.
 | `hive_options_set_max_settings_pending(opt, v)` | 3 | 1–255 | max unACK'd outbound SETTINGS; also used as inbound flood threshold |
 | `hive_options_set_rst_stream_flood_threshold(opt, v)` | 100 | 1–65535 | RST_STREAM rate limit |
 | `hive_options_set_rst_stream_flood_window_secs(opt, v)` | 10 | 1–3600 | RST_STREAM window |
-| `hive_options_set_max_send_iov(opt, v)` | 512 | 64–HIVE_SEND_IOV_MAX | iovec array size. Upper bound is the compile-time constant HIVE_SEND_IOV_MAX (default 1024). Must not exceed HIVE_SEND_IOV_MAX — enforced by hive_options_set_max_send_iov() returning HIVE_ERR_INVALID. |
+| `hive_options_set_max_send_iov(opt, v)` | 512 | 64–HIVE_SEND_IOV_MAX | iovec array size. Upper bound is the compile-time constant HIVE_SEND_IOV_MAX (default 1024). Must not exceed HIVE_SEND_IOV_MAX - enforced by hive_options_set_max_send_iov() returning HIVE_ERR_INVALID. |
 | `hive_options_set_max_header_string_size(opt, v)` | 8192 | 256–65536 | Huffman scratch buffer size (per buffer; two buffers allocated) |
 | `hive_options_set_no_http_messaging(opt, v)` | 0 | 0–1 | 1 = skip RFC 9113 §8 validation |
 | `hive_options_set_no_auto_ping_ack(opt, v)` | 0 | 0–1 | 1 = suppress automatic PING ACK; on_ping fires instead |
@@ -3098,7 +3098,7 @@ typedef struct {
      * copy the data to session allocator memory. After this callback returns,
      * HIVE_BUF_VALID is cleared in the handle and the data regions are
      * poisoned in ASan debug builds. Do not store name or value pointers
-     * beyond the callback — retain or copy.
+     * beyond the callback - retain or copy.
      *
      * flags: HIVE_NV_FLAG_NO_INDEX if the header is never-indexed.
      *
@@ -3121,7 +3121,7 @@ typedef struct {
      * DATA bytes received on stream_id.
      *
      * data: pointer directly into the caller's buffer passed to
-     *       hive_session_recv(). Zero copy — no internal DATA staging.
+     *       hive_session_recv(). Zero copy - no internal DATA staging.
      *
      * LIFETIME: valid only within this callback. Copy if needed beyond
      * callback return. This lifetime is a documented contract only; it is
@@ -3172,7 +3172,7 @@ typedef struct {
      * dedicated push-header callback to avoid this attribution ambiguity.
      *
      * Return HIVE_OK to accept the push.
-     * Return HIVE_ERR_REFUSED_STREAM to reject — the library sends
+     * Return HIVE_ERR_REFUSED_STREAM to reject - the library sends
      * RST_STREAM REFUSED_STREAM on the promised stream and closes it.
      * Any other return value is treated as HIVE_OK (push accepted).
      */
@@ -3185,7 +3185,7 @@ typedef struct {
      * last_stream_id: highest stream ID peer will process.
      * error_code:     RFC 9113 wire error code.
      * debug_data:     optional opaque debug data from the GOAWAY frame.
-     *                 Pointer is into reassembly_buf — valid only within callback.
+     *                 Pointer is into reassembly_buf - valid only within callback.
      *                 NULL only if the GOAWAY frame contained no debug data
      *                 (debug_len == 0 in the wire frame).
      *                 If debug data was present but exceeded reassembly_buf
@@ -3253,7 +3253,7 @@ typedef struct {
      * or into caller memory (DATA body with HIVE_DATA_FLAG_NO_COPY).
      *
      * Returns ssize_t: number of bytes written (0..total).
-     * Return -1 on fatal error — session is marked CLOSED.
+     * Return -1 on fatal error - session is marked CLOSED.
      * The library retains any unsent portion for the next call.
      *
      * The caller is responsible for calling hive_session_send() again
@@ -3305,7 +3305,7 @@ hive_session_t *hive_session_client_new(
  * Create a server-role session from an HTTP/1.1 Upgrade context.
  *
  * settings_payload: base64url-decoded value of the HTTP2-Settings header
- *   from the client's Upgrade request. Must not be NULL — a valid h2c
+ *   from the client's Upgrade request. Must not be NULL - a valid h2c
  *   upgrade MUST include exactly one HTTP2-Settings header field per RFC
  *   9113 §3.2.1. If the header was absent, the Upgrade request is not a
  *   valid h2c upgrade; reject it at the HTTP/1.1 layer and do not call
@@ -3343,7 +3343,7 @@ hive_session_t *hive_session_server_upgrade(
  *             and regular headers. Must include :method, :path, :scheme.
  * nvlen:      number of entries in nva.
  * end_stream: must always be 1. Stream 1 for an h2c upgrade is implicitly
- *             half-closed from the client per RFC 9113 §3.2 — the request
+ *             half-closed from the client per RFC 9113 §3.2 - the request
  *             body (if any) was sent over HTTP/1.1 before the connection
  *             upgrade and cannot arrive as HTTP/2 DATA frames. Passing 0 is
  *             a caller error.
@@ -3413,7 +3413,7 @@ int hive_session_send(hive_session_t *session);
  * tail from a partial write). Returns 0 if the send queue is fully drained.
  *
  * Use to register EPOLLOUT / EVFILT_WRITE interest after a partial send.
- * Advisory — the caller may choose to send more aggressively.
+ * Advisory - the caller may choose to send more aggressively.
  */
 int hive_session_want_write(hive_session_t *session);
 
@@ -3429,7 +3429,7 @@ int hive_session_want_write(hive_session_t *session);
 int hive_session_want_read(hive_session_t *session);
 ```
 
-### 9.9 Submit — Server Role
+### 9.9 Submit - Server Role
 
 ```c
 /*
@@ -3459,12 +3459,12 @@ int hive_submit_response(hive_session_t *session,
  * Trailers must not contain pseudo-headers.
  *
  * Call sequence for a response with trailers:
- * 1. hive_submit_response() with a data_source — body DATA frames follow
+ * 1. hive_submit_response() with a data_source - body DATA frames follow
  * 2. data_source.read_callback returns data WITHOUT HIVE_DATA_FLAG_EOF
  *    for all body chunks except the last
  * 3. When the body is exhausted, the read_callback returns 0 bytes (no EOF
- *    flag) — this signals no more DATA, leaving the stream open for trailers
- * 4. Call hive_submit_trailers() — sends HEADERS with END_STREAM
+ *    flag) - this signals no more DATA, leaving the stream open for trailers
+ * 4. Call hive_submit_trailers() - sends HEADERS with END_STREAM
  *
  * Do NOT set HIVE_DATA_FLAG_EOF on the final DATA frame when trailers follow.
  * HIVE_DATA_FLAG_EOF closes the local side immediately with END_STREAM on the
@@ -3518,7 +3518,7 @@ int hive_submit_rst_stream(hive_session_t *session,
     uint32_t stream_id, uint32_t error_code);
 
 /*
- * Initiate two-phase graceful shutdown — phase 1.
+ * Initiate two-phase graceful shutdown - phase 1.
  *
  * Sends GOAWAY with last_stream_id = 0x7FFFFFFF and error code NO_ERROR.
  * This signals the peer to stop opening new streams while allowing existing
@@ -3532,7 +3532,7 @@ int hive_submit_rst_stream(hive_session_t *session,
 int hive_submit_goaway_prepare(hive_session_t *session);
 
 /*
- * Complete two-phase graceful shutdown — phase 2.
+ * Complete two-phase graceful shutdown - phase 2.
  *
  * Sends GOAWAY with the actual last_stream_id_remote (highest stream ID
  * the server has processed) and the given error_code.
@@ -3566,7 +3566,7 @@ int hive_submit_ping_ack(hive_session_t *session,
     const uint8_t opaque_data[8]);
 ```
 
-### 9.10 Submit — Client Role
+### 9.10 Submit - Client Role
 
 ```c
 /*
@@ -3618,7 +3618,7 @@ hive_settings_t hive_session_get_remote_settings(hive_session_t *session);
  * Timing note: when a locally-sent END_STREAM closes a stream (e.g.
  * HALF_CLOSED_REMOTE → CLOSED in the send path), the stream state
  * transitions to CLOSED and on_stream_close fires in the same call that
- * queues the DATA/HEADERS frame — before the frame is transmitted. Callers
+ * queues the DATA/HEADERS frame - before the frame is transmitted. Callers
  * should not interpret on_stream_close as confirmation of peer receipt; it
  * means the stream is logically closed from the local perspective and the
  * close frame is queued. The stream slot is freed immediately; subsequent
@@ -3690,7 +3690,7 @@ int  hive_hpack_decode(hive_hpack_decoder_t *dec,
 #define HIVE_ERR_STREAM_CLOSED    -4   /* stream_id not open */
 #define HIVE_ERR_SESSION_CLOSED   -5   /* session in GOAWAY or CLOSED state */
 #define HIVE_ERR_WOULDBLOCK       -6   /* flow-controlled; retry after WINDOW_UPDATE */
-#define HIVE_ERR_COMPRESSION      -7   /* HPACK encoding/decoding error — fatal */
+#define HIVE_ERR_COMPRESSION      -7   /* HPACK encoding/decoding error - fatal */
 #define HIVE_ERR_FLOW_CONTROL     -8   /* flow control window overflow */
 #define HIVE_ERR_FRAME_SIZE       -9   /* frame exceeds advertised max frame size */
 #define HIVE_ERR_REFUSED_STREAM   -10  /* stream refused (push rejected, max concurrent) */
@@ -3706,7 +3706,7 @@ function to signal the timeout condition and receive this error. The mechanism
 for caller-driven timeout triggering will be specified in a future revision.
 
 ```c
-/* HPACK standalone decoder return values (positive — not error codes) */
+/* HPACK standalone decoder return values (positive - not error codes) */
 #define HIVE_HPACK_DECODE_EMIT     1   /* header decoded; call again */
 #define HIVE_HPACK_DECODE_DONE     2   /* block complete */
 
@@ -3744,12 +3744,12 @@ responding with a static file body.
 Stream 1 is new. Previous SETTINGS exchange is complete.
 
 ```
-Step 1 — epoll_wait fires; socket is readable
+Step 1 - epoll_wait fires; socket is readable
 
   n = tls_read(tls_ctx, read_buf, 4096);
   /* read_buf contains: [9 frame header bytes][N compressed header bytes] */
 
-Step 2 — hive_session_recv(session, read_buf, n)
+Step 2 - hive_session_recv(session, read_buf, n)
 
   recv_state = RECV_FRAME_HEADER
   · consume 9 bytes from read_buf → frame_hdr_buf
@@ -3758,7 +3758,7 @@ Step 2 — hive_session_recv(session, read_buf, n)
   · validate: inbound length N <= local_settings.max_frame_size ✓
   · validate: stream_id=1 is new, odd, > last_stream_id_remote (0)
   · validate: peer_stream_open_count (0) < opt_max_concurrent_streams (100)
-  · check stream ID exhaustion: 1 < (0x7FFFFFFFu - 1000u) — no GOAWAY needed
+  · check stream ID exhaustion: 1 < (0x7FFFFFFFu - 1000u) - no GOAWAY needed
   · pop slot 0 from stream_free_stack
   · initialise stream_slots[0]: stream_id=1, state=OPEN,
       send_window=65535, recv_window=65535, recv_consumed=0,
@@ -3782,25 +3782,25 @@ Step 2 — hive_session_recv(session, read_buf, n)
   · END_STREAM → stream 1 state = HALF_CLOSED_REMOTE
   · return n (all bytes consumed)
 
-Step 3 — inside on_headers_complete, caller calls:
+Step 3 - inside on_headers_complete, caller calls:
   hive_submit_response(session, 1, nva, nvlen, &data_source)
 
   · verify stream 1 is HALF_CLOSED_REMOTE ✓
   · encode_start headers using multi-iov approach (§6.4)
     · first_hdr_offset = 0; encode_start = 9
     · hpack_encode produces 12 bytes: [:status 200, content-type text/html]
-    · encoded_len=12 <= remote_settings.max_frame_size — simple case
+    · encoded_len=12 <= remote_settings.max_frame_size - simple case
     · write HEADERS frame header at send_buf[0..8]:
         length=12, type=0x1, flags=0x04 (END_HEADERS), stream_id=1
     · send_iov[0] = {send_buf+0, 9+12=21}
     · send_buf_used = 21
   · store data_source in stream_slots[0].data_source
 
-Step 4 — hive_session_recv() returns; event loop calls hive_session_send()
+Step 4 - hive_session_recv() returns; event loop calls hive_session_send()
 
   · send_partial == 0: call send_queue_flush_data(session)
   · stream 1 has pending data_source
-    · send_window check: session=65535, stream=65535 — flow control allows DATA
+    · send_window check: session=65535, stream=65535 - flow control allows DATA
     · max_len = min(16384, 65535, 65535) = 16384
     · hdr_offset = 21; send_buf_used → 30
     · send_iov[1] = {send_buf+21, 9}   (DATA frame header)
@@ -3818,7 +3818,7 @@ Step 4 — hive_session_recv() returns; event loop calls hive_session_send()
   · fire send(session, send_iov, 3, user_data)
       iov[0] = {send_buf+0,  21}     HEADERS frame (header+payload, contiguous)
       iov[1] = {send_buf+21,  9}     DATA frame header
-      iov[2] = {mmap_ptr,  8192}     file body — caller memory, zero copy
+      iov[2] = {mmap_ptr,  8192}     file body - caller memory, zero copy
 
   · caller: tls_write(tls_ctx, iov, 3)
     → returns 8230 (all bytes written)
@@ -3826,7 +3826,7 @@ Step 4 — hive_session_recv() returns; event loop calls hive_session_send()
   · send_partial_offset = 8230 >= total(8230): full send
   · send_iov_count = 0; send_buf_used = 0; send_partial = 0
 
-Step 5 — return to event loop
+Step 5 - return to event loop
   hive_session_want_write(session) = 0  (queue empty, no partial)
   hive_session_want_read(session)  = 1  (session still open)
 ```
@@ -3857,7 +3857,7 @@ Dominated by `send_buf` and `reassembly_buf`. Both are configurable.
 
 Setting `opt_max_continuation_size = 16384` (one max-frame-size) reduces
 per-session footprint to ~103 KB. At 1000 concurrent HTTP/2 connections in
-Wraith with arena allocators: ~103 MB — well within budget for a production
+Wraith with arena allocators: ~103 MB - well within budget for a production
 server.
 
 With a Wraith connection-scoped arena: one `malloc(~168 KB)` at connection

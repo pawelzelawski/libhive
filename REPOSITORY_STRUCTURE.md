@@ -27,7 +27,7 @@ into `$(INCLUDEDIR)`.
 
 ---
 
-## 2. include/ — Public Header
+## 2. include/ - Public Header
 
 ```
 include/
@@ -47,16 +47,16 @@ include/
 
 ---
 
-## 3. src/ — Library Source Files
+## 3. src/ - Library Source Files
 
 All library source lives here. No subdirectories. Each module is a `.c` file
 with a corresponding internal `.h` file. The public API is in `include/hive.h`
-only — internal headers are never installed and never included by embedders.
+only - internal headers are never installed and never included by embedders.
 
 ```
 src/
 │
-│   — Session and public API —
+│   - Session and public API -
 │
 ├── hive.c              # Session lifecycle and public API entry points.
 │                       # hive_session_server_new(), hive_session_client_new(),
@@ -65,7 +65,7 @@ src/
 │                       #   hive_session_free().
 │                       # session_prealloc(): allocates all sub-buffers from the
 │                       #   session allocator using goto cleanup. See ARCHITECTURE.md §2.
-│                       # hive_session_recv(): entry point — drives hive_frame.c
+│                       # hive_session_recv(): entry point - drives hive_frame.c
 │                       #   receive state machine.
 │                       # hive_session_send(): fires send callback with batched
 │                       #   iovec; returns int (HIVE_OK or HIVE_ERR_*); retains
@@ -107,15 +107,15 @@ src/
 │                       #   flag), pad_length_received (PADDED frame split-delivery
 │                       #   flag), reassembly_promised_stream_id (fragmented
 │                       #   PUSH_PROMISE promised stream ID), reassembly_type
-│                       #   (0=HEADERS, 1=PUSH_PROMISE — controls CONTINUATION
+│                       #   (0=HEADERS, 1=PUSH_PROMISE - controls CONTINUATION
 │                       #   completion path), goaway_error_code_recv (Region C).
 │                       #   v1.8/v1.9 additions: pad_validated (deferred padding
-│                       #   check flag — validated after fixed-prefix fields consumed);
+│                       #   check flag - validated after fixed-prefix fields consumed);
 │                       #   pending_min in hpack_table_t (lowest HEADER_TABLE_SIZE
-│                       #   reached since last encode — required for RFC 7541 §6.3
+│                       #   reached since last encode - required for RFC 7541 §6.3
 │                       #   two-update sequence).
 │                       #   v1.13/v1.14 additions: error_stream_id parameter
-│                       #   added to hpack_decode_block() — for HEADERS errors
+│                       #   added to hpack_decode_block() - for HEADERS errors
 │                       #   target reassembly_stream_id; for PUSH_PROMISE errors
 │                       #   target reassembly_promised_stream_id.
 │                       # hpack_table_t, hpack_entry_t, hpack_hash_slot_t.
@@ -129,10 +129,10 @@ src/
 │                       #   accessor macros.
 │                       # HIVE_ASAN_POISON / HIVE_ASAN_UNPOISON macros.
 │                       # HIVE_DEBUG build guards.
-│                       # NOT included by embedders — internal only.
+│                       # NOT included by embedders - internal only.
 │                       # See ARCHITECTURE.md §2.
 │
-│   — Frame parser, serialiser, and standalone header parser —
+│   - Frame parser, serialiser, and standalone header parser -
 │
 ├── hive_frame_bare.h   # Standalone frame header parser interface.
 │                       # No dependency on hive_session_t, callbacks, or stream state.
@@ -145,7 +145,7 @@ src/
 │
 ├── hive_frame_bare.c   # Standalone frame header serialisation and parsing.
 │                       # Implements frame_hdr_write_at() and frame_hdr_parse().
-│                       # Zero session coupling — safe to link into any binary.
+│                       # Zero session coupling - safe to link into any binary.
 │                       # See ARCHITECTURE.md §6.2.
 │                       # See TECH_STACK.md §7.8 (frame decoder tool usage).
 │
@@ -220,7 +220,7 @@ src/
 │                       #   table synchronization per RFC 7541 §2.3.2). RST_STREAM
 │                       #   and stream_close fire on END_HEADERS. Cleared after use.
 │                       # RST_STREAM error paths: all send RST_STREAM paths now call
-│                       #   on_stream_close and stream_close before queuing the RST —
+│                       #   on_stream_close and stream_close before queuing the RST -
 │                       #   RST_STREAM is terminal for the stream per RFC 9113 §6.4.
 │                       # WINDOW_UPDATE zero-increment: returns explicitly after error;
 │                       #   does not fall through to normal window update logic.
@@ -229,11 +229,11 @@ src/
 │                       # HEADERS + CONTINUATION + PUSH_PROMISE reassembly
 │                       #   into reassembly_buf.
 │                       # DATA delivery: on_data_chunk fires with pointer
-│                       #   directly into caller's buffer — zero copy.
+│                       #   directly into caller's buffer - zero copy.
 │                       #   Receive-side flow control enforced before delivery:
 │                       #   FLOW_CONTROL_ERROR on stream or connection window exceeded.
 │                       # CONTINUATION lockout: connection error (GOAWAY) per
-│                       #   RFC 9113 §4.3 — NOT RST_STREAM.
+│                       #   RFC 9113 §4.3 - NOT RST_STREAM.
 │                       #   Checked in RECV_FRAME_HEADER before any other processing.
 │                       #   See ARCHITECTURE.md §3.5.
 │                       # Fixed-length frame validation: SETTINGS-ACK=0, PING=8,
@@ -250,7 +250,7 @@ src/
 │                       #   exceeded limits → RST_STREAM REFUSED_STREAM on
 │                       #   promised stream (not carrying stream).
 │                       # HPACK decode errors on PUSH_PROMISE target the promised
-│                       #   stream via error_stream_id parameter — carrying stream
+│                       #   stream via error_stream_id parameter - carrying stream
 │                       #   is unaffected per RFC 9113 §6.6.
 │                       # SETTINGS flood: increments inbound_settings_count
 │                       #   (separate from the outbound pending_settings ring).
@@ -259,7 +259,7 @@ src/
 │                       # See ARCHITECTURE.md §3, §6.2.
 │                       # See CODING_STANDARDS.md §3.1 (SETTINGS directionality).
 │
-│   — HPACK —
+│   - HPACK -
 │
 ├── hive_hpack.h        # Internal HPACK interface.
 │                       # hpack_table_init(), hpack_table_free().
@@ -267,7 +267,7 @@ src/
 │                       #   fire on_header callbacks (by pointer), enforce
 │                       #   bomb limits, enforce size-update position rule.
 │                       # hpack_encode_block(): encode header list into send_buf.
-│                       # hpack_decode_int() — returns HPACK_INT_OVERFLOW on error.
+│                       # hpack_decode_int() - returns HPACK_INT_OVERFLOW on error.
 │                       # hpack_encode_int().
 │                       # Standalone API glue: hive_hpack_encoder_t,
 │                       #   hive_hpack_decoder_t (thin wrappers around
@@ -284,7 +284,7 @@ src/
 │                       # Dynamic table: ring buffer of hpack_entry_t* pointers.
 │                       #   Each entry is a single allocation:
 │                       #   [hpack_entry_t header | name bytes | value bytes].
-│                       #   SECURITY: every insertion copies into arena memory —
+│                       #   SECURITY: every insertion copies into arena memory -
 │                       #   never stores a pointer into the caller's buffer.
 │                       #   Oversized entry (rfc_size > max_size): evict table
 │                       #   fully but do not insert. See ARCHITECTURE.md §4.2.
@@ -299,7 +299,7 @@ src/
 │                       # hpack_decode_block(): Added error_stream_id parameter.
 │                       #   For HEADERS blocks: error_stream_id == reassembly_stream_id.
 │                       #   For PUSH_PROMISE blocks: error_stream_id ==
-│                       #   reassembly_promised_stream_id — HPACK decode errors on
+│                       #   reassembly_promised_stream_id - HPACK decode errors on
 │                       #   PUSH_PROMISE target the promised stream; the carrying
 │                       #   stream is unaffected per RFC 9113 §6.6.
 │                       #   RECV_CONTINUATION_PAYLOAD derives err_target from
@@ -317,12 +317,12 @@ src/
 │                       #   (not static/dynamic table data).
 │                       #   See ARCHITECTURE.md §4.5, §8.8.
 │                       # String decode: Huffman path decodes into hpack_scratch_name
-│                       #   (for names) or hpack_scratch_value (for values) — two
+│                       #   (for names) or hpack_scratch_value (for values) - two
 │                       #   separate scratch buffers so both decoded strings are
 │                       #   simultaneously valid when on_header fires;
 │                       #   literal path is a direct pointer into reassembly_buf.
 │                       #   Truncated string or string-too-long: HIVE_ERR_COMPRESSION
-│                       #   (connection error COMPRESSION_ERROR) — not PROTOCOL_ERROR.
+│                       #   (connection error COMPRESSION_ERROR) - not PROTOCOL_ERROR.
 │                       #   See ARCHITECTURE.md §4.6.
 │                       # Integer varint: returns HPACK_INT_OVERFLOW on truncation
 │                       #   or overflow. Callers check before use.
@@ -332,7 +332,7 @@ src/
 │                       # See ARCHITECTURE.md §4.
 │                       # See CODING_STANDARDS.md §3.2 (SECURITY comments).
 │
-│   — Stream table —
+│   - Stream table -
 │
 ├── hive_stream.h       # Internal stream table interface.
 │                       # stream_open(), stream_lookup(), stream_close().
@@ -349,13 +349,13 @@ src/
 │                       #   TOMBSTONE=0xFFFFFFFE.
 │                       # Layer 2: stream_slots (hive_stream_t array, 64 bytes each).
 │                       # Free stack: stream_free_stack (uint32_t array).
-│                       #   O(1) slot alloc and free — no allocation per stream.
+│                       #   O(1) slot alloc and free - no allocation per stream.
 │                       # Compaction: when tombstone ratio > 25% and closes_since_compact
 │                       #   >= 64. tombstone_count and closes_since_compact reset on
 │                       #   compaction. See ARCHITECTURE.md §5.6.
 │                       # See ARCHITECTURE.md §5.
 │
-│   — Flow control —
+│   - Flow control -
 │
 ├── hive_flow.h         # Internal flow control interface.
 │                       # flow_recv_data(): enforce recv_window, update
@@ -385,7 +385,7 @@ src/
 │                       #   SETTINGS_INITIAL_WINDOW_SIZE change.
 │                       # See ARCHITECTURE.md §7.7, §8.7.
 │
-│   — Send queue —
+│   - Send queue -
 │
 ├── hive_send.h         # Internal send queue interface.
 │                       # send_queue_append_ctrl(): queue control frame.
@@ -401,7 +401,7 @@ src/
 │                       # Control frames (SETTINGS, SETTINGS ACK, PING, PING ACK,
 │                       #   RST_STREAM, WINDOW_UPDATE, GOAWAY): frame header
 │                       #   + payload contiguous in send_buf, one iovec entry.
-│                       # HEADERS frames: no byte-shifting algorithm —
+│                       # HEADERS frames: no byte-shifting algorithm -
 │                       #   encoded payload placed contiguously at encode_start,
 │                       #   frame headers written after it, iovecs interleave
 │                       #   headers and payload chunks. Outbound frame sizing
@@ -411,13 +411,13 @@ src/
 │                       #   NO_COPY path: callback redirects *buf to caller memory;
 │                       #   iovec points directly to caller's memory.
 │                       #   END_STREAM flag included in frame_hdr_write_at() call
-│                       #   when HIVE_DATA_FLAG_EOF is set — not written retroactively.
+│                       #   when HIVE_DATA_FLAG_EOF is set - not written retroactively.
 │                       #   State transition on EOF: OPEN→HALF_CLOSED_LOCAL,
 │                       #   HALF_CLOSED_REMOTE→CLOSED; on_stream_close fires at
 │                       #   queue time (before transmission).
 │                       #   Send windows decremented BEFORE stream_close() to avoid
 │                       #   use-after-free of freed slot.
-│                       #   0-byte/no-EOF read_callback return: trailer handoff —
+│                       #   0-byte/no-EOF read_callback return: trailer handoff -
 │                       #   reserved iov and header space undone, data_source.read_callback
 │                       #   cleared to NULL (embedded struct, not pointer), returns
 │                       #   without queuing DATA frame; caller then calls
@@ -432,7 +432,7 @@ src/
 │                       #   would exceed opt_max_send_iov.
 │                       # See ARCHITECTURE.md §6.
 │
-│   — Security —
+│   - Security -
 │
 ├── hive_security.h     # Internal security module interface.
 │                       # security_check_rst_flood(): update rate counter using
@@ -446,7 +446,7 @@ src/
 │                       # RST_STREAM flood: rolling rate counter using
 │                       #   hive_monotonic_secs() clock abstraction (see
 │                       #   hive_clock.h). Window resets on expiry.
-│                       #   Fires on_rst_stream_flood — library does not
+│                       #   Fires on_rst_stream_flood - library does not
 │                       #   take unilateral action.
 │                       # Stream ID exhaustion: triggers prepare-phase GOAWAY
 │                       #   (last_stream_id=0x7FFFFFFF) when stream_id exceeds
@@ -462,7 +462,7 @@ src/
 │                       #   stream exhaustion.
 │                       # See ARCHITECTURE.md §8.5, §8.6.
 │
-│   — Clock abstraction —
+│   - Clock abstraction -
 │
 ├── hive_clock.h        # Monotonic clock abstraction.
 │                       # hive_monotonic_secs(): returns uint64_t seconds
@@ -476,7 +476,7 @@ src/
 │                       # See ARCHITECTURE.md §8.5.
 │                       # See DEVELOPMENT.md Phase 7 §7.3.
 │
-│   — Platform compat (Linux only) —
+│   - Platform compat (Linux only) -
 │
 ├── compat_str.h        # strlcpy and strlcat declarations for Linux.
 │                       # On OpenBSD: not compiled (libc provides them).
@@ -485,12 +485,12 @@ src/
 │
 └── compat_str.c        # Portable strlcpy() and strlcat() implementations.
                         # Compiled on Linux only via $(COMPAT_SRC) in Makefile.
-                        # Not compiled on OpenBSD — libc versions used instead.
+                        # Not compiled on OpenBSD - libc versions used instead.
 ```
 
 ---
 
-## 4. tests/ — Unit Tests and Conformance Helpers
+## 4. tests/ - Unit Tests and Conformance Helpers
 
 All test source lives here. Tests link against `libhive.a`, not directly
 against source files. This verifies that the library's exported symbols
@@ -499,7 +499,7 @@ are complete and correct.
 ```
 tests/
 │
-│   — Test harness —
+│   - Test harness -
 │
 ├── test_harness.h      # RUN() macro, tests_run / tests_passed counters.
 │                       # Contract: test functions return 1 on pass, 0 on fail.
@@ -512,7 +512,7 @@ tests/
 ├── run_tests.sh        # Shell runner. Executes run_tests binary, fails
 │                       #   on non-zero exit. Invoked by `make test`.
 │
-│   — Unit tests by module —
+│   - Unit tests by module -
 │
 ├── test_compat.c       # Platform compat layer tests.
 │                       # strlcpy: basic copy, truncation, empty source.
@@ -546,7 +546,7 @@ tests/
 │                       # Receive coverage: all 10 frame types + unknown type.
 │                       # Split delivery: 1-byte feed for all frame types.
 │                       # CONTINUATION lockout: connection error (GOAWAY),
-│                       #   not RST_STREAM — verified explicitly.
+│                       #   not RST_STREAM - verified explicitly.
 │                       # Fixed-length frame matrix: SETTINGS-ACK=0, PING=8,
 │                       #   RST_STREAM=4, WINDOW_UPDATE=4, PRIORITY=5, GOAWAY>=8.
 │                       # Inbound length validated against local_settings
@@ -602,13 +602,13 @@ tests/
 │
 ├── test_security.c     # Security limit and flood protection tests.
 │                       # CONTINUATION flood: GOAWAY (connection error) before
-│                       #   HPACK decode — explicitly NOT RST_STREAM.
+│                       #   HPACK decode - explicitly NOT RST_STREAM.
 │                       # PUSH_PROMISE flood: same connection error path.
 │                       # SETTINGS flood: inbound_settings_count counter (separate
 │                       #   from the outbound pending_settings ring).
 │                       # Unsolicited SETTINGS ACK: GOAWAY PROTOCOL_ERROR.
 │                       # RST_STREAM flood: callback at threshold using clock mock
-│                       #   (hive_test_clock_secs — no sleep() needed).
+│                       #   (hive_test_clock_secs - no sleep() needed).
 │                       # RST_STREAM window reset: advance clock mock, verify reset.
 │                       # Stream ID exhaustion: prepare-phase GOAWAY
 │                       #   (last_stream_id=0x7FFFFFFF, session stays OPEN).
@@ -626,10 +626,10 @@ tests/
 │                       #   verified manually in HIVE_DEBUG build (not static table).
 │                       # See TESTING.md §5.
 │
-│   — Conformance test server —
+│   - Conformance test server -
 │
 └── h2spec_server.c     # Minimal HTTP/2 server built on libhive.a.
-                        # Uses libtls (LibreSSL) for TLS — the only file in
+                        # Uses libtls (LibreSSL) for TLS - the only file in
                         #   tests/ that depends on libtls. Not linked into
                         #   libhive.a itself.
                         # Handles all h2spec test scenarios: responds 200 to
@@ -645,7 +645,7 @@ tests/
 
 ---
 
-## 5. tools/ — Developer Tools
+## 5. tools/ - Developer Tools
 
 ```
 tools/
@@ -657,7 +657,7 @@ tools/
                         #   length, and known payload fields (SETTINGS params,
                         #   WINDOW_UPDATE increment, RST_STREAM error code,
                         #   GOAWAY last_stream_id and error code, etc.).
-                        # Does NOT decode HPACK — shows raw compressed byte
+                        # Does NOT decode HPACK - shows raw compressed byte
                         #   count for HEADERS frames.
                         # Built from tools/hive_decode.c + src/hive_frame_bare.c
                         #   only. No dependency on hive_session_t, HPACK, stream
@@ -677,7 +677,7 @@ Single top-level Makefile. No per-directory Makefiles.
 
 ```makefile
 # Key targets
-make              # same as make release — builds libhive.a
+make              # same as make release - builds libhive.a
 make dev          # debug build with ASan/UBSan and HIVE_DEBUG=1
 make release      # optimised build with -fPIC and hardening flags
 make test         # build and run tests/run_tests.sh
@@ -693,7 +693,7 @@ make install      # install libhive.a and include/hive.h to PREFIX
 
 Platform detected via `$(shell uname)`. Compiles `src/compat_str.c` only
 on Linux. The `make install` target installs exactly two files and nothing
-else — no man pages, no pkg-config, no service scripts.
+else - no man pages, no pkg-config, no service scripts.
 
 The `make dev` target defines `-DHIVE_DEBUG=1` which enables ASan poisoning
 of `hive_buf_t` data after callbacks. The `HIVE_TEST_CLOCK=1` flag may be
@@ -762,7 +762,7 @@ Public API functions (declared in `include/hive.h`) are grouped by namespace:
 
 Internal functions (in `src/`) use the module prefix listed in the table
 above and are declared `static` if file-scoped or in the internal `.h` if
-shared across files. No internal function name begins with `hive_` — that
+shared across files. No internal function name begins with `hive_` - that
 prefix is reserved for the public API.
 
 **See Also**: PROJECT.md, ARCHITECTURE.md, TECH_STACK.md, CODING_STANDARDS.md,

@@ -1,4 +1,4 @@
-/* test_flow.c -- Phase 5 flow-control tests (Task 5.1: WINDOW_UPDATE recv) */
+/* test_flow.c -- Phase 5 flow-control tests (WINDOW_UPDATE receive path) */
 
 #include <stdint.h>
 #include <stddef.h>

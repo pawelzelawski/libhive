@@ -1,5 +1,5 @@
 /*
- * hive_frame_bare.c — standalone frame header serialisation and parsing
+ * hive_frame_bare.c - standalone frame header serialisation and parsing
  *
  * No dependency on hive_session_t, callbacks, or stream state.
  * Shared between libhive.a (frame parser and send path) and the

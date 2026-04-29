@@ -1,9 +1,8 @@
 /*
- * test_harness.h — minimal test assertion framework
+ * test_harness.h - minimal test assertion framework
  *
  * Test functions must return 1 on pass, 0 on fail.
  * Use the RUN() macro in a test binary's main() to register and run tests.
- * See TECH_STACK.md §6.1.
  */
 
 #ifndef TEST_HARNESS_H

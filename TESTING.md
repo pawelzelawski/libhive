@@ -73,7 +73,7 @@ assert(session->remote_settings.initial_window_size == 131072);
 assert(session->send_iov_count == 1);
 ```
 
-**Split delivery testing** — the most important correctness property of the
+**Split delivery testing** - the most important correctness property of the
 receive state machine. Every frame type must be tested with 1-byte delivery:
 
 ```c
@@ -83,7 +83,7 @@ test_split_feed(hive_session_t *s, const uint8_t *data, size_t len)
     for (size_t i = 0; i < len; i++) {
         ssize_t n = hive_session_recv(s, data + i, 1);
         if (n < 0)
-            return;  /* session error — test will fail on next assert */
+            return;  /* session error - test will fail on next assert */
     }
 }
 ```
@@ -97,7 +97,7 @@ Tests use a capture struct to record callback arguments. See TECH_STACK.md
 §6.3 for the pattern. The capture struct is passed as `user_data` and
 populated by test callback implementations.
 
-Verifying callback ordering is equally important as verifying values —
+Verifying callback ordering is equally important as verifying values -
 `on_begin_headers` must fire before `on_header`, which must fire before
 `on_headers_complete`. Tests assert on both the call count and the order.
 
@@ -163,10 +163,10 @@ Every module in `src/`:
 - Send queue (`hive_send.c`)
 - Security checks (`hive_security.c`)
 - Session lifecycle (`hive.c`)
-- Platform compat (`compat_str.c` — Linux only)
+- Platform compat (`compat_str.c` - Linux only)
 
 What does **not** need unit tests:
-- The NULL-allocator shim (tested implicitly — every session test with NULL
+- The NULL-allocator shim (tested implicitly - every session test with NULL
   allocator exercises it)
 - Build system files and config files
 
@@ -178,7 +178,7 @@ See DEVELOPMENT.md for the specific test cases required per phase.
 
 ```sh
 make dev
-make test           # ASan/UBSan compiled in — catches issues at runtime
+make test           # ASan/UBSan compiled in - catches issues at runtime
 
 make valgrind       # additional coverage
 # equivalent to:
@@ -203,14 +203,14 @@ platforms before a phase is considered complete.
 The allocator discipline rule (CODING_STANDARDS.md §2) is verified at two
 levels:
 
-**Static check** — run after every phase:
+**Static check** - run after every phase:
 ```sh
 grep -rn "malloc\|calloc\|realloc\|free" src/ | grep -v "null_alloc"
 ```
 Any match outside the NULL-allocator shim in `hive.c` is a violation and
 must be fixed before proceeding.
 
-**Dynamic check** — tracking allocator in unit tests:
+**Dynamic check** - tracking allocator in unit tests:
 
 ```c
 typedef struct {
@@ -265,13 +265,13 @@ a simple multi-connection model. Run TSAN on the test server binary.
 make test-tsan
 ```
 
-TSAN and ASan are mutually exclusive — TSAN runs as a separate target on
+TSAN and ASan are mutually exclusive - TSAN runs as a separate target on
 Linux only. It is not a per-commit gate; run it at phase boundaries and
 before each release.
 
 ---
 
-## 3. Manual Testing — Live Session Verification
+## 3. Manual Testing - Live Session Verification
 
 Starting from Phase 4, after a basic session can handle SETTINGS, a
 minimal test server can be used to verify behaviour with real HTTP/2 clients
@@ -296,7 +296,7 @@ manually during development.
 
 **Verify SETTINGS exchange and basic response**:
 ```sh
-# --http2-prior-knowledge bypasses TLS — for h2c test server
+# --http2-prior-knowledge bypasses TLS - for h2c test server
 curl -v --http2-prior-knowledge http://127.0.0.1:8080/
 # Expected:
 #   < HTTP/2 200
@@ -312,7 +312,7 @@ curl -v --http2 --insecure https://127.0.0.1:8443/
 
 **Verify multiplexed streams**:
 ```sh
-# Open 3 parallel requests — tests concurrent stream handling
+# Open 3 parallel requests - tests concurrent stream handling
 curl -v --http2-prior-knowledge            \
      --parallel --parallel-immediate       \
      http://127.0.0.1:8080/one             \
@@ -324,7 +324,7 @@ curl -v --http2-prior-knowledge            \
 
 **Verify PING keepalive**:
 ```sh
-# curl does not expose PING directly — use the frame decoder instead
+# curl does not expose PING directly - use the frame decoder instead
 # Capture traffic and inspect with tools/hive_decode (see §3.3)
 ```
 
@@ -349,7 +349,7 @@ curl -v --http2 --insecure https://127.0.0.1:8443/with-push
 
 `tools/hive_decode` reads raw HTTP/2 bytes (post-TLS-decryption) and
 pretty-prints each frame. Built from `tools/hive_decode.c` +
-`src/hive_frame_bare.c` only — no dependency on the session, HPACK, or
+`src/hive_frame_bare.c` only - no dependency on the session, HPACK, or
 stream table. See TECH_STACK.md §7.8 for usage.
 
 ```sh
@@ -381,7 +381,7 @@ can process the bytes. Use the test server's built-in plaintext mode
 
 ---
 
-## 4. Conformance Testing — h2spec
+## 4. Conformance Testing - h2spec
 
 ### 4.1 Purpose
 
@@ -394,7 +394,7 @@ is considered complete. There are no planned exceptions.
 
 If h2spec reports a failure, the correct response is:
 1. Reproduce the failure with the byte injection technique in unit tests
-2. Diagnose against the RFC — which section, which MUST?
+2. Diagnose against the RFC - which section, which MUST?
 3. Fix the library
 4. Only if the RFC analysis confirms Hive is correct and h2spec's expectation
    is wrong: document the discrepancy explicitly with the RFC citation
@@ -428,20 +428,20 @@ h2spec covers these RFC 9113 areas. All must pass:
 
 | h2spec group | RFC section | Key scenarios |
 |---|---|---|
-| `generic/1` | §3 — Starting HTTP/2 | Connection preface, upgrade |
-| `generic/2` | §4 — HTTP Frames | Frame format, unknown frames |
-| `generic/3` | §4.2 — Frame size | MAX_FRAME_SIZE enforcement |
-| `generic/4` | §4.3 — Header compression | HPACK integration |
-| `generic/5` | §5.1 — Stream states | State machine transitions |
-| `generic/6` | §5.4 — Error handling | Connection vs stream errors |
-| `generic/7` | §6 — Frame definitions | All 10 frame types |
-| `generic/8` | §6.5 — SETTINGS | Exchange, ACK, flood |
-| `generic/9` | §6.7 — PING | Auto-ACK, opaque data |
-| `generic/10` | §6.8 — GOAWAY | Graceful shutdown |
-| `generic/11` | §6.9 — Flow control | Window management |
-| `generic/12` | §7 — Error codes | All wire error codes |
+| `generic/1` | §3 - Starting HTTP/2 | Connection preface, upgrade |
+| `generic/2` | §4 - HTTP Frames | Frame format, unknown frames |
+| `generic/3` | §4.2 - Frame size | MAX_FRAME_SIZE enforcement |
+| `generic/4` | §4.3 - Header compression | HPACK integration |
+| `generic/5` | §5.1 - Stream states | State machine transitions |
+| `generic/6` | §5.4 - Error handling | Connection vs stream errors |
+| `generic/7` | §6 - Frame definitions | All 10 frame types |
+| `generic/8` | §6.5 - SETTINGS | Exchange, ACK, flood |
+| `generic/9` | §6.7 - PING | Auto-ACK, opaque data |
+| `generic/10` | §6.8 - GOAWAY | Graceful shutdown |
+| `generic/11` | §6.9 - Flow control | Window management |
+| `generic/12` | §7 - Error codes | All wire error codes |
 | `hpack/1–5` | RFC 7541 | Encoding, decoding, table management |
-| `http2/3.5` | §3.5 — h2c Upgrade | HTTP/1.1 Upgrade path |
+| `http2/3.5` | §3.5 - h2c Upgrade | HTTP/1.1 Upgrade path |
 | `http2/4–8` | §4–8 | Full HTTP/2 frame semantics |
 
 ### 4.4 Interpreting h2spec Output
@@ -457,7 +457,7 @@ h2spec prints each test result:
 
 A timeout usually means the server did not send the expected response
 within h2spec's deadline. Common causes:
-- SETTINGS ACK not queued (check Phase 4 task 4.0 — minimal send queue)
+- SETTINGS ACK not queued (check Phase 4 task 4.0 - minimal send queue)
 - Response not submitted in the callback (test server bug)
 - Send callback not writing to the socket (partial write not being retried)
 - `want_write()` not triggering re-registration for write-readiness
@@ -487,7 +487,7 @@ test_h2spec_stream_id_even_from_client(void)
     hive_session_t *s     = make_test_session_server(&cap);
     uint8_t         frame[9];
 
-    /* Build HEADERS frame with stream_id = 2 (even — invalid from client) */
+    /* Build HEADERS frame with stream_id = 2 (even - invalid from client) */
     frame[0] = 0x00; frame[1] = 0x00; frame[2] = 0x00;  /* length: 0 */
     frame[3] = 0x01;                                      /* type: HEADERS */
     frame[4] = 0x04;                                      /* END_HEADERS */
@@ -552,14 +552,14 @@ static const uint8_t oversized_frame[] = {
     0x00, 0x00, 0x00, 0x01,             /* stream_id: 1 */
 };
 /*
- * Expected: FRAME_SIZE_ERROR connection error — do not attempt to read payload.
+ * Expected: FRAME_SIZE_ERROR connection error - do not attempt to read payload.
  * Verify using local_settings.max_frame_size (not remote_settings).
  */
 feed_bytes(session, oversized_frame, sizeof(oversized_frame));
 assert(session->session_state == HIVE_SESSION_CLOSED);
 ```
 
-**Fixed-length frame violations** — complete matrix per ARCHITECTURE.md §3.3:
+**Fixed-length frame violations** - complete matrix per ARCHITECTURE.md §3.3:
 
 | Frame type | Required length | Wrong length to test | Expected error |
 |---|---|---|---|
@@ -653,7 +653,7 @@ Verify that the SETTINGS direction rules are correctly implemented:
 ```c
 /*
  * Stream-level: peer sends more DATA than stream->recv_window allows.
- * Expected: RST_STREAM FLOW_CONTROL_ERROR (stream error — session continues).
+ * Expected: RST_STREAM FLOW_CONTROL_ERROR (stream error - session continues).
  */
 static int
 test_recv_exceeds_stream_window(void)
@@ -712,7 +712,7 @@ make the distinction unambiguous.
 
 ### 5.7 hive_buf_t Lifetime Verification
 
-`on_header` passes `hive_buf_t *name` and `hive_buf_t *value` — pointers
+`on_header` passes `hive_buf_t *name` and `hive_buf_t *value` - pointers
 to library-owned handle objects. After the callback returns, the library
 clears `HIVE_BUF_VALID` in those objects.
 
@@ -756,7 +756,7 @@ manually during Phase 7:
 4. For a non-indexed Huffman-decoded header (decoded into `hpack_scratch_name`
    or `hpack_scratch_value`), verify ASan reports `heap-use-after-poison`
 5. For a non-Huffman header (pointer into `reassembly_buf`), same result
-6. For an indexed header (pointer into static table), verify no ASan abort —
+6. For an indexed header (pointer into static table), verify no ASan abort -
    static table data must NOT be poisoned
 
 Document both results as comments in `tests/test_security.c`.
@@ -767,7 +767,7 @@ Callbacks may return `HIVE_ERR_*`. The library must handle these correctly:
 
 - `on_begin_headers` returns `HIVE_ERR_NOMEM` → library suppresses all
   `on_header` delivery for this block but continues consuming and applying
-  dynamic table updates until the full block is decoded (RFC 7541 §2.3.2 —
+  dynamic table updates until the full block is decoded (RFC 7541 §2.3.2 -
   the connection-scoped dynamic table must remain consistent); RST_STREAM
   is sent after the block is fully consumed; session continues
 - `on_header` returns `HIVE_ERR_PROTOCOL` → same behaviour: remaining
@@ -797,15 +797,15 @@ platforms.
 
 | Module | Test file | Written | Valgrind clean | ASan clean | OpenBSD |
 |---|---|---|---|---|---|
-| compat_str | test_compat.c | — | — | — | — |
-| hive_frame_bare (standalone header parser) | test_frame.c | — | — | — | — |
-| HPACK (static + Huffman tables) | test_hpack.c | — | — | — | — |
-| HPACK (full encode/decode) | test_hpack.c | — | — | — | — |
-| Frame parser | test_frame.c | — | — | — | — |
-| Stream table | test_stream.c | — | — | — | — |
-| Flow control | test_flow.c | — | — | — | — |
-| Session lifecycle | test_session.c | — | — | — | — |
-| Security limits | test_security.c | — | — | — | — |
+| compat_str | test_compat.c | - | - | - | - |
+| hive_frame_bare (standalone header parser) | test_frame.c | - | - | - | - |
+| HPACK (static + Huffman tables) | test_hpack.c | - | - | - | - |
+| HPACK (full encode/decode) | test_hpack.c | - | - | - | - |
+| Frame parser | test_frame.c | - | - | - | - |
+| Stream table | test_stream.c | - | - | - | - |
+| Flow control | test_flow.c | - | - | - | - |
+| Session lifecycle | test_session.c | - | - | - | - |
+| Security limits | test_security.c | - | - | - | - |
 
 ### Key Test Cases
 
@@ -903,24 +903,24 @@ platforms.
 
 | h2spec group | Total tests | Passing | Notes |
 |---|---|---|---|
-| generic/1 — Starting HTTP/2 | — | — | — |
-| generic/2 — HTTP Frames | — | — | — |
-| generic/3 — Frame size | — | — | — |
-| generic/4 — Header compression | — | — | — |
-| generic/5 — Stream states | — | — | — |
-| generic/6 — Error handling | — | — | — |
-| generic/7 — Frame definitions | — | — | — |
-| generic/8 — SETTINGS | — | — | — |
-| generic/9 — PING | — | — | — |
-| generic/10 — GOAWAY | — | — | — |
-| generic/11 — Flow control | — | — | — |
-| generic/12 — Error codes | — | — | — |
-| hpack/1–5 | — | — | — |
-| http2/* | — | — | — |
-| **Total** | — | — | — |
+| generic/1 - Starting HTTP/2 | - | - | - |
+| generic/2 - HTTP Frames | - | - | - |
+| generic/3 - Frame size | - | - | - |
+| generic/4 - Header compression | - | - | - |
+| generic/5 - Stream states | - | - | - |
+| generic/6 - Error handling | - | - | - |
+| generic/7 - Frame definitions | - | - | - |
+| generic/8 - SETTINGS | - | - | - |
+| generic/9 - PING | - | - | - |
+| generic/10 - GOAWAY | - | - | - |
+| generic/11 - Flow control | - | - | - |
+| generic/12 - Error codes | - | - | - |
+| hpack/1–5 | - | - | - |
+| http2/* | - | - | - |
+| **Total** | - | - | - |
 
 Fill in counts after the first h2spec run in Phase 9. All cells in the
-Notes column should be empty when v1 is released — any entry there is an
+Notes column should be empty when v1 is released - any entry there is an
 open issue.
 
 ---

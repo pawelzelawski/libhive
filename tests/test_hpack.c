@@ -6,7 +6,6 @@
  * Phase 3.2: integer varint encode/decode tests.
  * Phase 3.3: string encode/decode tests.
  *
- * See DEVELOPMENT.md tasks 1.4, 3.1, 3.2 and 3.3.
  */
 
 #include <stddef.h>
@@ -30,7 +29,7 @@ int test_huffman_eos_rejected(void);
 int test_huffman_invalid_padding(void);
 int test_huffman_decode_truncated_long_code(void);
 
-/* Phase 3.1 — dynamic table */
+/* Phase 3.1 - dynamic table */
 int test_hpack_table_insert_basic(void);
 int test_hpack_table_evict_on_insert(void);
 int test_hpack_table_evict_to_zero(void);
@@ -42,21 +41,21 @@ int test_hpack_hash_insert_nomem(void);
 int test_hpack_hash_tombstone_probe_chain(void);
 int test_hpack_hash_rebuild_on_recross(void);
 
-/* Phase 3.2 — integer varint encode/decode */
+/* Phase 3.2 - integer varint encode/decode */
 int test_hpack_int_decode_1byte(void);
 int test_hpack_int_decode_multibyte(void);
 int test_hpack_int_decode_truncated(void);
 int test_hpack_int_decode_overflow(void);
 int test_hpack_int_encode_decode_roundtrip(void);
 
-/* Phase 3.3 — string encode/decode */
+/* Phase 3.3 - string encode/decode */
 int test_hpack_string_decode_literal(void);
 int test_hpack_string_decode_huffman(void);
 int test_hpack_string_encode_huffman(void);
 int test_hpack_string_scratch_limit(void);
 int test_hpack_string_truncated(void);
 
-/* Phase 3.4 — full decoder */
+/* Phase 3.4 - full decoder */
 int test_hpack_decode_rfc_c3(void);
 int test_hpack_decode_rfc_c4(void);
 int test_hpack_decode_rfc_c6(void);
@@ -68,12 +67,12 @@ int test_hpack_bomb_size_limit(void);
 int test_hpack_bomb_count_limit(void);
 int test_hpack_header_callback_by_pointer(void);
 
-/* Phase 3.5 — full encoder */
+/* Phase 3.5 - full encoder */
 int test_hpack_encode_decode_roundtrip_no_huff(void);
 int test_hpack_encode_decode_roundtrip_huff(void);
 int test_hpack_encode_pending_size_update_dual(void);
 
-/* Phase 3.7 — standalone API */
+/* Phase 3.7 - standalone API */
 int test_hpack_standalone_encoder_decoder(void);
 
 int
@@ -193,7 +192,7 @@ test_huffman_eos_rejected(void)
 	 *   = 0x1f 0xff 0xff 0xff 0xff
 	 * The decoder must consume 'a', then enter the slow path on the
 	 * 0xff prefix, where huff_decode_long matches the 30-bit EOS code
-	 * and returns HIVE_ERR_COMPRESSION (RFC 7541 §5.2 — EOS in a
+	 * and returns HIVE_ERR_COMPRESSION (RFC 7541 §5.2 - EOS in a
 	 * non-terminal position is a decoding error).
 	 */
 	static const uint8_t in[] = { 0x1f, 0xff, 0xff, 0xff, 0xff };
@@ -220,14 +219,14 @@ test_huffman_invalid_padding(void)
 }
 
 /*
- * test_huffman_roundtrip_long_codes — exercise the >8-bit code path.
+ * test_huffman_roundtrip_long_codes - exercise the >8-bit code path.
  *
  * The decoder's 256-entry fast-path table only handles codes up to
  * 8 bits. HPACK Huffman defines codes from 5 to 30 bits (RFC 7541
  * Appendix B); the implementation must dispatch to the slow path for
  * any input containing a code with bit-length > 8.
  *
- * The byte '|' (0x7c) has the 11-bit code 0x7fc — encoding "a|" yields
+ * The byte '|' (0x7c) has the 11-bit code 0x7fc - encoding "a|" yields
  * exactly two bytes (0x1f 0xfc) which fit no fast-path entry. Without
  * the slow path this test fails (huff_decode returns HIVE_ERR_COMPRESSION
  * via the leftover-bits guard with out_len == 0).
@@ -257,7 +256,7 @@ test_huffman_roundtrip_long_codes(void)
 }
 
 /*
- * test_huffman_decode_truncated_long_code — slow path must reject input
+ * test_huffman_decode_truncated_long_code - slow path must reject input
  * that ends mid-long-code instead of looping or returning success.
  *
  * Encode '|' (11-bit code 0x7fc) on its own: bytes 0xff 0xff (the second
@@ -279,7 +278,7 @@ test_huffman_decode_truncated_long_code(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Phase 3.1 — hpack_table_t dynamic table                            */
+/* Phase 3.1 - hpack_table_t dynamic table                            */
 /* ------------------------------------------------------------------ */
 
 /*
@@ -347,7 +346,7 @@ fail_calloc_fn(size_t nmemb, size_t size, void *ctx)
 }
 
 /*
- * test_hpack_table_insert_basic — insert one entry, verify via lookup.
+ * test_hpack_table_insert_basic - insert one entry, verify via lookup.
  *
  * RFC 7541 §4.1: size = name_len + value_len + 32.
  */
@@ -399,11 +398,11 @@ test_hpack_table_insert_basic(void)
 }
 
 /*
- * test_hpack_table_evict_on_insert — verify oldest entry is evicted.
+ * test_hpack_table_evict_on_insert - verify oldest entry is evicted.
  *
  * max_size=135; each entry: 2+2+32=36 bytes.
  * Three entries total 108 bytes.  Insert of 4th (36 bytes) would reach
- * 144 > 135 — oldest entry must be evicted first.
+ * 144 > 135 - oldest entry must be evicted first.
  */
 int
 test_hpack_table_evict_on_insert(void)
@@ -458,7 +457,7 @@ test_hpack_table_evict_on_insert(void)
 }
 
 /*
- * test_hpack_table_evict_to_zero — evict_to(0) removes all entries.
+ * test_hpack_table_evict_to_zero - evict_to(0) removes all entries.
  */
 int
 test_hpack_table_evict_to_zero(void)
@@ -493,7 +492,7 @@ test_hpack_table_evict_to_zero(void)
 }
 
 /*
- * test_hpack_table_rfc_size — verify name + value + 32 accounting.
+ * test_hpack_table_rfc_size - verify name + value + 32 accounting.
  *
  * RFC 7541 §4.1: each entry costs name_len + value_len + 32 bytes.
  */
@@ -532,7 +531,7 @@ test_hpack_table_rfc_size(void)
 }
 
 /*
- * test_hpack_table_oversized_entry — rfc_size > max_size.
+ * test_hpack_table_oversized_entry - rfc_size > max_size.
  *
  * RFC 7541 §4.4: when the new entry's rfc_size exceeds max_size, the
  * entire existing table is evicted and the entry is NOT inserted.
@@ -545,7 +544,7 @@ test_hpack_table_oversized_entry(void)
 	uint32_t      dyn_idx;
 	int           ret, match;
 
-	/* max_size=64; "hello"/"world" rfc_size=5+5+32=42 — fits */
+	/* max_size=64; "hello"/"world" rfc_size=5+5+32=42 - fits */
 	ret = hpack_table_init(&t, &test_mem, 64);
 	ASSERT(ret == HIVE_OK);
 
@@ -562,7 +561,7 @@ test_hpack_table_oversized_entry(void)
 	ret = hpack_table_insert(&t, &test_mem,
 	    (const uint8_t *)"12345678901234567890", 20,
 	    (const uint8_t *)"12345678901234567890", 20);
-	ASSERT(ret == HIVE_OK);   /* not an error — evict and skip */
+	ASSERT(ret == HIVE_OK);   /* not an error - evict and skip */
 	ASSERT(t.count == 0);     /* table is empty */
 	ASSERT(t.size == 0);
 
@@ -583,11 +582,11 @@ test_hpack_table_oversized_entry(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Phase 3.2 — hpack_decode_int / hpack_encode_int                    */
+/* Phase 3.2 - hpack_decode_int / hpack_encode_int                    */
 /* ------------------------------------------------------------------ */
 
 /*
- * test_hpack_int_decode_1byte — value fits entirely in the prefix bits.
+ * test_hpack_int_decode_1byte - value fits entirely in the prefix bits.
  *
  * RFC 7541 §C.1.1: integer value 10 with a 5-bit prefix.
  * Input byte: 0x0a (= 10 decimal).  Since 10 < 31 (prefix_max for N=5),
@@ -608,7 +607,7 @@ test_hpack_int_decode_1byte(void)
 }
 
 /*
- * test_hpack_int_decode_multibyte — multi-byte continuation decoding.
+ * test_hpack_int_decode_multibyte - multi-byte continuation decoding.
  *
  * RFC 7541 §C.1.3: integer value 1337 with a 5-bit prefix.
  * Encoded as: [0x1f, 0x9a, 0x0a]
@@ -632,7 +631,7 @@ test_hpack_int_decode_multibyte(void)
 }
 
 /*
- * test_hpack_int_decode_truncated — input ends mid-continuation.
+ * test_hpack_int_decode_truncated - input ends mid-continuation.
  *
  * src[0] = 0x1f (prefix_bits=5, value=31, multi-byte required).
  * src[1] = 0x9a (continuation bit set, but no further byte follows).
@@ -651,7 +650,7 @@ test_hpack_int_decode_truncated(void)
 }
 
 /*
- * test_hpack_int_decode_overflow — continuation bytes push value above
+ * test_hpack_int_decode_overflow - continuation bytes push value above
  * UINT32_MAX.
  *
  * Input (prefix_bits=5):
@@ -679,7 +678,7 @@ test_hpack_int_decode_overflow(void)
 }
 
 /*
- * test_hpack_int_encode_decode_roundtrip — encode then decode, verify.
+ * test_hpack_int_encode_decode_roundtrip - encode then decode, verify.
  *
  * Tests values covering single-byte (val < prefix_max) and multi-byte
  * (val >= prefix_max) paths.  Confirms the consumed byte count equals
@@ -733,7 +732,7 @@ test_hpack_int_encode_decode_roundtrip(void)
 }
 
 /*
- * test_hpack_always_copy — overwrite source buffers after insert.
+ * test_hpack_always_copy - overwrite source buffers after insert.
  *
  * SECURITY: the table must hold its own copies of name and value bytes.
  * Overwriting the caller's source buffers must not corrupt table data.
@@ -787,7 +786,7 @@ test_hpack_always_copy(void)
 }
 
 /*
- * test_hpack_hash_threshold_activation — hash remains disabled below the
+ * test_hpack_hash_threshold_activation - hash remains disabled below the
  * threshold and is allocated when max_size first crosses above it.
  */
 int
@@ -820,7 +819,7 @@ test_hpack_hash_threshold_activation(void)
 }
 
 /*
- * test_hpack_hash_insert_nomem — large-table insert hard-fails with
+ * test_hpack_hash_insert_nomem - large-table insert hard-fails with
  * HIVE_ERR_NOMEM when hash allocation fails.
  */
 int
@@ -854,7 +853,7 @@ test_hpack_hash_insert_nomem(void)
 }
 
 /*
- * test_hpack_hash_tombstone_probe_chain — evicting an older colliding entry
+ * test_hpack_hash_tombstone_probe_chain - evicting an older colliding entry
  * must leave a tombstone so lookup can reach the newer colliding entry.
  */
 int
@@ -894,7 +893,7 @@ test_hpack_hash_tombstone_probe_chain(void)
 }
 
 /*
- * test_hpack_hash_rebuild_on_recross — existing hash allocation is reused
+ * test_hpack_hash_rebuild_on_recross - existing hash allocation is reused
  * and rebuilt when table size rises above the threshold after being below it.
  */
 int
@@ -934,18 +933,18 @@ test_hpack_hash_rebuild_on_recross(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Phase 3.3 — hpack_decode_string / hpack_encode_string              */
+/* Phase 3.3 - hpack_decode_string / hpack_encode_string              */
 /* ------------------------------------------------------------------ */
 
 /*
- * test_hpack_string_decode_literal — decode a non-Huffman HPACK string.
+ * test_hpack_string_decode_literal - decode a non-Huffman HPACK string.
  *
  * Encodes "www.example.com" (15 bytes) as a literal string: the first
  * byte is 0x0f (Huffman flag = 0, length = 15), followed by the raw
  * ASCII bytes.  The decoded output must match and consumed must be 16.
  *
  * For non-Huffman strings, out.data must point directly into src (no
- * copy — the zero-copy non-Huffman property per ARCHITECTURE.md §4.6).
+ * copy - the zero-copy non-Huffman property per ARCHITECTURE.md §4.6).
  */
 int
 test_hpack_string_decode_literal(void)
@@ -973,7 +972,7 @@ test_hpack_string_decode_literal(void)
 }
 
 /*
- * test_hpack_string_decode_huffman — decode a Huffman-encoded HPACK string.
+ * test_hpack_string_decode_huffman - decode a Huffman-encoded HPACK string.
  *
  * Uses the RFC 7541 §C.4 example: "www.example.com" Huffman-encoded as
  * 12 bytes.  The HPACK string header is 0x8c (bit 7 = Huffman, length = 12).
@@ -1008,7 +1007,7 @@ test_hpack_string_decode_huffman(void)
 }
 
 /*
- * test_hpack_string_encode_huffman — encode a string as a shorter Huffman form.
+ * test_hpack_string_encode_huffman - encode a string as a shorter Huffman form.
  *
  * "no-cache" (8 ASCII bytes) is known to produce a shorter Huffman encoding
  * (6 bytes, per the RFC 7541 §C.3 example).  The encoder must set bit 7 of
@@ -1051,13 +1050,13 @@ test_hpack_string_encode_huffman(void)
 }
 
 /*
- * test_hpack_string_scratch_limit — decoded string exceeds scratch_cap.
+ * test_hpack_string_scratch_limit - decoded string exceeds scratch_cap.
  *
  * A literal string of length 5 is presented with scratch_cap = 4.
  * The claimed decoded length (5) exceeds the limit (4), so
  * hpack_decode_string() must return HIVE_ERR_COMPRESSION.
  *
- * See ARCHITECTURE.md §4.6 — the limit applies to both Huffman and
+ * See ARCHITECTURE.md §4.6 - the limit applies to both Huffman and
  * literal strings.
  */
 int
@@ -1078,7 +1077,7 @@ test_hpack_string_scratch_limit(void)
 }
 
 /*
- * test_hpack_string_truncated — claimed length exceeds remaining bytes.
+ * test_hpack_string_truncated - claimed length exceeds remaining bytes.
  *
  * The length field claims 10 bytes but only 5 string bytes follow.
  * hpack_decode_string() must return HIVE_ERR_COMPRESSION (truncated
@@ -1102,7 +1101,7 @@ test_hpack_string_truncated(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Phase 3.4 — hpack_decode_block                                     */
+/* Phase 3.4 - hpack_decode_block                                     */
 /* ------------------------------------------------------------------ */
 
 typedef struct {

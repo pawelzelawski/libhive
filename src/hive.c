@@ -1,9 +1,9 @@
 /*
- * hive.c — session lifecycle and public API entry points
+ * hive.c - session lifecycle and public API entry points
  *
  * See ARCHITECTURE.md §1 and §9 for full documentation.
- * See CODING_STANDARDS.md §2.1 — this is the ONLY file in src/ that may
- * call malloc/free/calloc/realloc directly (in the NULL-allocator shim).
+ * This is the ONLY file in src/ that may call malloc/free/calloc/realloc
+ * directly (in the NULL-allocator shim).
  */
 
 #include <stdlib.h>
@@ -213,12 +213,12 @@ standalone_index_to_name(const hive_hpack_decoder_t *dec,
 }
 
 /*
- * Stub implementations — Phase 1 skeleton only.
+ * Stub implementations - Phase 1 skeleton only.
  * Full implementations land in Phase 4 onward.
  */
 
 /*
- * Options API — ARCHITECTURE.md §9.5.
+ * Options API - ARCHITECTURE.md §9.5.
  *
  * hive_options_t uses system malloc (calloc/free) directly because options
  * are created once at startup, not per-connection.  This is the only place
@@ -845,7 +845,7 @@ upgrade_apply_settings_param(hive_session_t *s,
 		s->enc_table.has_pending = 1;
 		break;
 	case HIVE_SETTINGS_ENABLE_PUSH:
-		/* SECURITY: RFC 9113 §6.5.2 — ENABLE_PUSH MUST be 0 or 1;
+		/* SECURITY: RFC 9113 §6.5.2 - ENABLE_PUSH MUST be 0 or 1;
 		 * any other value is a PROTOCOL_ERROR connection error.
 		 */
 		if (param_val > 1u)
@@ -856,13 +856,13 @@ upgrade_apply_settings_param(hive_session_t *s,
 		s->remote_settings.max_concurrent_streams = param_val;
 		break;
 	case HIVE_SETTINGS_INITIAL_WINDOW_SIZE:
-		/* SECURITY: RFC 9113 §6.9.2 — values above 2^31-1 are a
+		/* SECURITY: RFC 9113 §6.9.2 - values above 2^31-1 are a
 		 * FLOW_CONTROL_ERROR; upgrade_apply_initial_window() enforces
 		 * this and retroactively adjusts existing stream windows.
 		 */
 		return upgrade_apply_initial_window(s, param_val);
 	case HIVE_SETTINGS_MAX_FRAME_SIZE:
-		/* SECURITY: RFC 9113 §6.5.2 — MAX_FRAME_SIZE MUST be in the
+		/* SECURITY: RFC 9113 §6.5.2 - MAX_FRAME_SIZE MUST be in the
 		 * range [16384, 16777215]; values outside this range are a
 		 * PROTOCOL_ERROR connection error.
 		 */
@@ -1221,7 +1221,7 @@ hive_session_send(hive_session_t *session)
 	    session, eff_iov, eff_cnt, session->user_data);
 
 	if (written < 0) {
-		/* Fatal — session is dead. */
+		/* Fatal - session is dead. */
 		session->session_state = HIVE_SESSION_CLOSED;
 		return HIVE_ERR_PROTOCOL;
 	}
@@ -1229,13 +1229,13 @@ hive_session_send(hive_session_t *session)
 	session->send_partial_offset += (size_t)written;
 
 	if (session->send_partial_offset >= total) {
-		/* All bytes sent — reset queue for next batch. */
+		/* All bytes sent - reset queue for next batch. */
 		session->send_iov_count = 0;
 		session->send_buf_used = 0;
 		session->send_partial_offset = 0;
 		session->send_partial = 0;
 	} else {
-		/* Partial write — retain unsent tail. */
+		/* Partial write - retain unsent tail. */
 		session->send_partial = 1;
 	}
 
@@ -1539,7 +1539,7 @@ hive_submit_push_promise(hive_session_t *session,
 	    carry->state != HIVE_STREAM_HALF_CLOSED_REMOTE)
 		return HIVE_ERR_STREAM_CLOSED;
 
-	/* SECURITY: RFC 9113 §8.4 — a server MUST NOT send PUSH_PROMISE if
+	/* SECURITY: RFC 9113 §8.4 - a server MUST NOT send PUSH_PROMISE if
 	 * the client has disabled push (ENABLE_PUSH == 0).  Doing so is a
 	 * PROTOCOL_ERROR connection error on the client side; reject early
 	 * here to prevent violating the peer's declared constraint.

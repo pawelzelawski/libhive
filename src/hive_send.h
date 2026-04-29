@@ -1,5 +1,5 @@
 /*
- * hive_send.h — send queue helpers (internal)
+ * hive_send.h - send queue helpers (internal)
  *
  * Declares frame_hdr_write(), send_queue_append_ctrl(), and
  * send_queue_flush_data(). These are internal to the library only.
@@ -10,7 +10,7 @@
  * See ARCHITECTURE.md §6.4 for send_queue_append_headers() pseudocode.
  * See ARCHITECTURE.md §6.6 for drain / partial-send model.
  *
- * Not included by embedders — internal to the library only.
+ * Not included by embedders - internal to the library only.
  */
 
 #ifndef HIVE_SEND_H
@@ -22,7 +22,7 @@
 #include "hive_frame_bare.h"
 
 /*
- * frame_hdr_write — write a 9-byte frame header at send_buf + send_buf_used
+ * frame_hdr_write - write a 9-byte frame header at send_buf + send_buf_used
  * and advance send_buf_used by 9.
  *
  * Returns a pointer to the first byte of the written header so callers can
@@ -38,7 +38,7 @@ uint8_t *frame_hdr_write(hive_session_t *s,
                          uint32_t stream_id);
 
 /*
- * send_queue_append_ctrl — serialise one control frame into send_buf and
+ * send_queue_append_ctrl - serialise one control frame into send_buf and
  * append one iovec entry pointing at the complete frame.
  *
  * Writes the 9-byte frame header followed by `payload_len` bytes from
@@ -61,7 +61,7 @@ int send_queue_append_ctrl(hive_session_t *s,
                            uint32_t payload_len);
 
 /*
- * send_queue_append_headers — queue one HEADERS block, splitting into
+ * send_queue_append_headers - queue one HEADERS block, splitting into
  * CONTINUATION frames when encoded HPACK bytes exceed
  * remote_settings.max_frame_size.
  *
@@ -84,7 +84,7 @@ int send_queue_append_headers(hive_session_t *s,
                               uint8_t end_stream);
 
 /*
- * send_queue_append_push_promise — queue one PUSH_PROMISE frame.
+ * send_queue_append_push_promise - queue one PUSH_PROMISE frame.
  *
  * Payload layout: 4-byte promised stream ID (R bit clear) followed by an
  * HPACK-encoded request header block. This helper emits a single
@@ -98,7 +98,7 @@ int send_queue_append_push_promise(hive_session_t *s,
                                    size_t nvlen);
 
 /*
- * u32_write_be — write a 32-bit value in big-endian byte order at out[0..3].
+ * u32_write_be - write a 32-bit value in big-endian byte order at out[0..3].
  *
  * Shared by hive_send.c, hive_frame.c, and hive.c to avoid three identical
  * private copies.  See CODING_STANDARDS.md §1.1.
@@ -106,7 +106,7 @@ int send_queue_append_push_promise(hive_session_t *s,
 void u32_write_be(uint8_t out[4], uint32_t v);
 
 /*
- * send_queue_flush_data — drive pending data_source streams into the send
+ * send_queue_flush_data - drive pending data_source streams into the send
  * queue within flow control limits.
  *
  * Phase 4 stub: does nothing.  Phase 6 provides the real implementation.

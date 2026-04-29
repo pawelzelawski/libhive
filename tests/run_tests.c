@@ -1,9 +1,8 @@
 /*
- * run_tests.c — test binary entry point
+ * run_tests.c - test binary entry point
  *
  * Calls RUN() for every test case across all test files.
  * Returns 0 if all pass, 1 if any fail.
- * See TECH_STACK.md §6.1.
  */
 
 #include <stdio.h>
@@ -72,7 +71,7 @@ int test_huffman_eos_rejected(void);
 int test_huffman_invalid_padding(void);
 int test_huffman_decode_truncated_long_code(void);
 
-/* Phase 3.1 — dynamic table */
+/* Phase 3.1 - dynamic table */
 int test_hpack_table_insert_basic(void);
 int test_hpack_table_evict_on_insert(void);
 int test_hpack_table_evict_to_zero(void);
@@ -84,21 +83,21 @@ int test_hpack_hash_insert_nomem(void);
 int test_hpack_hash_tombstone_probe_chain(void);
 int test_hpack_hash_rebuild_on_recross(void);
 
-/* Phase 3.2 — integer varint encode/decode */
+/* Phase 3.2 - integer varint encode/decode */
 int test_hpack_int_decode_1byte(void);
 int test_hpack_int_decode_multibyte(void);
 int test_hpack_int_decode_truncated(void);
 int test_hpack_int_decode_overflow(void);
 int test_hpack_int_encode_decode_roundtrip(void);
 
-/* Phase 3.3 — string encode/decode */
+/* Phase 3.3 - string encode/decode */
 int test_hpack_string_decode_literal(void);
 int test_hpack_string_decode_huffman(void);
 int test_hpack_string_encode_huffman(void);
 int test_hpack_string_scratch_limit(void);
 int test_hpack_string_truncated(void);
 
-/* Phase 3.4 — full decoder */
+/* Phase 3.4 - full decoder */
 int test_hpack_decode_rfc_c3(void);
 int test_hpack_decode_rfc_c4(void);
 int test_hpack_decode_rfc_c6(void);
@@ -110,12 +109,12 @@ int test_hpack_bomb_size_limit(void);
 int test_hpack_bomb_count_limit(void);
 int test_hpack_header_callback_by_pointer(void);
 
-/* Phase 3.5 — full encoder */
+/* Phase 3.5 - full encoder */
 int test_hpack_encode_decode_roundtrip_no_huff(void);
 int test_hpack_encode_decode_roundtrip_huff(void);
 int test_hpack_encode_pending_size_update_dual(void);
 
-/* Phase 3.7 — standalone API */
+/* Phase 3.7 - standalone API */
 int test_hpack_standalone_encoder_decoder(void);
 
 /* --- test_session.c ------------------------------------------------------- */
@@ -238,7 +237,7 @@ int test_hpack_negative_index_zero(void);
 int
 main(void)
 {
-	/* Phase 4.0 — minimal send queue */
+	/* Phase 4.0 - minimal send queue */
 	RUN(send_control_frame_queued);
 	RUN(send_partial_write);
 	RUN(send_partial_resume);
@@ -247,19 +246,19 @@ main(void)
 	RUN(iovec_overflow_wouldblock);
 	RUN(send_fatal_error);
 
-	/* Phase 6.1 — HEADERS queueing and split CONTINUATION layout */
+	/* Phase 6.1 - HEADERS queueing and split CONTINUATION layout */
 	RUN(send_headers_single_frame_layout);
 	RUN(send_headers_split_layout);
 	RUN(send_headers_split_end_stream_flag);
 
-	/* Phase 6.4 — hive_submit_response() */
+	/* Phase 6.4 - hive_submit_response() */
 	RUN(submit_response_headers_only);
 	RUN(submit_response_with_data_copy);
 	RUN(submit_response_no_copy);
 	RUN(submit_response_eof_flag);
 	RUN(full_get_request_response);
 
-	/* Phase 6.5 — additional submit functions */
+	/* Phase 6.5 - additional submit functions */
 	RUN(submit_trailers);
 	RUN(submit_interim_response);
 	RUN(submit_rst_stream);
@@ -278,12 +277,12 @@ main(void)
 	RUN(stream_get_state);
 	RUN(stream_user_data);
 
-	/* Phase 4.2 — options API */
+	/* Phase 4.2 - options API */
 	RUN(options_defaults);
 	RUN(options_set_valid);
 	RUN(options_set_invalid);
 
-	/* Phase 4.3 — session creation and teardown */
+	/* Phase 4.3 - session creation and teardown */
 	RUN(session_server_new_null_alloc);
 	RUN(session_client_new_null_alloc);
 	RUN(session_new_custom_alloc);
@@ -310,48 +309,48 @@ main(void)
 	RUN(client_preface_first_frame_not_settings);
 	RUN(client_preface_settings_with_ack);
 
-	/* Phase 8.1 — h2c Upgrade path */
+	/* Phase 8.1 - h2c Upgrade path */
 	RUN(h2c_upgrade_settings_applied);
 	RUN(h2c_upgrade_stream1_open);
 	RUN(h2c_feed_upgrade_headers_fires_callbacks);
 	RUN(h2c_feed_upgrade_headers_double_call);
 
-	/* Phase 8.2 — server push */
+	/* Phase 8.2 - server push */
 	RUN(server_push_promise);
 	RUN(server_push_response);
 	RUN(push_disabled_by_remote_settings);
 
-	/* Phase 8.3 — PUSH_PROMISE receive (client role) */
+	/* Phase 8.3 - PUSH_PROMISE receive (client role) */
 	RUN(client_recv_push_promise);
 	RUN(client_recv_push_promise_refused);
 
-	/* Phase 8.4 — two-phase GOAWAY end-to-end path */
+	/* Phase 8.4 - two-phase GOAWAY end-to-end path */
 	RUN(goaway_two_phase);
 	RUN(goaway_recv_want_read_advisory);
 	RUN(goaway_recv_streams_closed);
 
-	/* Phase 8.5 — client role: full request-response */
+	/* Phase 8.5 - client role: full request-response */
 	RUN(client_full_request_response);
 
-	/* Phase 5.1 — WINDOW_UPDATE receive */
+	/* Phase 5.1 - WINDOW_UPDATE receive */
 	RUN(window_update_connection);
 	RUN(window_update_stream);
 	RUN(window_update_zero_increment_connection);
 	RUN(window_update_zero_increment_stream);
 	RUN(window_update_overflow);
 
-	/* Phase 5.2 — DATA recv-side flow control enforcement */
+	/* Phase 5.2 - DATA recv-side flow control enforcement */
 	RUN(data_recv_zero_copy);
 	RUN(data_recv_partial);
 	RUN(data_recv_exceeds_stream_window);
 	RUN(data_recv_exceeds_connection_window);
 	RUN(window_update_coalescing);
 
-	/* Phase 5.3 — DATA send flow-control enforcement */
+	/* Phase 5.3 - DATA send flow-control enforcement */
 	RUN(send_window_blocks_data);
 	RUN(send_max_len_respects_remote_max_frame_size);
 
-	/* Phase 5.4 — want_write with pending data sources */
+	/* Phase 5.4 - want_write with pending data sources */
 	RUN(want_write_pending_data_source);
 	RUN(want_write_blocked_by_connection_window);
 	RUN(data_recv_idle_stream_connection_error);
@@ -359,7 +358,7 @@ main(void)
 	RUN(window_update_closed_stream_ignored);
 	RUN(window_update_coalescing_overflow_no_queue);
 
-	/* Phase 6.2 — full DATA frame queueing (copy / NO_COPY / EOF) */
+	/* Phase 6.2 - full DATA frame queueing (copy / NO_COPY / EOF) */
 	RUN(data_send_copy_frame_queued);
 	RUN(data_send_no_copy_frame_queued);
 	RUN(data_send_zero_no_eof_clears_source);
@@ -389,7 +388,7 @@ main(void)
 	RUN(http_messaging_content_length_mismatch);
 	RUN(hpack_negative_index_zero);
 
-	/* Phase 2.2 — frame header serialisation */
+	/* Phase 2.2 - frame header serialisation */
 	RUN(frame_hdr_write_data);
 	RUN(frame_hdr_write_settings);
 	RUN(frame_hdr_write_headers);
@@ -431,7 +430,7 @@ main(void)
 	RUN(recv_push_promise_wrong_length_padded);
 	RUN(recv_unknown_frame_mid_stream);
 
-	/* Phase 1.3 — platform compat layer */
+	/* Phase 1.3 - platform compat layer */
 	RUN(strlcpy_basic);
 	RUN(strlcpy_truncation);
 	RUN(strlcpy_empty_src);
@@ -451,7 +450,7 @@ main(void)
 	RUN(huffman_invalid_padding);
 	RUN(huffman_decode_truncated_long_code);
 
-	/* Phase 3.1 — hpack_table_t: dynamic table */
+	/* Phase 3.1 - hpack_table_t: dynamic table */
 	RUN(hpack_table_insert_basic);
 	RUN(hpack_table_evict_on_insert);
 	RUN(hpack_table_evict_to_zero);
@@ -463,21 +462,21 @@ main(void)
 	RUN(hpack_hash_tombstone_probe_chain);
 	RUN(hpack_hash_rebuild_on_recross);
 
-	/* Phase 3.2 — integer varint encode/decode */
+	/* Phase 3.2 - integer varint encode/decode */
 	RUN(hpack_int_decode_1byte);
 	RUN(hpack_int_decode_multibyte);
 	RUN(hpack_int_decode_truncated);
 	RUN(hpack_int_decode_overflow);
 	RUN(hpack_int_encode_decode_roundtrip);
 
-	/* Phase 3.3 — string encode/decode */
+	/* Phase 3.3 - string encode/decode */
 	RUN(hpack_string_decode_literal);
 	RUN(hpack_string_decode_huffman);
 	RUN(hpack_string_encode_huffman);
 	RUN(hpack_string_scratch_limit);
 	RUN(hpack_string_truncated);
 
-	/* Phase 3.4 — full decoder */
+	/* Phase 3.4 - full decoder */
 	RUN(hpack_decode_rfc_c3);
 	RUN(hpack_decode_rfc_c4);
 	RUN(hpack_decode_rfc_c6);
@@ -489,12 +488,12 @@ main(void)
 	RUN(hpack_bomb_count_limit);
 	RUN(hpack_header_callback_by_pointer);
 
-	/* Phase 3.5 — full encoder */
+	/* Phase 3.5 - full encoder */
 	RUN(hpack_encode_decode_roundtrip_no_huff);
 	RUN(hpack_encode_decode_roundtrip_huff);
 	RUN(hpack_encode_pending_size_update_dual);
 
-	/* Phase 3.7 — standalone API */
+	/* Phase 3.7 - standalone API */
 	RUN(hpack_standalone_encoder_decoder);
 
 	printf("%d/%d tests passed\n", tests_passed, tests_run);

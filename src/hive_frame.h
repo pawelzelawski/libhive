@@ -1,5 +1,5 @@
 /*
- * hive_frame.h — frame parser and serialiser (internal)
+ * hive_frame.h - frame parser and serialiser (internal)
  *
  * Defines all HTTP/2 frame type constants, frame flag constants,
  * the parsed frame header struct, and the receive state machine enum.
@@ -10,7 +10,7 @@
  * See ARCHITECTURE.md §6 for frame header serialisation.
  * RFC 9113: https://www.rfc-editor.org/rfc/rfc9113
  *
- * Not included by embedders — internal to the library only.
+ * Not included by embedders - internal to the library only.
  */
 
 #ifndef HIVE_FRAME_H
@@ -21,7 +21,7 @@
 #include "../include/hive.h"
 
 /* ------------------------------------------------------------------ */
-/* Frame type constants — RFC 9113 §4.1                               */
+/* Frame type constants - RFC 9113 §4.1                               */
 /* See ARCHITECTURE.md §3.2.                                          */
 /* ------------------------------------------------------------------ */
 
@@ -37,7 +37,7 @@
 #define HIVE_FRAME_CONTINUATION 0x9u
 
 /* ------------------------------------------------------------------ */
-/* Frame flag constants — RFC 9113 §4.1 and per-frame sections        */
+/* Frame flag constants - RFC 9113 §4.1 and per-frame sections        */
 /* ------------------------------------------------------------------ */
 
 /*
@@ -69,20 +69,20 @@
 /*
  * HIVE_FLAG_PRIORITY (0x20): set on HEADERS frames to indicate a stream
  * dependency and weight (PRIORITY prefix, 5 bytes) is present.
- * Deprecated by RFC 9113 — received and silently consumed.
+ * Deprecated by RFC 9113 - received and silently consumed.
  * RFC 9113 §6.2.
  */
 #define HIVE_FLAG_PRIORITY 0x20u /* HEADERS */
 
 /* ------------------------------------------------------------------ */
-/* Frame header structure — ARCHITECTURE.md §3.2                      */
+/* Frame header structure - ARCHITECTURE.md §3.2                      */
 /* ------------------------------------------------------------------ */
 
 /*
  * Parsed 9-byte frame header.
  *
  * Populated from frame_hdr_buf[9] in the session once all 9 bytes have
- * accumulated via frame_hdr_count. Not stored persistently — it lives in
+ * accumulated via frame_hdr_count. Not stored persistently - it lives in
  * the session as cur_frame and is overwritten on each new frame.
  *
  * Wire layout (RFC 9113 §4.1):
@@ -101,7 +101,7 @@ typedef struct {
 } frame_hdr_t;
 
 /* ------------------------------------------------------------------ */
-/* Receive state machine — ARCHITECTURE.md §3.1                       */
+/* Receive state machine - ARCHITECTURE.md §3.1                       */
 /* ------------------------------------------------------------------ */
 
 /*
@@ -142,7 +142,7 @@ typedef enum {
 	RECV_GOAWAY_DEBUG =
 	    15, /* collect optional GOAWAY debug bytes into reassembly_buf */
 	RECV_PRIORITY_PAYLOAD =
-	    16, /* accumulate 5 bytes; discard — deprecated RFC 9113 */
+	    16, /* accumulate 5 bytes; discard - deprecated RFC 9113 */
 	RECV_SKIP_PAYLOAD =
 	    17, /* skip N bytes for unknown frame types (RFC 9113 §4.1) */
 } hive_recv_state_t;

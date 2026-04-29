@@ -1,28 +1,27 @@
 /*
- * test_session.c — Phase 4 session tests
+ * test_session.c - Phase 4 session tests
  *
- * Task 4.0: minimal send queue verification.
- *   test_send_control_frame_queued — queue a control frame; want_write == 1;
+ * Minimal send queue verification.
+ *   test_send_control_frame_queued - queue a control frame; want_write == 1;
  *     full send clears the queue.
- *   test_send_partial_write — partial send retains unsent tail; second send
+ *   test_send_partial_write - partial send retains unsent tail; second send
  *     drains completely.
- *   test_send_fatal_error — callback returns -1; session marked CLOSED.
+ *   test_send_fatal_error - callback returns -1; session marked CLOSED.
  *
- * Task 4.2: options API.
- *   test_options_defaults — hive_options_new() applies all defaults from
+ * Options API.
+ *   test_options_defaults - hive_options_new() applies all defaults from
  *     ARCHITECTURE.md §9.5.
- *   test_options_set_valid — each setter accepts its boundary values.
- *   test_options_set_invalid — each setter rejects out-of-range values.
+ *   test_options_set_valid - each setter accepts its boundary values.
+ *   test_options_set_invalid - each setter rejects out-of-range values.
  *
  * NOTE: test_options_set_max_concurrent (verifying stream_slots size after
- * session creation) is deferred to Task 4.3 because it requires a fully
+ * session creation) is deferred because it requires a fully
  * working hive_session_server_new().
  *
  * The session struct for send-queue tests is initialised manually on the
  * stack, following the same pattern as test_frame.c.  Full session lifecycle
- * (create / free) is tested in tasks 4.1–4.3.
+ * (create / free) is tested in the session lifecycle test group.
  *
- * See DEVELOPMENT.md — Phase 4, Tasks 4.0 and 4.2.
  * See ARCHITECTURE.md §6.1, §6.3, §6.6, §9.5.
  */
 
@@ -124,7 +123,7 @@ static const uint8_t test_client_preface_magic[24] = {
 	'.', '0', '\r', '\n', '\r', '\n', 'S', 'M', '\r', '\n', '\r', '\n'};
 
 /*
- * send callback that sums the effective iov and returns the total —
+ * send callback that sums the effective iov and returns the total -
  * simulating a full successful write.
  */
 static ssize_t
@@ -1140,7 +1139,7 @@ test_send_control_frame_queued(void)
 	send_queue_append_ctrl(&s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u,
 	    NULL, 0u);
 
-	/* One frame queued — want_write must be true */
+	/* One frame queued - want_write must be true */
 	ASSERT(hive_session_want_write(&s) == 1);
 	ASSERT(s.send_iov_count == 1);
 	ASSERT(s.send_buf_used == 9u); /* header only */
@@ -1152,7 +1151,7 @@ test_send_control_frame_queued(void)
 	ret = hive_session_send(&s);
 	ASSERT(ret == HIVE_OK);
 
-	/* Queue drained — want_write must be false */
+	/* Queue drained - want_write must be false */
 	ASSERT(hive_session_want_write(&s) == 0);
 	ASSERT(s.send_iov_count == 0);
 	ASSERT(s.send_buf_used == 0u);
@@ -1196,7 +1195,7 @@ test_send_partial_write(void)
 	ASSERT(s.send_buf_used == 17u);
 	ASSERT(hive_session_want_write(&s) == 1);
 
-	/* First send: partial — return only 5 of 17 bytes */
+	/* First send: partial - return only 5 of 17 bytes */
 	st.call_count    = 0;
 	st.partial_bytes = 5;
 	s.callbacks.send = send_cb_partial;

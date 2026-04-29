@@ -3,8 +3,8 @@
 ## Overview
 
 Hive is a standalone HTTP/2 library written in C11 for Linux and OpenBSD.
-It implements the full HTTP/2 protocol — binary framing, stream multiplexing,
-HPACK header compression, flow control, and stream state management — as a
+It implements the full HTTP/2 protocol - binary framing, stream multiplexing,
+HPACK header compression, flow control, and stream state management - as a
 pure protocol engine. It performs zero I/O. The caller feeds bytes in, the
 library processes them and fires callbacks, and the caller writes the resulting
 output bytes to the network. Hive integrates into any existing event loop
@@ -29,20 +29,20 @@ can be audited, understood, and trusted.
    does not own an event loop. The caller reads bytes from the network and
    feeds them to `hive_session_recv()`. The caller calls `hive_session_send()`
    to drain serialised frames and writes the result to the network. This is
-   not a limitation — it is the design. A library that owns I/O cannot be
+   not a limitation - it is the design. A library that owns I/O cannot be
    embedded cleanly in an existing event loop. Hive works in any host
-   application — epoll, kqueue, io_uring, test harnesses, proxies — without
+   application - epoll, kqueue, io_uring, test harnesses, proxies - without
    modification.
 
 2. **Zero Dependencies**: No external libraries. No TLS stack, no allocator
    library, no protocol helpers. Everything is implemented from the
    authoritative specifications: RFC 9113 for HTTP/2, RFC 7541 for HPACK.
-   The zero-dependency requirement is non-negotiable — it is what makes Hive
+   The zero-dependency requirement is non-negotiable - it is what makes Hive
    auditable, portable, and embeddable without dependency management.
 
 3. **Explicit Memory Ownership**: The allocator is injected at session
-   creation. Pass NULL for system malloc. Pass a custom allocator — an arena,
-   a pool, a region — and Hive uses it for every internal allocation without
+   creation. Pass NULL for system malloc. Pass a custom allocator - an arena,
+   a pool, a region - and Hive uses it for every internal allocation without
    exception. All structural per-session memory (stream table, send buffers,
    reassembly buffer, HPACK scratch) is pre-allocated at session creation.
    Two categories of allocation occur after creation during normal operation:
@@ -50,7 +50,7 @@ can be audited, understood, and trusted.
    eviction) and `hive_buf_retain()` calls (one allocation per retained
    header value). Both go through the session allocator. With a
    connection-scoped arena, these are free-list pops, not system malloc calls.
-   The allocator model is not a hook added for flexibility — it is the
+   The allocator model is not a hook added for flexibility - it is the
    architecture.
 
 4. **Security in the Design**: HPACK bomb protection, CONTINUATION flood
@@ -73,7 +73,7 @@ can be audited, understood, and trusted.
    fires the send callback once per call with a batched scatter-gather iovec.
    SETTINGS ACK, WINDOW_UPDATE, HEADERS, and DATA all go out in a single
    `writev` or TLS write regardless of how many frames are queued. This is
-   not an optimisation layered on top — it is how the send path works from
+   not an optimisation layered on top - it is how the send path works from
    the start.
 
 7. **Boring Technology**: Open-addressed hash table for stream lookup, linear
@@ -116,7 +116,7 @@ the author did not anticipate.
    for callers who need header compression without a full session.
 
 3. **Zero I/O, Zero TLS**: The library processes bytes. The caller moves
-   them. This invariant must hold in every code path — no hidden socket
+   them. This invariant must hold in every code path - no hidden socket
    operations, no internal threads, no blocking calls.
 
 4. **Configurable Allocator**: Every internal allocation goes through the
@@ -154,7 +154,7 @@ the author did not anticipate.
    use a different library.
 
 2. **TLS**: TLS is the caller's responsibility. Hive sees plaintext bytes
-   only. Use libtls, OpenSSL, BoringSSL, or any other TLS stack — Hive
+   only. Use libtls, OpenSSL, BoringSSL, or any other TLS stack - Hive
    does not care.
 
 3. **HTTP/3 and QUIC**: Permanently out of scope. Different transport layer,
@@ -170,7 +170,7 @@ the author did not anticipate.
 
 6. **Dynamic Configuration**: Options are set once at session creation.
    There is no mechanism to change option values on a live session. This is
-   intentional — live reconfiguration of protocol limits introduces edge
+   intentional - live reconfiguration of protocol limits introduces edge
    cases that are difficult to reason about.
 
 7. **Thread Safety on a Single Session**: A session is not thread-safe.
@@ -201,7 +201,7 @@ caller reads bytes from network
 hive_session_recv(session, buf, n)
     │
     ├── fires on_begin_headers / on_header / on_headers_complete
-    ├── fires on_data_chunk  (pointer into caller's buf — zero copy)
+    ├── fires on_data_chunk  (pointer into caller's buf - zero copy)
     ├── fires on_stream_close / on_settings / on_goaway / on_ping / etc.
     └── queues SETTINGS ACK / WINDOW_UPDATE / error responses internally
 
@@ -211,7 +211,7 @@ caller calls hive_submit_response(session, stream_id, headers, &data_source)
 
 hive_session_send(session)
     │
-    └── fires send(session, iov, iovcnt, user_data) — once per call
+    └── fires send(session, iov, iovcnt, user_data) - once per call
             │
             └── returns bytes_written; library retains unsent tail
                 iov covers: SETTINGS ACK + WINDOW_UPDATE +
@@ -265,11 +265,11 @@ With a connection-scoped arena allocator (the Wraith model), this is one
 
 **Explicitly excluded (v1):**
 
-- WebSocket over HTTP/2 (RFC 8441) — v2
-- Extended CONNECT (RFC 8441) — v2
-- Extensible Priorities (RFC 9218) — v2
-- HTTP/3 / QUIC — permanently out of scope
-- I/O, sockets, TLS — permanently out of scope
+- WebSocket over HTTP/2 (RFC 8441) - v2
+- Extended CONNECT (RFC 8441) - v2
+- Extensible Priorities (RFC 9218) - v2
+- HTTP/3 / QUIC - permanently out of scope
+- I/O, sockets, TLS - permanently out of scope
 
 ### v2 (Planned)
 
@@ -283,8 +283,8 @@ Hive defends against the following classes of attack:
 
 **HPACK bomb**: A malicious peer sends a tiny HEADERS frame that expands to
 megabytes of decoded headers via HPACK compression. Hive enforces two
-independent limits — maximum decoded header list size and maximum header
-count per HEADERS block — incrementally as each header is decoded. Neither
+independent limits - maximum decoded header list size and maximum header
+count per HEADERS block - incrementally as each header is decoded. Neither
 limit requires buffering the full decoded block first. Exceeded:
 RST_STREAM PROTOCOL_ERROR.
 
@@ -293,7 +293,7 @@ unbounded stream of CONTINUATION frames, forcing the receiver to buffer
 compressed header data indefinitely before any decoding occurs. Hive enforces
 a hard cap on total compressed bytes in any HEADERS+CONTINUATION reassembly
 sequence, applied before HPACK decoding begins. Exceeded: connection error
-PROTOCOL_ERROR (GOAWAY). This is a connection error per RFC 9113 §4.3 —
+PROTOCOL_ERROR (GOAWAY). This is a connection error per RFC 9113 §4.3 -
 receiving any frame other than CONTINUATION while in a CONTINUATION sequence
 is a connection-level protocol violation.
 
@@ -307,7 +307,7 @@ PROTOCOL_ERROR.
 opens and immediately resets streams at high rate, exhausting server resources
 without completing any requests. Hive tracks RST_STREAM rate in a rolling
 window and fires the `on_rst_stream_flood` callback when the threshold is
-exceeded. The caller decides the response — Hive does not act unilaterally.
+exceeded. The caller decides the response - Hive does not act unilaterally.
 
 **Stream ID exhaustion**: When the highest seen stream ID approaches 2^31,
 Hive automatically initiates graceful shutdown via GOAWAY NO_ERROR. The
@@ -317,7 +317,7 @@ requests.
 
 **Receive-side flow control enforcement**: Hive tracks the remaining receive
 window at both connection and stream level. If a peer sends more DATA bytes
-than the window allows, Hive issues a FLOW_CONTROL_ERROR — a connection
+than the window allows, Hive issues a FLOW_CONTROL_ERROR - a connection
 error for connection-level violations, a stream error for stream-level
 violations.
 
@@ -342,7 +342,7 @@ the caller's allocator strategy.
 | Hot-path allocations per request (arena, no retain) | 0 |
 
 The bottleneck for an HTTP/2 server at scale is not the protocol library
-— it is TLS, syscall overhead, and file I/O. Hive is designed to not be
+- it is TLS, syscall overhead, and file I/O. Hive is designed to not be
 the bottleneck.
 
 ## Related Work
@@ -354,7 +354,7 @@ comprehensive, and battle-tested in nginx, curl, and many other projects.
 It is the reference implementation for correctness. Hive differs in three
 ways: Hive uses a configurable allocator interface (nghttp2 uses an internal
 allocator), Hive performs strictly zero I/O (nghttp2 has optional I/O
-callbacks), and Hive is simpler in scope — no HTTP/2 upgrade helpers beyond
+callbacks), and Hive is simpler in scope - no HTTP/2 upgrade helpers beyond
 what RFC 9113 requires, no HTTP/1.1 bridge layer. If you need a library with
 the largest ecosystem, broadest compatibility, and the most deployment
 history, use nghttp2. Hive is for callers who need allocator control, a
