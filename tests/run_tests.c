@@ -228,6 +228,7 @@ int test_http_messaging_pseudo_after_regular(void);
 int test_http_messaging_unknown_pseudo_header(void);
 int test_http_messaging_duplicate_pseudo_header(void);
 int test_http_messaging_pseudo_header_in_trailers(void);
+int test_http_messaging_trailers_require_end_stream(void);
 int test_http_messaging_uppercase_field_name(void);
 int test_http_messaging_forbidden_connection_header(void);
 int test_http_messaging_te_invalid_value(void);
@@ -381,6 +382,7 @@ main(void)
 	RUN(http_messaging_unknown_pseudo_header);
 	RUN(http_messaging_duplicate_pseudo_header);
 	RUN(http_messaging_pseudo_header_in_trailers);
+	RUN(http_messaging_trailers_require_end_stream);
 	RUN(http_messaging_uppercase_field_name);
 	RUN(http_messaging_forbidden_connection_header);
 	RUN(http_messaging_te_invalid_value);

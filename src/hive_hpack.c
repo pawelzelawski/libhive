@@ -1651,6 +1651,7 @@ typedef struct {
 	int pseudo_done;
 	uint8_t pseudo_seen;
 	int is_trailer_block;
+	int method_is_connect;
 } hpack_http_state_t;
 
 #define HPACK_PSEUDO_METHOD 0x01u
@@ -1748,13 +1749,18 @@ hpack_te_value_is_trailers(const hive_buf_t *value)
 }
 
 static int
-hpack_validate_http_messaging(hive_stream_t *stream,
+hpack_validate_http_messaging(const hive_session_t *s,
+                              hive_stream_t *stream,
                               hpack_http_state_t *http_state,
                               const hive_buf_t *name,
                               const hive_buf_t *value)
 {
 	uint8_t pseudo_bit;
+	int expect_response;
 	int64_t content_length;
+
+	expect_response =
+	    (s->role == HIVE_ROLE_CLIENT && s->reassembly_type != 1u);
 
 	/* SECURITY: RFC 9113 requires lowercase field names in HTTP/2. */
 	if (hpack_ascii_has_uppercase(name))
@@ -1779,7 +1785,17 @@ hpack_validate_http_messaging(hive_stream_t *stream,
 		else
 			return HIVE_ERR_PROTOCOL;
 
+		if (!expect_response && pseudo_bit == HPACK_PSEUDO_STATUS)
+			return HIVE_ERR_PROTOCOL;
+		if (expect_response && pseudo_bit != HPACK_PSEUDO_STATUS)
+			return HIVE_ERR_PROTOCOL;
+
 		if ((http_state->pseudo_seen & pseudo_bit) != 0)
+			return HIVE_ERR_PROTOCOL;
+		if (pseudo_bit == HPACK_PSEUDO_METHOD &&
+		    hpack_buf_equal_lit(value, "CONNECT"))
+			http_state->method_is_connect = 1;
+		if (pseudo_bit == HPACK_PSEUDO_PATH && value->len == 0)
 			return HIVE_ERR_PROTOCOL;
 		http_state->pseudo_seen |= pseudo_bit;
 		return HIVE_OK;
@@ -1813,6 +1829,56 @@ hpack_validate_http_messaging(hive_stream_t *stream,
 	return HIVE_OK;
 }
 
+static int
+hpack_validate_http_pseudo_final(const hive_session_t *s,
+                                 const hpack_http_state_t *http_state)
+{
+	uint8_t seen;
+	int expect_response;
+
+	if (http_state->is_trailer_block) {
+		/* SECURITY: trailer header blocks must terminate the stream
+		 * (END_STREAM set). A trailing HEADERS block without END_STREAM
+		 * is malformed HTTP messaging and must be rejected with a
+		 * stream PROTOCOL_ERROR. */
+		if (s->reassembly_end_stream == 0)
+			return HIVE_ERR_PROTOCOL;
+		return HIVE_OK;
+	}
+
+	seen = http_state->pseudo_seen;
+	if (seen == 0u)
+		return HIVE_OK;
+
+	expect_response =
+	    (s->role == HIVE_ROLE_CLIENT && s->reassembly_type != 1u);
+	if (!expect_response) {
+		if ((seen & HPACK_PSEUDO_METHOD) == 0)
+			return HIVE_ERR_PROTOCOL;
+		if (http_state->method_is_connect) {
+			if ((seen & HPACK_PSEUDO_AUTHORITY) == 0)
+				return HIVE_ERR_PROTOCOL;
+			if ((seen & HPACK_PSEUDO_SCHEME) != 0 ||
+			    (seen & HPACK_PSEUDO_PATH) != 0)
+				return HIVE_ERR_PROTOCOL;
+		} else {
+			if ((seen & HPACK_PSEUDO_SCHEME) == 0 ||
+			    (seen & HPACK_PSEUDO_PATH) == 0)
+				return HIVE_ERR_PROTOCOL;
+		}
+		if ((seen & HPACK_PSEUDO_STATUS) != 0)
+			return HIVE_ERR_PROTOCOL;
+	} else {
+		if ((seen & HPACK_PSEUDO_STATUS) == 0)
+			return HIVE_ERR_PROTOCOL;
+		if ((seen & (HPACK_PSEUDO_METHOD | HPACK_PSEUDO_SCHEME |
+		             HPACK_PSEUDO_PATH | HPACK_PSEUDO_AUTHORITY)) != 0)
+			return HIVE_ERR_PROTOCOL;
+	}
+
+	return HIVE_OK;
+}
+
 int
 hpack_decode_block(hive_session_t *s,
                    const uint8_t *data,
@@ -1840,6 +1906,7 @@ hpack_decode_block(hive_session_t *s,
 	stream = stream_lookup(s, error_stream_id);
 	http_state.pseudo_done = 0;
 	http_state.pseudo_seen = 0;
+	http_state.method_is_connect = 0;
 	http_state.is_trailer_block =
 	    stream != NULL &&
 	    (stream->flags & HIVE_STREAM_FLAG_HEADERS_SEEN) != 0;
@@ -1945,6 +2012,7 @@ hpack_decode_block(hive_session_t *s,
 			    s->dec_table.hash == NULL)
 				return HIVE_ERR_NOMEM;
 			s->dec_table.max_size = idx;
+			pos += consumed;
 			continue;
 		} else {
 			/* Literal without indexing / never indexed (§6.2.2 /
@@ -2021,7 +2089,7 @@ hpack_decode_block(hive_session_t *s,
 
 		if (s->opt_no_http_messaging == 0 && !stream_error_pending) {
 			ret = hpack_validate_http_messaging(
-			    stream, &http_state, name_buf, value_buf);
+			    s, stream, &http_state, name_buf, value_buf);
 			if (ret != HIVE_OK)
 				stream_error_pending = 1;
 		}
@@ -2049,6 +2117,11 @@ hpack_decode_block(hive_session_t *s,
 			hpack_poison_if_ephemeral(s, name_buf);
 			hpack_poison_if_ephemeral(s, value_buf);
 		}
+	}
+
+	if (s->opt_no_http_messaging == 0 && !stream_error_pending) {
+		if (hpack_validate_http_pseudo_final(s, &http_state) != HIVE_OK)
+			stream_error_pending = 1;
 	}
 
 	if (stream_error_pending)

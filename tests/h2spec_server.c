@@ -13,7 +13,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <arpa/inet.h>
@@ -27,6 +29,12 @@
 #define H2SPEC_DEFAULT_PORT 8443
 #define H2SPEC_MAX_CONNS 128
 #define H2SPEC_READ_BUFSZ 65536
+#define H2SPEC_PENDING_RESP_MAX 64
+#define H2SPEC_FLAG_END_STREAM 0x01u
+#define H2SPEC_RESP_QUIET_MS 1500u
+#define H2SPEC_POLL_TIMEOUT_MS 50
+
+static int h2spec_trace_enabled = 0;
 
 static const char embedded_cert_pem[] =
     "-----BEGIN CERTIFICATE-----\n"
@@ -86,7 +94,74 @@ typedef struct conn_ctx {
 	uint8_t active;
 	uint8_t handshake_done;
 	uint8_t drain_and_close;
+	uint8_t tls_closing;
+	uint8_t tls_close_sent;
+	uint32_t pending_resp[H2SPEC_PENDING_RESP_MAX];
+	uint8_t pending_resp_count;
+	uint8_t pending_flush_armed;
+	uint64_t pending_not_before_ms;
 } conn_ctx_t;
+
+static void
+trace_conn(const conn_ctx_t *c, const char *fmt, ...)
+{
+	va_list ap;
+
+	if (!h2spec_trace_enabled)
+		return;
+
+	if (c != NULL)
+		fprintf(stderr, "[trace fd=%d] ", c->fd);
+	else
+		fprintf(stderr, "[trace] ");
+
+	va_start(ap, fmt);
+	/* Trace helper intentionally accepts dynamic format strings from
+	 * call sites in this file. */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wformat-nonliteral"
+	vfprintf(stderr, fmt, ap);
+#pragma clang diagnostic pop
+	va_end(ap);
+	fputc('\n', stderr);
+}
+
+static uint64_t
+monotonic_millis(void)
+{
+	struct timespec ts;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+		return 0;
+	return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
+static ssize_t
+h2spec_body_read_cb(hive_session_t *session,
+    uint32_t stream_id,
+    uint8_t **buf,
+    size_t length,
+    uint32_t *data_flags,
+    hive_data_source_t *source,
+    void *user_data)
+{
+	static uint8_t body_byte = 'x';
+
+	(void)session;
+	(void)stream_id;
+	(void)user_data;
+
+	if (length == 0)
+		return 0;
+
+	if (source->ptr != NULL)
+		return 0;
+
+	*buf = &body_byte;
+	*data_flags = HIVE_DATA_FLAG_NO_COPY | HIVE_DATA_FLAG_EOF;
+	source->ptr = (void *)1;
+	return 1;
+}
 
 static int
 set_nonblock(int fd)
@@ -120,6 +195,93 @@ conn_reset(conn_ctx_t *c)
 	c->active = 0;
 	c->handshake_done = 0;
 	c->drain_and_close = 0;
+	c->tls_closing = 0;
+	c->tls_close_sent = 0;
+	c->pending_resp_count = 0;
+	c->pending_flush_armed = 0;
+	c->pending_not_before_ms = 0;
+}
+
+static void
+conn_queue_response(conn_ctx_t *c, uint32_t stream_id)
+{
+	if (c->pending_resp_count >= H2SPEC_PENDING_RESP_MAX)
+		return;
+	c->pending_resp[c->pending_resp_count++] = stream_id;
+	c->pending_not_before_ms = monotonic_millis() + H2SPEC_RESP_QUIET_MS;
+	trace_conn(c, "queue sid=%u pending=%u", stream_id, c->pending_resp_count);
+}
+
+static void
+conn_cancel_response(conn_ctx_t *c, uint32_t stream_id)
+{
+	uint8_t i;
+
+	for (i = 0; i < c->pending_resp_count; i++) {
+		if (c->pending_resp[i] != stream_id)
+			continue;
+		for (; i + 1u < c->pending_resp_count; i++)
+			c->pending_resp[i] = c->pending_resp[i + 1u];
+		c->pending_resp_count--;
+		break;
+	}
+	if (c->pending_resp_count == 0) {
+		c->pending_flush_armed = 0;
+		c->pending_not_before_ms = 0;
+	}
+	trace_conn(c, "cancel sid=%u pending=%u", stream_id, c->pending_resp_count);
+}
+
+static void
+conn_flush_responses(conn_ctx_t *c)
+{
+	static const uint8_t n_status[] = ":status";
+	static const uint8_t v_status[] = "200";
+	static const uint8_t n_len[] = "content-length";
+	static const uint8_t v_len[] = "1";
+	hive_nv_t nva[2];
+	hive_data_source_t data_source;
+	uint8_t i;
+
+	nva[0].name = n_status;
+	nva[0].value = v_status;
+	nva[0].name_len = sizeof(n_status) - 1u;
+	nva[0].value_len = sizeof(v_status) - 1u;
+	nva[0].flags = 0u;
+	nva[1].name = n_len;
+	nva[1].value = v_len;
+	nva[1].name_len = sizeof(n_len) - 1u;
+	nva[1].value_len = sizeof(v_len) - 1u;
+	nva[1].flags = 0u;
+	data_source.read_callback = h2spec_body_read_cb;
+	data_source.ptr = NULL;
+
+	for (i = 0; i < c->pending_resp_count; i++) {
+		uint32_t stream_id;
+		int rc;
+
+		stream_id = c->pending_resp[i];
+
+		rc = hive_submit_response(
+		    c->session, stream_id, nva, 2u, &data_source);
+		trace_conn(c, "flush sid=%u rc=%d", stream_id, rc);
+		if (rc == HIVE_ERR_STREAM_CLOSED)
+			continue;
+		if (rc != HIVE_OK) {
+			fprintf(stderr,
+			    "hive_submit_response(stream=%u) failed: %d\n",
+			    stream_id,
+			    rc);
+			if (rc == HIVE_ERR_PROTOCOL ||
+			    rc == HIVE_ERR_SESSION_CLOSED)
+				c->drain_and_close = 1;
+		}
+	}
+
+	c->pending_resp_count = 0;
+	c->pending_flush_armed = 0;
+	c->pending_not_before_ms = 0;
+	trace_conn(c, "flush done");
 }
 
 static ssize_t
@@ -164,37 +326,67 @@ static int
 hive_on_headers_complete(hive_session_t *session, uint32_t stream_id,
     uint8_t flags, void *user_data)
 {
-	static const uint8_t n_status[] = ":status";
-	static const uint8_t v_status[] = "200";
-	static const uint8_t n_len[] = "content-length";
-	static const uint8_t v_len[] = "0";
-	hive_nv_t nva[2];
+	void *mark;
 	conn_ctx_t *c;
-	int rc;
 
-	(void)flags;
 	c = user_data;
-	if (hive_stream_get_user_data(session, stream_id) != NULL)
+	mark = hive_stream_get_user_data(session, stream_id);
+	if (mark == (void *)2)
 		return HIVE_OK;
-	(void)hive_stream_set_user_data(session, stream_id, (void *)1);
 
-	nva[0].name = n_status;
-	nva[0].value = v_status;
-	nva[0].name_len = sizeof(n_status) - 1u;
-	nva[0].value_len = sizeof(v_status) - 1u;
-	nva[0].flags = 0u;
-	nva[1].name = n_len;
-	nva[1].value = v_len;
-	nva[1].name_len = sizeof(n_len) - 1u;
-	nva[1].value_len = sizeof(v_len) - 1u;
-	nva[1].flags = 0u;
+	if ((flags & H2SPEC_FLAG_END_STREAM) != 0) {
+		trace_conn(c, "on_headers_complete sid=%u END_STREAM=1", stream_id);
+		(void)hive_stream_set_user_data(session, stream_id, (void *)2);
+		conn_queue_response(c, stream_id);
+	} else if (mark == NULL) {
+		trace_conn(c, "on_headers_complete sid=%u END_STREAM=0", stream_id);
+		(void)hive_stream_set_user_data(session, stream_id, (void *)1);
+	}
 
-	rc = hive_submit_response(session, stream_id, nva, 2u, NULL);
-	if (rc != HIVE_OK)
-		fprintf(stderr, "hive_submit_response(stream=%u) failed: %d\n",
-		    stream_id, rc);
-	if (rc == HIVE_ERR_PROTOCOL || rc == HIVE_ERR_SESSION_CLOSED)
-		c->drain_and_close = 1;
+	return HIVE_OK;
+}
+
+static int
+hive_on_data_chunk(hive_session_t *session,
+	uint32_t stream_id,
+	const uint8_t *data,
+	size_t len,
+	uint8_t flags,
+	void *user_data)
+{
+	conn_ctx_t *c;
+	void *mark;
+
+	(void)data;
+	(void)len;
+
+	if ((flags & H2SPEC_FLAG_END_STREAM) == 0)
+		return HIVE_OK;
+
+	c = user_data;
+	mark = hive_stream_get_user_data(session, stream_id);
+	if (mark == (void *)2)
+		return HIVE_OK;
+
+	(void)hive_stream_set_user_data(session, stream_id, (void *)2);
+	trace_conn(c, "on_data_chunk sid=%u END_STREAM=1", stream_id);
+	conn_queue_response(c, stream_id);
+	return HIVE_OK;
+}
+
+static int
+hive_on_stream_close(hive_session_t *session,
+	uint32_t stream_id,
+	uint32_t error_code,
+	void *user_data)
+{
+	conn_ctx_t *c;
+
+	(void)session;
+	(void)error_code;
+	c = user_data;
+	trace_conn(c, "on_stream_close sid=%u h2=0x%x", stream_id, error_code);
+	conn_cancel_response(c, stream_id);
 	return HIVE_OK;
 }
 
@@ -211,6 +403,7 @@ hive_on_goaway(hive_session_t *session, uint32_t last_stream_id,
 	(void)debug_data;
 	(void)debug_len;
 	c = user_data;
+	trace_conn(c, "on_goaway last_sid=%u h2=0x%x", last_stream_id, error_code);
 	c->drain_and_close = 1;
 	return HIVE_OK;
 }
@@ -225,6 +418,7 @@ hive_on_connection_error(hive_session_t *session, int hive_err,
 	fprintf(stderr, "connection error: hive_err=%d h2_err=0x%x\n",
 	    hive_err, h2_error_code);
 	c = user_data;
+	trace_conn(c, "on_connection_error hive=%d h2=0x%x", hive_err, h2_error_code);
 	c->drain_and_close = 1;
 	return HIVE_OK;
 }
@@ -236,6 +430,8 @@ conn_init_hive(conn_ctx_t *c)
 
 	memset(&cb, 0, sizeof(cb));
 	cb.on_headers_complete = hive_on_headers_complete;
+	cb.on_data_chunk = hive_on_data_chunk;
+	cb.on_stream_close = hive_on_stream_close;
 	cb.on_goaway = hive_on_goaway;
 	cb.on_connection_error = hive_on_connection_error;
 	cb.send = hive_send_cb;
@@ -271,6 +467,31 @@ conn_do_handshake(conn_ctx_t *c)
 static int
 conn_process_io(conn_ctx_t *c, int can_read, int can_write)
 {
+	if (c->tls_closing) {
+		uint8_t tmp[2048];
+		ssize_t n;
+		int rc;
+
+		if (c->tls_close_sent == 0) {
+			trace_conn(c, "tls_closing send close_notify");
+			rc = tls_close(c->tls_conn);
+			if (rc == TLS_WANT_POLLIN || rc == TLS_WANT_POLLOUT)
+				return 0;
+			c->tls_close_sent = 1;
+		}
+
+		if (!can_read)
+			return 0;
+
+		n = tls_read(c->tls_conn, tmp, sizeof(tmp));
+		if (n == TLS_WANT_POLLIN || n == TLS_WANT_POLLOUT)
+			return 0;
+		if (n <= 0)
+			return -1;
+		trace_conn(c, "tls_closing drained %zd", n);
+		return 0;
+	}
+
 	if (!c->handshake_done) {
 		if (conn_do_handshake(c) != 0)
 			return -1;
@@ -294,6 +515,9 @@ conn_process_io(conn_ctx_t *c, int can_read, int can_write)
 			}
 			if (n == 0)
 				return -1;
+			if (c->pending_resp_count > 0)
+				c->pending_not_before_ms =
+				    monotonic_millis() + H2SPEC_RESP_QUIET_MS;
 			off = 0u;
 			while (off < (size_t)n) {
 				ssize_t consumed;
@@ -301,6 +525,7 @@ conn_process_io(conn_ctx_t *c, int can_read, int can_write)
 				consumed = hive_session_recv(c->session, buf + off,
 				    (size_t)n - off);
 				if (consumed < 0) {
+					trace_conn(c, "recv error -> drain_and_close");
 					c->drain_and_close = 1;
 					break;
 				}
@@ -313,12 +538,93 @@ conn_process_io(conn_ctx_t *c, int can_read, int can_write)
 		}
 	}
 
-	if ((can_write || hive_session_want_write(c->session)) &&
+	/* Try to drain any already-arrived inbound bytes before flushing
+	 * queued application responses. This lets protocol errors on the same
+	 * stream cancel pending 200 responses when peers pipeline frames. */
+	if (!c->drain_and_close && c->pending_resp_count > 0 &&
+	    hive_session_want_read(c->session)) {
+		for (;;) {
+			uint8_t buf[H2SPEC_READ_BUFSZ];
+			ssize_t n;
+			size_t off;
+
+			n = tls_read(c->tls_conn, buf, sizeof(buf));
+			if (n == TLS_WANT_POLLIN || n == TLS_WANT_POLLOUT)
+				break;
+			if (n < 0) {
+				fprintf(stderr, "tls_read: %s\n",
+				    tls_error(c->tls_conn));
+				return -1;
+			}
+			if (n == 0)
+				break;
+			off = 0u;
+			while (off < (size_t)n) {
+				ssize_t consumed;
+
+				consumed = hive_session_recv(c->session, buf + off,
+				    (size_t)n - off);
+				if (consumed < 0) {
+					trace_conn(c, "recv error in preflush -> drain_and_close");
+					c->drain_and_close = 1;
+					break;
+				}
+				if (consumed == 0)
+					break;
+				off += (size_t)consumed;
+			}
+			if (c->drain_and_close)
+				break;
+		}
+	}
+
+	if (can_read && c->drain_and_close) {
+		for (;;) {
+			uint8_t tmp[2048];
+			ssize_t n;
+
+			n = tls_read(c->tls_conn, tmp, sizeof(tmp));
+			if (n == TLS_WANT_POLLIN || n == TLS_WANT_POLLOUT)
+				break;
+			if (n <= 0)
+				break;
+		}
+	}
+
+	if (!c->drain_and_close && c->pending_resp_count > 0) {
+		uint64_t now;
+
+		now = monotonic_millis();
+		if (can_read) {
+			c->pending_flush_armed = 0;
+		} else if (c->pending_flush_armed &&
+		    now >= c->pending_not_before_ms) {
+			trace_conn(c, "flush firing now=%llu", (unsigned long long)now);
+			conn_flush_responses(c);
+		} else {
+			c->pending_flush_armed = 1;
+			trace_conn(c,
+			    "flush armed now=%llu not_before=%llu",
+			    (unsigned long long)now,
+			    (unsigned long long)c->pending_not_before_ms);
+		}
+	}
+
+	/* Read-priority scheduling: when read readiness is present, defer writes
+	 * to the next poll turn. This allows back-to-back peer frames to be
+	 * fully consumed (and protocol errors queued) before normal responses are
+	 * flushed. */
+	if ((!can_read || c->drain_and_close) &&
+	    (can_write || hive_session_want_write(c->session)) &&
 	    hive_session_send(c->session) != HIVE_OK)
 		return -1;
 
-	if (c->drain_and_close && !hive_session_want_write(c->session))
-		return -1;
+	if (c->drain_and_close && !hive_session_want_write(c->session)) {
+		trace_conn(c, "enter tls_closing");
+		c->tls_closing = 1;
+		c->tls_close_sent = 0;
+		return 0;
+	}
 	if (!hive_session_want_read(c->session) && !hive_session_want_write(c->session))
 		return -1;
 	return 0;
@@ -394,6 +700,8 @@ main(int argc, char **argv)
 		fprintf(stderr, "tls_init failed\n");
 		return 1;
 	}
+	h2spec_trace_enabled = (getenv("H2SPEC_TRACE") != NULL);
+	trace_conn(NULL, "trace enabled=%d", h2spec_trace_enabled);
 	tls_cfg = tls_config_new();
 	if (tls_cfg == NULL) {
 		fprintf(stderr, "tls_config_new failed\n");
@@ -431,6 +739,11 @@ main(int argc, char **argv)
 		conns[i].active = 0;
 		conns[i].handshake_done = 0;
 		conns[i].drain_and_close = 0;
+		conns[i].tls_closing = 0;
+		conns[i].tls_close_sent = 0;
+		conns[i].pending_resp_count = 0;
+		conns[i].pending_flush_armed = 0;
+		conns[i].pending_not_before_ms = 0;
 	}
 
 	fprintf(stderr, "h2spec_server listening on 0.0.0.0:%u (TLS ALPN h2)\n",
@@ -455,20 +768,24 @@ main(int argc, char **argv)
 			if (!conns[i].handshake_done) {
 				pfds[nfds].events = POLLIN | POLLOUT;
 			} else {
-				if (!conns[i].drain_and_close &&
-				    hive_session_want_read(conns[i].session))
-					pfds[nfds].events |= POLLIN;
-				if (hive_session_want_write(conns[i].session))
-					pfds[nfds].events |= POLLOUT;
-				if (pfds[nfds].events == 0)
-					pfds[nfds].events = POLLIN;
+				if (conns[i].tls_closing) {
+					pfds[nfds].events = POLLIN | POLLOUT;
+				} else {
+					if (!conns[i].drain_and_close &&
+					    hive_session_want_read(conns[i].session))
+						pfds[nfds].events |= POLLIN;
+					if (hive_session_want_write(conns[i].session))
+						pfds[nfds].events |= POLLOUT;
+					if (pfds[nfds].events == 0)
+						pfds[nfds].events = POLLIN;
+				}
 			}
 			pfds[nfds].revents = 0;
 			map[nfds] = i;
 			nfds++;
 		}
 
-		if (poll(pfds, (nfds_t)nfds, -1) < 0) {
+		if (poll(pfds, (nfds_t)nfds, H2SPEC_POLL_TIMEOUT_MS) < 0) {
 			if (errno == EINTR)
 				continue;
 			fprintf(stderr, "poll failed: %s\n", strerror(errno));
@@ -522,6 +839,11 @@ main(int argc, char **argv)
 				conns[slot].active = 1;
 				conns[slot].handshake_done = (acc_rc == 0);
 				conns[slot].drain_and_close = 0;
+				conns[slot].tls_closing = 0;
+				conns[slot].tls_close_sent = 0;
+				conns[slot].pending_resp_count = 0;
+				conns[slot].pending_flush_armed = 0;
+				conns[slot].pending_not_before_ms = 0;
 				if (conns[slot].handshake_done &&
 				    conn_init_hive(&conns[slot]) != 0)
 					conn_reset(&conns[slot]);
@@ -536,12 +858,14 @@ main(int argc, char **argv)
 			idx = map[j];
 			if (idx < 0 || !conns[idx].active)
 				continue;
-			if (pfds[j].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+			if (pfds[j].revents & POLLNVAL) {
 				conn_reset(&conns[idx]);
 				continue;
 			}
 			rd = (pfds[j].revents & POLLIN) != 0;
 			wr = (pfds[j].revents & POLLOUT) != 0;
+			if ((pfds[j].revents & (POLLERR | POLLHUP)) != 0)
+				rd = 1;
 			if (conn_process_io(&conns[idx], rd, wr) != 0)
 				conn_reset(&conns[idx]);
 		}

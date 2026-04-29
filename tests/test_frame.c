@@ -866,9 +866,11 @@ test_recv_priority_wrong_length(void)
 
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	frame_hdr_write_at(frame, 4, HIVE_FRAME_PRIORITY, 0, 1);
-	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
+	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == (ssize_t)sizeof(frame));
 	ASSERT(s.last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s.last_h2_err == HIVE_H2_FRAME_SIZE_ERROR);
+	ASSERT(s.send_iov_count == 1);
+	ASSERT(queued_frame_type(&s, 0) == HIVE_FRAME_RST_STREAM);
 	return 1;
 }
 

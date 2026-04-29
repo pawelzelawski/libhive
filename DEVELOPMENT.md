@@ -4,7 +4,7 @@
 
 **Last Updated**: 2026-04-29
 **Current Phase**: Phase 9 — Conformance and Polish
-**Next Task**: 9.2 — h2spec run and fix
+**Next Task**: 9.3 — Frame decoder tool (`tools/hive_decode.c`)
 
 ### Phase Summary
 
@@ -18,7 +18,7 @@
 | 6 | Submit and Send | DONE | All Phase 6 tests pass (Linux + OpenBSD) | Full send queue, partial-send, response/request submit, new callbacks |
 | 7 | Security Hardening | DONE | All Phase 7 tests pass (Linux + OpenBSD) | Completion criteria confirmed 2026-04-26; flood protection, exhaustion, HTTP messaging validation, buffer lifetime |
 | 8 | h2c and Server Push | DONE | All Phase 8 tests pass (Linux + OpenBSD) | Tasks 8.1-8.5 complete; client role request-response receive path confirmed; Linux valgrind/tsan/lint/format gates green |
-| 9 | Conformance and Polish | NOT STARTED | — | h2spec, README, API reference, tools |
+| 9 | Conformance and Polish | IN PROGRESS | h2spec full suite: 0 failed (1 skipped) on Linux | Tasks 9.1–9.2 done; README, API reference, tools pending |
 
 ### Quality Milestones
 
@@ -34,7 +34,7 @@
 | M8 | No direct malloc/free calls in src/ except the NULL-allocator shim | DONE |
 | M9 | Full HPACK test suite passes (encode-decode round-trip) | DONE |
 | M10 | Frame state machine handles split delivery (1 byte at a time) | DONE |
-| M11 | h2spec full suite passes — zero failures | NOT STARTED |
+| M11 | h2spec full suite passes — zero failures | DONE |
 | M12 | Wraith integration: HTTP/2 GET over TLS with arena allocator | NOT STARTED |
 
 ---
@@ -1389,13 +1389,14 @@ for embedder use.
   requests, handles RST_STREAM, GOAWAY, PING, SETTINGS exchanges correctly
 - Tested via `make h2spec-server && ./tests/h2spec_server --port 8443 &`
 
-**9.2 — h2spec run and fix**
+**9.2 — h2spec run and fix** ✓ DONE
 - Run the full h2spec suite: `make h2spec`
 - Fix all failures. Every failure is either a genuine bug in Hive or a
   misunderstanding of the RFC — resolve against the RFC, not against h2spec
   alone. Document any disagreement explicitly before concluding Hive is
   correct and h2spec is wrong.
 - Target: zero failures across all h2spec test groups
+- Verification (Linux): `make h2spec` → 146 tests, 145 passed, 1 skipped, 0 failed
 
 **9.3 — Frame decoder tool (`tools/hive_decode.c`)**
 - Implement per TECH_STACK.md §7.8:
@@ -1436,7 +1437,7 @@ for embedder use.
 
 ### Phase 9 Completion Criteria
 
-- [ ] h2spec: zero failures — quality milestone M11 confirmed
+- [x] h2spec: zero failures — quality milestone M11 confirmed
 - [ ] `tools/hive_decode` decodes a captured HTTP/2 stream correctly;
       builds standalone from `hive_frame_bare.c` only
 - [ ] README integration example compiles and runs

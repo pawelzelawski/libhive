@@ -923,11 +923,22 @@ session_queue_server_preface(hive_session_t *s)
 {
 	uint8_t payload[36];
 	uint32_t payload_len;
+	uint8_t next_tail;
 	int ret;
 
 	payload_len = session_build_settings_payload(s, payload);
+	if (s->pending_count >= s->opt_max_settings_pending)
+		return HIVE_ERR_NOMEM;
 	ret = send_queue_append_ctrl(
 	    s, HIVE_FRAME_SETTINGS, 0u, 0u, payload, payload_len);
+	if (ret != HIVE_OK)
+		return ret;
+	if (s->pending_settings != NULL)
+		s->pending_settings[s->pending_tail] = s->local_settings;
+	next_tail =
+	    (uint8_t)((s->pending_tail + 1u) % s->opt_max_settings_pending);
+	s->pending_tail = next_tail;
+	s->pending_count++;
 	return ret;
 }
 
@@ -936,6 +947,7 @@ session_queue_client_preface(hive_session_t *s)
 {
 	uint8_t payload[36];
 	uint32_t payload_len;
+	uint8_t next_tail;
 	int ret;
 
 	if (s->send_buf_used + sizeof(client_preface_magic) > s->send_buf_cap)
@@ -953,8 +965,18 @@ session_queue_client_preface(hive_session_t *s)
 	s->send_buf_used += sizeof(client_preface_magic);
 
 	payload_len = session_build_settings_payload(s, payload);
+	if (s->pending_count >= s->opt_max_settings_pending)
+		return HIVE_ERR_NOMEM;
 	ret = send_queue_append_ctrl(
 	    s, HIVE_FRAME_SETTINGS, 0u, 0u, payload, payload_len);
+	if (ret != HIVE_OK)
+		return ret;
+	if (s->pending_settings != NULL)
+		s->pending_settings[s->pending_tail] = s->local_settings;
+	next_tail =
+	    (uint8_t)((s->pending_tail + 1u) % s->opt_max_settings_pending);
+	s->pending_tail = next_tail;
+	s->pending_count++;
 	return ret;
 }
 

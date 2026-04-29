@@ -25,6 +25,7 @@ int test_http_messaging_pseudo_after_regular(void);
 int test_http_messaging_unknown_pseudo_header(void);
 int test_http_messaging_duplicate_pseudo_header(void);
 int test_http_messaging_pseudo_header_in_trailers(void);
+int test_http_messaging_trailers_require_end_stream(void);
 int test_http_messaging_uppercase_field_name(void);
 int test_http_messaging_forbidden_connection_header(void);
 int test_http_messaging_te_invalid_value(void);
@@ -304,6 +305,9 @@ test_settings_unsolicited_ack(void)
 	size_t n;
 
 	s = new_server_security_session(1u, 100u, 10u, NULL, NULL);
+	s->pending_head = 0u;
+	s->pending_tail = 0u;
+	s->pending_count = 0u;
 
 	n = build_settings_frame(frame, HIVE_FLAG_ACK);
 	ASSERT(hive_session_recv(s, frame, n) == -1);
@@ -536,6 +540,38 @@ test_http_messaging_pseudo_header_in_trailers(void)
 
 	n2 = build_headers_frame_hpack(
 	    s, frame2, sizeof(frame2), 1u, HIVE_FLAG_END_STREAM, headers2, 1u);
+	ASSERT(hive_session_recv(s, frame2, n2) == (ssize_t)n2);
+	ASSERT(assert_rst_protocol(s, 1u));
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_http_messaging_trailers_require_end_stream(void)
+{
+	hive_session_t *s;
+	uint8_t frame1[256];
+	uint8_t frame2[256];
+	size_t n1;
+	size_t n2;
+	static const hive_nv_t headers1[] = {
+		{(const uint8_t *)"content-type", (const uint8_t *)"text/plain",
+		    12u, 10u, 0u},
+	};
+	static const hive_nv_t headers2[] = {
+		{(const uint8_t *)"x-extra", (const uint8_t *)"1", 7u, 1u, 0u},
+	};
+
+	s = new_server_security_session(3u, 100u, 10u, NULL, NULL);
+	n1 = build_headers_frame_hpack(
+	    s, frame1, sizeof(frame1), 1u, 0u, headers1, 1u);
+	ASSERT(hive_session_recv(s, frame1, n1) == (ssize_t)n1);
+	ASSERT(s->send_iov_count == 0);
+
+	/* Trailing HEADERS must terminate the stream (END_STREAM required). */
+	n2 = build_headers_frame_hpack(
+	    s, frame2, sizeof(frame2), 1u, 0u, headers2, 1u);
 	ASSERT(hive_session_recv(s, frame2, n2) == (ssize_t)n2);
 	ASSERT(assert_rst_protocol(s, 1u));
 

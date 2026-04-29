@@ -157,6 +157,72 @@ stream_error(hive_session_t *s,
 	return 0;
 }
 
+static void
+stream_recv_close(hive_session_t *s, hive_stream_t *stream, uint32_t h2_err)
+{
+	if (s->callbacks.on_stream_close != NULL) {
+		(void)s->callbacks.on_stream_close(
+		    s, stream->stream_id, h2_err, s->user_data);
+	}
+	stream_close(s, stream);
+}
+
+static int
+stream_apply_end_stream(hive_session_t *s, uint32_t stream_id)
+{
+	hive_stream_t *stream;
+
+	if (s->stream_hash == NULL || s->stream_slots == NULL)
+		return 0;
+
+	stream = stream_lookup(s, stream_id);
+	if (stream == NULL)
+		return 0;
+
+	/* SECURITY: Content-Length on a headers-only message must match total
+	 * DATA bytes received at END_STREAM; mismatch is a stream
+	 * PROTOCOL_ERROR. */
+	if (s->opt_no_http_messaging == 0 &&
+	    stream->content_length_expected != -1 &&
+	    stream->content_length_received !=
+	        (uint64_t)stream->content_length_expected) {
+		stream_recv_close(s, stream, HIVE_H2_PROTOCOL_ERROR);
+		(void)stream_error(
+		    s, stream_id, HIVE_ERR_PROTOCOL, HIVE_H2_PROTOCOL_ERROR);
+		return 0;
+	}
+
+	if (stream->state == HIVE_STREAM_OPEN) {
+		stream->state = HIVE_STREAM_HALF_CLOSED_REMOTE;
+	} else if (stream->state == HIVE_STREAM_HALF_CLOSED_LOCAL ||
+	           stream->state == HIVE_STREAM_RESERVED_REMOTE) {
+		stream_recv_close(s, stream, HIVE_H2_NO_ERROR);
+	}
+
+	return 0;
+}
+
+static uint32_t
+headers_illegal_state_error(hive_session_t *s, uint32_t stream_id)
+{
+	const hive_stream_t *stream;
+
+	if (s->stream_hash == NULL || s->stream_slots == NULL)
+		return 0;
+
+	stream = stream_lookup(s, stream_id);
+	if (stream == NULL)
+		return 0;
+
+	if (stream->state == HIVE_STREAM_HALF_CLOSED_REMOTE ||
+	    stream->state == HIVE_STREAM_CLOSED)
+		return HIVE_H2_STREAM_CLOSED;
+	if (stream->state == HIVE_STREAM_RESERVED_LOCAL)
+		return HIVE_H2_PROTOCOL_ERROR;
+
+	return 0;
+}
+
 static int
 headers_callbacks_enabled(const hive_session_t *s)
 {
@@ -171,6 +237,7 @@ headers_decode_complete(hive_session_t *s,
                         uint8_t end_stream)
 {
 	hive_stream_t *stream;
+	uint32_t stream_h2_err;
 	int ret;
 
 	if (!headers_callbacks_enabled(s))
@@ -178,13 +245,45 @@ headers_decode_complete(hive_session_t *s,
 
 	s->reassembly_stream_id = stream_id;
 	s->reassembly_end_stream = end_stream;
-	ret = hpack_decode_block(
-	    s, s->reassembly_buf, s->reassembly_len, 0, stream_id);
+	ret =
+	    hpack_decode_block(s,
+	                       s->reassembly_buf,
+	                       s->reassembly_len,
+	                       (s->reassembly_stream_error_code != 0u) ? 1 : 0,
+	                       stream_id);
+	stream_h2_err = s->reassembly_stream_error_code;
+	if (stream_h2_err == 0u && ret == HIVE_ERR_PROTOCOL) {
+		stream = stream_lookup(s, stream_id);
+		if (stream != NULL &&
+		    (stream->state == HIVE_STREAM_HALF_CLOSED_REMOTE ||
+		     stream->state == HIVE_STREAM_CLOSED))
+			stream_h2_err = HIVE_H2_STREAM_CLOSED;
+	}
+	if (stream_h2_err != 0u && ret != HIVE_ERR_COMPRESSION) {
+		stream = stream_lookup(s, stream_id);
+		if (stream != NULL)
+			stream_recv_close(s, stream, stream_h2_err);
+		(void)stream_error(
+		    s, stream_id, HIVE_ERR_PROTOCOL, stream_h2_err);
+		s->reassembly_stream_error_code = 0u;
+		s->reassembly_len = 0;
+		return 0;
+	}
 	if (ret == HIVE_OK) {
+		if (end_stream != 0)
+			(void)stream_apply_end_stream(s, stream_id);
+		else {
+			stream = stream_lookup(s, stream_id);
+			if (stream != NULL &&
+			    stream->state == HIVE_STREAM_RESERVED_REMOTE)
+				stream->state = HIVE_STREAM_HALF_CLOSED_LOCAL;
+		}
+
 		s->reassembly_len = 0;
 		return 0;
 	}
 	s->reassembly_len = 0;
+	s->reassembly_stream_error_code = 0u;
 	if (ret == HIVE_ERR_COMPRESSION)
 		return session_error(
 		    s, HIVE_ERR_COMPRESSION, HIVE_H2_COMPRESSION_ERROR);
@@ -466,12 +565,9 @@ frame_header_validate(hive_session_t *s)
 		}
 		break;
 	case HIVE_FRAME_PRIORITY:
-		/* SECURITY: PRIORITY payload must be exactly 5 bytes
-		 * (RFC 9113 §6.3). Any other length is a
-		 * FRAME_SIZE_ERROR connection error. */
-		if (f->length != 5) {
-			return frame_size_error(s);
-		}
+		/* PRIORITY frame size handling is stream-scoped in the receive
+		 * loop so invalid lengths can emit FRAME_SIZE_ERROR via
+		 * RST_STREAM while preserving connection state. */
 		break;
 	case HIVE_FRAME_GOAWAY:
 		/* SECURITY: GOAWAY must carry at least 8 bytes:
@@ -653,6 +749,7 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			s->priority_payload_len = 0;
 			if (s->reassembly_active == 0) {
 				s->reassembly_promised_stream_id = 0;
+				s->reassembly_stream_error_code = 0;
 			}
 
 			if (s->preface_count == 1) {
@@ -680,10 +777,25 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				return -1;
 			}
 
+			if (s->cur_frame.type == HIVE_FRAME_PRIORITY &&
+			    s->cur_frame.length != 5u) {
+				(void)stream_error(s,
+				                   s->cur_frame.stream_id,
+				                   HIVE_ERR_PROTOCOL,
+				                   HIVE_H2_FRAME_SIZE_ERROR);
+				s->recv_state = RECV_SKIP_PAYLOAD;
+				if (s->payload_remaining == 0)
+					s->recv_state = RECV_FRAME_HEADER;
+				break;
+			}
+
 			if (s->cur_frame.type == HIVE_FRAME_HEADERS) {
 				if (headers_open_new_stream(
 				        s, s->cur_frame.stream_id) != 0)
 					return -1;
+				s->reassembly_stream_error_code =
+				    headers_illegal_state_error(
+				        s, s->cur_frame.stream_id);
 			}
 
 			if (s->cur_frame.type == HIVE_FRAME_HEADERS &&
@@ -737,6 +849,16 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				if (s->recv_state == RECV_SETTINGS_PAYLOAD) {
 					if (settings_payload_complete(s) != 0)
 						return -1;
+				} else if (s->recv_state == RECV_DATA_PAYLOAD &&
+				           (s->cur_frame.flags &
+				            HIVE_FLAG_END_STREAM) != 0) {
+					/* SECURITY: A zero-length DATA frame
+					 * can carry END_STREAM. Apply stream
+					 * end-state transition even when no
+					 * DATA payload bytes are processed in
+					 * RECV_DATA_PAYLOAD. */
+					(void)stream_apply_end_stream(
+					    s, s->cur_frame.stream_id);
 				}
 				s->recv_state = RECV_FRAME_HEADER;
 			}
@@ -979,6 +1101,9 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				if (s->pad_remaining > 0) {
 					s->recv_state = RECV_DATA_PAD;
 				} else {
+					int cl_mismatch;
+
+					cl_mismatch = 0;
 					/* SECURITY: Content-Length consistency
 					 * enforcement. RFC 9113 §8.1.2 requires
 					 * that the number of DATA bytes matches
@@ -1000,7 +1125,13 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 						    s->cur_frame.stream_id,
 						    HIVE_ERR_PROTOCOL,
 						    HIVE_H2_PROTOCOL_ERROR);
+						cl_mismatch = 1;
 					}
+					if ((s->cur_frame.flags &
+					     HIVE_FLAG_END_STREAM) != 0 &&
+					    cl_mismatch == 0)
+						(void)stream_apply_end_stream(
+						    s, s->cur_frame.stream_id);
 					s->recv_state = RECV_FRAME_HEADER;
 				}
 			}
@@ -1019,6 +1150,9 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				if ((s->cur_frame.flags &
 				     HIVE_FLAG_END_STREAM) != 0) {
 					const hive_stream_t *dst;
+					int cl_mismatch;
+
+					cl_mismatch = 0;
 
 					dst = stream_lookup(
 					    s, s->cur_frame.stream_id);
@@ -1041,7 +1175,11 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 						    s->cur_frame.stream_id,
 						    HIVE_ERR_PROTOCOL,
 						    HIVE_H2_PROTOCOL_ERROR);
+						cl_mismatch = 1;
 					}
+					if (cl_mismatch == 0)
+						(void)stream_apply_end_stream(
+						    s, s->cur_frame.stream_id);
 				}
 				s->recv_state = RECV_FRAME_HEADER;
 			}
@@ -1066,9 +1204,36 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				if (n > s->payload_remaining) {
 					n = s->payload_remaining;
 				}
+				if (n > 0 && s->ctrl_staging_count <
+				                 sizeof(s->ctrl_staging)) {
+					size_t room;
+					size_t copy_n;
+
+					room = sizeof(s->ctrl_staging) -
+					       s->ctrl_staging_count;
+					copy_n = (n < room) ? n : room;
+					copy_bytes(s->ctrl_staging +
+					               s->ctrl_staging_count,
+					           data + consumed,
+					           copy_n);
+					s->ctrl_staging_count +=
+					    (uint8_t)copy_n;
+				}
 				consumed += n;
 				s->priority_payload_len -= (uint8_t)n;
 				s->payload_remaining -= (uint32_t)n;
+				if (s->priority_payload_len == 0 &&
+				    s->ctrl_staging_count == 5u) {
+					uint32_t dep_stream_id;
+
+					dep_stream_id = u32be(s->ctrl_staging) &
+					                0x7fffffffU;
+					if (dep_stream_id ==
+					    s->cur_frame.stream_id)
+						s->reassembly_stream_error_code =
+						    HIVE_H2_PROTOCOL_ERROR;
+					s->ctrl_staging_count = 0;
+				}
 				break;
 			}
 			if (s->pad_length_received != 0 &&
@@ -1123,6 +1288,18 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 					                   HIVE_FLAG_END_STREAM) !=
 					                  0)) != 0)
 						return -1;
+					if ((s->cur_frame.flags &
+					     HIVE_FLAG_END_STREAM) == 0) {
+						hive_stream_t *hstream;
+
+						hstream = stream_lookup(
+						    s, s->cur_frame.stream_id);
+						if (hstream != NULL &&
+						    hstream->state ==
+						        HIVE_STREAM_RESERVED_REMOTE)
+							hstream->state =
+							    HIVE_STREAM_HALF_CLOSED_LOCAL;
+					}
 					if (s->pad_remaining > 0) {
 						s->recv_state =
 						    RECV_HEADERS_PAD;
@@ -1441,7 +1618,22 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				s->payload_remaining--;
 			}
 			if (s->payload_remaining == 0) {
+				hive_stream_t *st;
 				uint64_t now;
+				uint32_t rst_h2_err;
+
+				rst_h2_err = u32be(s->ctrl_staging);
+				st = NULL;
+				if (s->stream_hash != NULL &&
+				    s->stream_slots != NULL)
+					st = stream_lookup(
+					    s, s->cur_frame.stream_id);
+				if (st == NULL && s->stream_hash != NULL &&
+				    s->stream_slots != NULL &&
+				    stream_was_idle(s, s->cur_frame.stream_id))
+					return protocol_error(s);
+				if (st != NULL)
+					stream_recv_close(s, st, rst_h2_err);
 
 				now = hive_monotonic_secs();
 				if (now - s->rst_flood_window_start >=
@@ -1626,6 +1818,20 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				s->payload_remaining--;
 			}
 			if (s->payload_remaining == 0) {
+				if (s->ctrl_staging_count == 5u) {
+					uint32_t dep_stream_id;
+
+					dep_stream_id = u32be(s->ctrl_staging) &
+					                0x7fffffffU;
+					if (dep_stream_id ==
+					    s->cur_frame.stream_id) {
+						(void)stream_error(
+						    s,
+						    s->cur_frame.stream_id,
+						    HIVE_ERR_PROTOCOL,
+						    HIVE_H2_PROTOCOL_ERROR);
+					}
+				}
 				s->ctrl_staging_count = 0;
 				s->recv_state = RECV_FRAME_HEADER;
 			}
