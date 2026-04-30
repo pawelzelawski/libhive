@@ -1339,37 +1339,48 @@ test_iovec_overflow(void)
 {
 	static uint8_t buf[TEST_SEND_BUF_CAP];
 	static struct iovec iov[TEST_SEND_IOV_CAP];
-	send_count_state_t st;
+	send_capture_t cap;
+	uint8_t ping_payload[8];
+	const uint8_t *p;
 	hive_session_t s;
 	int i;
 	int ret;
 
 	test_send_session_init(&s, buf, sizeof(buf), iov);
 	s.opt_max_send_iov = 4u;
-	memset(&st, 0, sizeof(st));
-	s.callbacks.send = send_cb_counting;
-	s.user_data = &st;
+	memset(&cap, 0, sizeof(cap));
+	memset(ping_payload, 0xa5, sizeof(ping_payload));
+	s.callbacks.send = send_cb_capture;
+	s.user_data = &cap;
 
 	for (i = 0; i < 4; i++) {
 		ret = send_queue_append_ctrl(
 		    &s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u, NULL, 0u);
 		ASSERT(ret == HIVE_OK);
 	}
-	ASSERT(st.call_count == 0);
+	ASSERT(cap.calls == 0);
 	ASSERT(s.send_iov_count == 4);
 
 	ret = send_queue_append_ctrl(
-	    &s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u, NULL, 0u);
+	    &s, HIVE_FRAME_PING, 0u, 0u, ping_payload, sizeof(ping_payload));
 	ASSERT(ret == HIVE_OK);
-	ASSERT(st.call_count == 1);
-	ASSERT(st.last_iovcnt == 4);
+	ASSERT(cap.calls == 1);
+	ASSERT(cap.iovcnt == 4);
 	ASSERT(s.send_partial == 0);
 	ASSERT(s.send_iov_count == 1);
+	ASSERT(s.send_iov[0].iov_len == 17u);
+	p = (const uint8_t *)s.send_iov[0].iov_base;
+	ASSERT(p[0] == 0x00);
+	ASSERT(p[1] == 0x00);
+	ASSERT(p[2] == 0x08);
+	ASSERT(p[3] == HIVE_FRAME_PING);
+	ASSERT(p[4] == 0x00);
+	ASSERT(p[8] == 0x00);
 
 	ret = hive_session_send(&s);
 	ASSERT(ret == HIVE_OK);
-	ASSERT(st.call_count == 2);
-	ASSERT(st.last_iovcnt == 1);
+	ASSERT(cap.calls == 2);
+	ASSERT(cap.iovcnt == 1);
 	ASSERT(s.send_iov_count == 0);
 
 	return 1;

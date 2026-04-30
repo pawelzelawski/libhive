@@ -106,11 +106,11 @@ send_queue_append_ctrl(hive_session_t *s,
 		return HIVE_ERR_INVALID_ARG;
 	if (payload_len > 0 && payload == NULL)
 		return HIVE_ERR_INVALID_ARG;
-	frame_start = s->send_buf_used;
 
 	ret = send_queue_reserve_iov(s, 1);
 	if (ret != HIVE_OK)
 		return ret;
+	frame_start = s->send_buf_used;
 
 	needed = 9u + (size_t)payload_len;
 	if (frame_start + needed > s->send_buf_cap)

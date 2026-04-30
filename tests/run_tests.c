@@ -57,6 +57,9 @@ int test_recv_priority_wrong_length(void);
 int test_recv_goaway_too_short(void);
 int test_recv_push_promise_wrong_length_unpadded(void);
 int test_recv_push_promise_wrong_length_padded(void);
+int test_recv_settings_ack_queue_failure_closes(void);
+int test_recv_data_window_update_queue_failure_no_restore(void);
+int test_recv_stream_error_queue_failure_closes(void);
 
 /* --- test_hpack.c --------------------------------------------------------- */
 int test_static_table_size(void);
@@ -428,6 +431,9 @@ main(void)
 	RUN(recv_goaway_too_short);
 	RUN(recv_push_promise_wrong_length_unpadded);
 	RUN(recv_push_promise_wrong_length_padded);
+	RUN(recv_settings_ack_queue_failure_closes);
+	RUN(recv_data_window_update_queue_failure_no_restore);
+	RUN(recv_stream_error_queue_failure_closes);
 	RUN(recv_unknown_frame_mid_stream);
 
 	/* Phase 1.3 - platform compat layer */

@@ -148,10 +148,14 @@ stream_error(hive_session_t *s,
              uint32_t h2_err)
 {
 	uint8_t payload[4];
+	int ret;
 
 	u32_write_be(payload, h2_err);
-	send_queue_append_ctrl(
+	ret = send_queue_append_ctrl(
 	    s, HIVE_FRAME_RST_STREAM, 0u, stream_id, payload, 4u);
+	if (ret != HIVE_OK) {
+		return session_error(s, HIVE_ERR_NOMEM, HIVE_H2_INTERNAL_ERROR);
+	}
 	s->last_err = hive_err;
 	s->last_h2_err = h2_err;
 	return 0;
@@ -438,6 +442,8 @@ settings_apply_param(hive_session_t *s, uint16_t param_id, uint32_t param_val)
 static int
 settings_payload_complete(hive_session_t *s)
 {
+	int ret;
+
 	if ((s->cur_frame.flags & HIVE_FLAG_ACK) != 0) {
 		if (s->pending_count == 0)
 			return protocol_error(s);
@@ -463,8 +469,10 @@ settings_payload_complete(hive_session_t *s)
 	if (s->inbound_settings_count > s->opt_max_settings_pending)
 		return protocol_error(s);
 
-	send_queue_append_ctrl(
+	ret = send_queue_append_ctrl(
 	    s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u, NULL, 0u);
+	if (ret != HIVE_OK)
+		return session_error(s, HIVE_ERR_NOMEM, HIVE_H2_INTERNAL_ERROR);
 	s->inbound_settings_count--;
 
 	if (s->callbacks.on_settings != NULL)
@@ -870,6 +878,7 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			uint32_t increment;
 			int64_t restored;
 			uint8_t wu_payload[4];
+			int ret;
 
 			st = NULL;
 			have_stream_state =
@@ -899,13 +908,18 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 							    s);
 						u32_write_be(wu_payload,
 						             increment);
-						send_queue_append_ctrl(
+						ret = send_queue_append_ctrl(
 						    s,
 						    HIVE_FRAME_WINDOW_UPDATE,
 						    0u,
 						    0u,
 						    wu_payload,
 						    4u);
+						if (ret != HIVE_OK)
+							return session_error(
+							    s,
+							    HIVE_ERR_NOMEM,
+							    HIVE_H2_INTERNAL_ERROR);
 						s->recv_window =
 						    (int32_t)restored;
 						s->recv_consumed = 0;
@@ -949,13 +963,18 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 							    s);
 						u32_write_be(wu_payload,
 						             increment);
-						send_queue_append_ctrl(
+						ret = send_queue_append_ctrl(
 						    s,
 						    HIVE_FRAME_WINDOW_UPDATE,
 						    0u,
 						    0u,
 						    wu_payload,
 						    4u);
+						if (ret != HIVE_OK)
+							return session_error(
+							    s,
+							    HIVE_ERR_NOMEM,
+							    HIVE_H2_INTERNAL_ERROR);
 						s->recv_window =
 						    (int32_t)restored;
 						s->recv_consumed = 0;
@@ -1012,13 +1031,18 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 					if (restored > 0x7fffffffLL)
 						return flow_control_error(s);
 					u32_write_be(wu_payload, increment);
-					send_queue_append_ctrl(
+					ret = send_queue_append_ctrl(
 					    s,
 					    HIVE_FRAME_WINDOW_UPDATE,
 					    0u,
 					    s->cur_frame.stream_id,
 					    wu_payload,
 					    4u);
+					if (ret != HIVE_OK)
+						return session_error(
+						    s,
+						    HIVE_ERR_NOMEM,
+						    HIVE_H2_INTERNAL_ERROR);
 					st->recv_window = (int32_t)restored;
 					st->recv_consumed = 0;
 				}
@@ -1031,13 +1055,18 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 					if (restored > 0x7fffffffLL)
 						return flow_control_error(s);
 					u32_write_be(wu_payload, increment);
-					send_queue_append_ctrl(
+					ret = send_queue_append_ctrl(
 					    s,
 					    HIVE_FRAME_WINDOW_UPDATE,
 					    0u,
 					    0u,
 					    wu_payload,
 					    4u);
+					if (ret != HIVE_OK)
+						return session_error(
+						    s,
+						    HIVE_ERR_NOMEM,
+						    HIVE_H2_INTERNAL_ERROR);
 					s->recv_window = (int32_t)restored;
 					s->recv_consumed = 0;
 				}

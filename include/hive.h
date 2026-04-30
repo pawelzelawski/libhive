@@ -230,7 +230,8 @@ typedef struct hive_callbacks {
 	 * Params:
 	 *   - session: owning session
 	 *   - stream_id: stream being decoded
-	 *   - name/value: transient handles delivered by pointer (`hive_buf_t *`)
+	 *   - name/value: transient handles delivered by pointer (`hive_buf_t
+	 * *`)
 	 *   - flags: header metadata flags
 	 *   - user_data: application context
 	 *
@@ -263,9 +264,9 @@ typedef struct hive_callbacks {
 	 * Called for each DATA chunk for `stream_id`.
 	 *
 	 * Params: session, stream_id, data pointer, len, flags, user_data.
-	 * Lifetime: `data` points into caller-provided recv bytes and is valid only
-	 * during the callback.
-	 * Returns: 0 to continue, non-zero to fail the receive path.
+	 * Lifetime: `data` points into caller-provided recv bytes and is valid
+	 * only during the callback. Returns: 0 to continue, non-zero to fail
+	 * the receive path.
 	 */
 	int (*on_data_chunk)(hive_session_t *session,
 	                     uint32_t stream_id,
@@ -309,7 +310,8 @@ typedef struct hive_callbacks {
 	                   const uint8_t opaque[8],
 	                   void *user_data);
 
-	/* Called before library queues GOAWAY for a connection-level failure. */
+	/* Called before library queues GOAWAY for a connection-level failure.
+	 */
 	int (*on_connection_error)(hive_session_t *session,
 	                           int hive_err,
 	                           uint32_t h2_error_code,
@@ -321,7 +323,8 @@ typedef struct hive_callbacks {
 	                           void *user_data);
 
 	/*
-	 * Transport send callback, called once per hive_session_send() invocation.
+	 * Transport send callback, called once per hive_session_send()
+	 * invocation.
 	 *
 	 * Returns `ssize_t` bytes written:
 	 *   - short write (0..total-1) is not an error; library resumes later
@@ -468,9 +471,9 @@ int hive_options_set_no_auto_ping_ack(hive_options_t *opt, uint32_t v);
  *   - NULL on allocation/setup failure
  */
 hive_session_t *hive_session_server_new(const hive_mem_t *mem,
-										const hive_options_t *opt,
-										const hive_callbacks_t *callbacks,
-										void *user_data);
+                                        const hive_options_t *opt,
+                                        const hive_callbacks_t *callbacks,
+                                        void *user_data);
 
 /*
  * Create a client-role HTTP/2 session.
