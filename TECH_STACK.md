@@ -322,11 +322,12 @@ required for embedders who link Hive into a shared library.
 ### 5.4 Build Targets
 
 ```makefile
-make              # same as make release
+make              # same as make dev
 make dev          # debug build with ASan/UBSan
 make release      # optimised hardened build
 make test         # build and run unit tests
 make test-asan    # run tests under ASan/UBSan (same as make dev + make test)
+make test-clock   # run the clock-gated RST_STREAM flood regressions
 make test-tsan    # run tests under ThreadSanitizer (Linux only)
 make valgrind     # run tests under Valgrind (Linux only)
 make h2spec       # run h2spec conformance suite against test server
@@ -524,8 +525,9 @@ Valgrind is not available on OpenBSD - use the ASan build there.
 
 **Compiler flags**: `-fsanitize=address,undefined` (included in `make dev`)
 
-Available on both Linux and OpenBSD with Clang. Use for all development
-builds. Do not ship sanitizer builds to embedders.
+Enabled by the Makefile on Linux. OpenBSD builds retain `HIVE_DEBUG` checks,
+but its default toolchain does not support this AddressSanitizer target. Do
+not ship sanitizer builds to embedders.
 
 The `HIVE_DEBUG=1` macro activates additional ASan behaviour within the
 library: `hive_buf_t` handles are poisoned via `__asan_poison_memory_region`
@@ -607,9 +609,10 @@ sequences at a running HTTP/2 server and verifies correct responses.
 
 **Installation**:
 ```sh
-# Download the binary for your platform
-curl -L https://github.com/summerwind/h2spec/releases/latest/download/h2spec_linux_amd64.tar.gz \
-     | tar xz
+# Linux amd64: pinned CI artifact (h2spec v2.6.0)
+curl -fsSLO https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz
+echo '157ee0de702e01ad40e752dbf074b366027e550c8e7504f9450da2809e279318  h2spec_linux_amd64.tar.gz' | sha256sum -c -
+tar xzf h2spec_linux_amd64.tar.gz
 chmod +x h2spec
 mv h2spec /usr/local/bin/
 
@@ -623,7 +626,7 @@ make h2spec-server
 ./tests/h2spec_server --port 8443 &
 
 # Run the full conformance suite
-make h2spec
+make h2spec H2SPEC_PORT=8443
 # equivalent to:
 h2spec -h 127.0.0.1 -p 8443 --tls --insecure
 ```
@@ -711,12 +714,12 @@ HTTP/2 analyser.
 
 | Dependency | Version | Type | Purpose | Platforms |
 |---|---|---|---|---|
-| Clang | ≥ 11.0 | Build tool | Compilation | Linux, OpenBSD |
+| Clang | 18 in CI; 22 also checked locally | Build tool | Compilation | Linux, OpenBSD |
 | libc | system | System lib | Standard C | Linux, OpenBSD |
 | Valgrind | latest | Dev tool | Memory checking | Linux only |
-| clang-tidy | ≥ 11.0 | Dev tool | Static analysis | Linux, OpenBSD |
+| clang-tidy | 18 in CI; current releases supported locally | Dev tool | Static analysis | Linux, OpenBSD |
 | cppcheck | latest | Dev tool | Static analysis | Linux, OpenBSD |
-| h2spec | latest | Conformance | HTTP/2 spec test | Linux, OpenBSD |
+| h2spec | 2.6.0 | Conformance | HTTP/2 spec test | Linux, OpenBSD |
 | libtls (LibreSSL) | ≥ 3.3 | Dev tool | TLS for test server | Linux, OpenBSD |
 
 **Runtime dependencies for embedders**:

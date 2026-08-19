@@ -146,7 +146,7 @@ uint32_t opt_initial_window_size;     /* SETTINGS_INITIAL_WINDOW_SIZE we adverti
 uint32_t opt_max_frame_size;          /* SETTINGS_MAX_FRAME_SIZE we advertise, default 16384 */
 uint32_t opt_max_header_list_size;    /* decoded header list limit, default 65536 */
 uint32_t opt_max_header_count;        /* max headers per block, default 100 */
-uint32_t opt_max_continuation_size;   /* reassembly cap, default opt_max_frame_size × 4 */
+uint32_t opt_max_continuation_size;   /* compressed-header reassembly cap, default 65536 */
 uint32_t opt_max_settings_pending;    /* max unACK'd outbound SETTINGS, default 3 */
 uint32_t opt_rst_flood_threshold;     /* RST_STREAM rate limit, default 100 */
 uint32_t opt_rst_flood_window_secs;   /* RST_STREAM rate window, default 10 */
@@ -292,7 +292,7 @@ uint8_t       reassembly_type;       /* 0 = HEADERS reassembly, 1 = PUSH_PROMISE
 uint8_t       reassembly_end_stream; /* END_STREAM flag from opening HEADERS frame */
 uint8_t       reassembly_active;     /* 1 = HEADERS/PUSH_PROMISE block in progress (no END_HEADERS yet) */
 uint32_t      reassembly_len;        /* bytes written into reassembly_buf so far */
-uint8_t      *reassembly_buf;        /* pre-allocated, opt_max_continuation_size bytes */
+uint8_t      *reassembly_buf;        /* pre-allocated max(continuation cap, max GOAWAY debug) */
 uint8_t       priority_payload_len;  /* bytes of PRIORITY prefix remaining in HEADERS payload */
 ```
 
@@ -2646,13 +2646,14 @@ Copy count on the receive hot path:
 Header name/value pairs are delivered via `hive_buf_t *` pointers to the
 `on_header` callback. The callback receives pointers to library-owned handles,
 not copies. The library clears `HIVE_BUF_VALID` in the actual handles
-immediately after the callback returns, making any stale pointer
-immediately detectable in debug builds.
+immediately after the callback returns. This catches stale handle use in
+debug builds; callers must still observe the lifetime contract.
 
 The caller calls `hive_buf_retain()` only for headers it needs to keep -
 typically 3–4 per request for a server (`:method`, `:path`, `host`,
 `content-type`). In a debug build, ASan poisons the data regions after
-callback return, catching accidental retain-after-return immediately.
+callback return. Scratch regions are unpoisoned before later library reuse, so
+this diagnostic cannot replace the explicit lifetime contract.
 
 ### 7.3 Send Path: Scatter-Gather iovec
 
@@ -2773,7 +2774,7 @@ Neither limit requires buffering the entire decoded header list.
 
 Hard cap on total compressed bytes in any HEADERS + CONTINUATION reassembly
 sequence. Configurable via `hive_options_set_max_continuation_size()`,
-default `opt_max_frame_size × 4 = 65536` bytes.
+default 65536 bytes.
 
 Enforced during `RECV_HEADERS_PAYLOAD` and `RECV_CONTINUATION_PAYLOAD`
 before any bytes are written into `reassembly_buf`. Exceeding the cap is a
@@ -2899,8 +2900,10 @@ The callback receives `hive_buf_t *name` and `hive_buf_t *value` pointing
 to library-owned handles. On callback return, the library clears
 `HIVE_BUF_VALID` in the actual handle objects. In ASan debug builds, the
 underlying data regions (`hpack_scratch_name`, `hpack_scratch_value`,
-`reassembly_buf`) are poisoned via `HIVE_ASAN_POISON`. Any access to a stale
-pointer after callback return produces an immediate ASan abort.
+`reassembly_buf`) are poisoned via `HIVE_ASAN_POISON`. Before the library
+reuses a scratch buffer, it unpoisons its writable capacity. Thus ASan catches
+stale access until that storage is reused; the lifetime contract remains
+binding after it becomes addressable again.
 
 `hive_buf_retain()` must be called only within the callback - it copies
 the data to arena memory and sets `HIVE_BUF_OWNED`. The copy is not poisoned.
@@ -3845,7 +3848,7 @@ Default options, `opt_max_concurrent_streams = 100`.
 | `stream_free_stack` | 100 × 4 | 400 |
 | `send_iov` | 512 × 16 | 8,192 |
 | `send_buf` | 65536 + 36 + 2048 | 67,620 |
-| `reassembly_buf` | opt_max_continuation_size | 65,536 |
+| `reassembly_buf` | max(continuation cap, max-frame-size - 8) | 65,536 at defaults |
 | `hpack_scratch_name` | opt_max_header_string_size | 8,192 |
 | `hpack_scratch_value` | opt_max_header_string_size | 8,192 |
 | `enc_table.ring` | 128 × 8 (4096/32 entries) | 1,024 |
@@ -3855,10 +3858,9 @@ Default options, `opt_max_concurrent_streams = 100`.
 
 Dominated by `send_buf` and `reassembly_buf`. Both are configurable.
 
-Setting `opt_max_continuation_size = 16384` (one max-frame-size) reduces
-per-session footprint to ~103 KB. At 1000 concurrent HTTP/2 connections in
-Wraith with arena allocators: ~103 MB - well within budget for a production
-server.
+At a configured frame size larger than the continuation cap, GOAWAY debug
+retention raises the reassembly allocation to `max-frame-size - 8`. Capacity
+planning must account for that legal configuration.
 
 With a Wraith connection-scoped arena: one `malloc(~168 KB)` at connection
 accept, zero structural allocation during the connection lifetime

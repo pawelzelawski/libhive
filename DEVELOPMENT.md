@@ -2,9 +2,14 @@
 
 ## Status Overview
 
-**Last Updated**: 2026-04-29
+**Last Updated**: 2026-08-19
 **Current Phase**: Phase 9 - Conformance and Polish (DONE)
-**Next Task**: Release workflow (dev -> main, tag v1.0.0, push)
+**Next Task**: Security-patch implementation and review on `dev`; no release
+or merge operation is implied by this historical development record.
+
+This document records the original v1.0.0 development programme. Historical
+test counts below are not evidence of a current validation run; use the
+version-controlled CI gates and `TESTING.md` for the current commands.
 
 ### Phase Summary
 
@@ -28,7 +33,7 @@
 | M2 | All unit tests pass on Linux | DONE |
 | M3 | All unit tests pass on OpenBSD | DONE |
 | M4 | Valgrind clean on Linux | DONE |
-| M5 | ASan/UBSan clean on both platforms | DONE |
+| M5 | Historical sanitizer milestone | DONE (Linux ASan/UBSan; OpenBSD debug build) |
 | M6 | clang-format clean | DONE |
 | M7 | clang-tidy clean | DONE |
 | M8 | No direct malloc/free calls in src/ except the NULL-allocator shim | DONE |
@@ -1396,7 +1401,8 @@ for embedder use.
   alone. Document any disagreement explicitly before concluding Hive is
   correct and h2spec is wrong.
 - Target: zero failures across all h2spec test groups
-- Verification (Linux): `make h2spec` → 146 tests, 145 passed, 1 skipped, 0 failed
+- Historical verification used an unpinned h2spec binary. Current conformance
+  validation uses pinned h2spec v2.6.0 and checks its failed count only.
 
 **9.3 - Frame decoder tool (`tools/hive_decode.c`)** ✓ DONE
 - Implement per TECH_STACK.md §7.8:
@@ -1409,8 +1415,8 @@ for embedder use.
 
 **9.4 - README.md** ✓ DONE
 - Written for an embedder coming to the project cold
-- Contents: one-paragraph description, requirements (libc only), how to
-  build (`make && make install`), minimal integration example (server role:
+- Contents: one-paragraph description, POSIX/Linux/OpenBSD requirements, how to
+  build (`make dev && make install`), minimal integration example (server role:
   the ~30-line event loop pattern from ARCHITECTURE.md §10), known
   limitations, link to ARCHITECTURE.md for full design
 - The integration example must compile and run correctly
@@ -1429,16 +1435,15 @@ for embedder use.
 - `make lint` → zero clang-tidy and cppcheck warnings
 - `make test` → all tests pass
 - `make valgrind` → clean on Linux
-- Full ASan/UBSan run on both platforms
+- Linux ASan/UBSan run; OpenBSD debug build/test
 - `grep -r "malloc\|free\|calloc\|realloc" src/ | grep -v null_alloc` →
   zero results
 - Update all status cells in phase summary table
 - Update all quality milestone statuses
 
-Verification status (2026-04-29):
-- Linux: `make lint` pass, `make test` pass (201/201), `make valgrind` clean,
-  README example compile+run verified against `build/rel/libhive.a`
-- OpenBSD: `make clean && make dev && make test` pass (201/201)
+Historical verification status (2026-04-29) is superseded for release evidence
+by the current CI gates and their logs. Do not use the historical test totals
+as a current result.
 
 ### Phase 9 Completion Criteria
 
@@ -1527,4 +1532,3 @@ Verification status (2026-04-29):
 | h2spec installation and use | TECH_STACK.md §7.7 | - |
 | Frame decoder tool | TECH_STACK.md §7.8 | - |
 | Source file purposes | REPOSITORY_STRUCTURE.md §3 | - |
-

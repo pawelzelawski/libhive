@@ -145,16 +145,16 @@ typedef enum {
  * All error codes are negative.
  */
 #define HIVE_OK 0
-#define HIVE_ERR_NOMEM -1
-#define HIVE_ERR_INVALID_ARG -2
-#define HIVE_ERR_PROTOCOL -3
-#define HIVE_ERR_COMPRESSION -4
-#define HIVE_ERR_FLOW_CONTROL -5
-#define HIVE_ERR_REFUSED_STREAM -6
-#define HIVE_ERR_STREAM_CLOSED -7
-#define HIVE_ERR_GOAWAY -8
-#define HIVE_ERR_SESSION_CLOSED -9
-#define HIVE_ERR_WOULDBLOCK -10
+#define HIVE_ERR_NOMEM (-1)
+#define HIVE_ERR_INVALID_ARG (-2)
+#define HIVE_ERR_PROTOCOL (-3)
+#define HIVE_ERR_COMPRESSION (-4)
+#define HIVE_ERR_FLOW_CONTROL (-5)
+#define HIVE_ERR_REFUSED_STREAM (-6)
+#define HIVE_ERR_STREAM_CLOSED (-7)
+#define HIVE_ERR_GOAWAY (-8)
+#define HIVE_ERR_SESSION_CLOSED (-9)
+#define HIVE_ERR_WOULDBLOCK (-10)
 
 /*
  * HTTP/2 wire error codes (for GOAWAY and RST_STREAM frames).

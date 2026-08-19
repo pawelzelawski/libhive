@@ -52,6 +52,9 @@ build_rst_stream_frame(uint8_t *dst, uint32_t stream_id, uint32_t error_code)
 	return 13u;
 }
 
+static size_t build_headers_frame_block(uint8_t *, uint32_t, uint8_t,
+	const uint8_t *, size_t);
+
 static int
 on_rst_stream_flood_capture(hive_session_t *session,
 	uint32_t rate,
@@ -67,6 +70,25 @@ on_rst_stream_flood_capture(hive_session_t *session,
 	cap->calls++;
 	cap->last_rate = rate;
 	return 0;
+}
+
+static int
+recv_opened_rst_stream(hive_session_t *session, uint32_t stream_id)
+{
+	uint8_t headers[12];
+	uint8_t rst[13];
+	uint8_t request[] = {0x82u, 0x84u, 0x86u};
+	size_t n;
+
+	n = build_headers_frame_block(headers,
+	                              stream_id,
+	                              HIVE_FLAG_END_HEADERS,
+	                              request,
+	                              sizeof(request));
+	if (hive_session_recv(session, headers, n) != (ssize_t)n)
+		return 0;
+	n = build_rst_stream_frame(rst, stream_id, HIVE_H2_CANCEL);
+	return hive_session_recv(session, rst, n) == (ssize_t)n;
 }
 #endif
 
@@ -347,8 +369,6 @@ test_rst_stream_flood_callback(void)
 #if defined(HIVE_TEST_CLOCK) && HIVE_TEST_CLOCK == 1
 	hive_session_t *s;
 	rst_flood_capture_t cap;
-	uint8_t frame[13];
-	size_t n;
 
 	memset(&cap, 0, sizeof(cap));
 	hive_test_clock_secs = 100u;
@@ -359,13 +379,12 @@ test_rst_stream_flood_callback(void)
 	                                on_rst_stream_flood_capture,
 	                                &cap);
 
-	n = build_rst_stream_frame(frame, 1u, HIVE_H2_CANCEL);
-	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
-	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
-	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(recv_opened_rst_stream(s, 1u));
+	ASSERT(recv_opened_rst_stream(s, 3u));
+	ASSERT(recv_opened_rst_stream(s, 5u));
 	ASSERT(cap.calls == 0u);
 
-	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(recv_opened_rst_stream(s, 7u));
 	ASSERT(cap.calls == 1u);
 	ASSERT(cap.last_rate == 4u);
 
@@ -382,8 +401,6 @@ test_rst_stream_flood_window_reset(void)
 #if defined(HIVE_TEST_CLOCK) && HIVE_TEST_CLOCK == 1
 	hive_session_t *s;
 	rst_flood_capture_t cap;
-	uint8_t frame[13];
-	size_t n;
 
 	memset(&cap, 0, sizeof(cap));
 	hive_test_clock_secs = 200u;
@@ -394,16 +411,15 @@ test_rst_stream_flood_window_reset(void)
 	                                on_rst_stream_flood_capture,
 	                                &cap);
 
-	n = build_rst_stream_frame(frame, 1u, HIVE_H2_CANCEL);
-	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
-	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
-	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(recv_opened_rst_stream(s, 1u));
+	ASSERT(recv_opened_rst_stream(s, 3u));
+	ASSERT(recv_opened_rst_stream(s, 5u));
 	ASSERT(cap.calls == 0u);
 
 	hive_test_clock_secs = 211u;
-	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
-	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
-	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(recv_opened_rst_stream(s, 7u));
+	ASSERT(recv_opened_rst_stream(s, 9u));
+	ASSERT(recv_opened_rst_stream(s, 11u));
 	ASSERT(cap.calls == 0u);
 
 	hive_session_free(s);

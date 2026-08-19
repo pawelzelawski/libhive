@@ -25,6 +25,10 @@ OS != uname -s
 # --- Compiler ---------------------------------------------------------------
 CC = clang
 AR = ar
+CLANG_TIDY ?= clang-tidy
+H2SPEC ?= h2spec
+H2SPEC_HOST ?= 127.0.0.1
+H2SPEC_PORT ?= 8443
 # --- Platform-specific flags ------------------------------------------------
 CFLAGS_OS != if [ "$(OS)" = "Linux" ]; then echo "-DLINUX"; \
              elif [ "$(OS)" = "OpenBSD" ]; then echo "-DOPENBSD"; \
@@ -148,7 +152,7 @@ h2spec-server: $(LIB_REL)
 	    tests/h2spec_server.c $(LIB_REL) -ltls \
 	    -o tests/h2spec_server
 h2spec:
-	h2spec -h 127.0.0.1 -p 8443 --tls --insecure
+	$(H2SPEC) -h $(H2SPEC_HOST) -p $(H2SPEC_PORT) --tls --insecure
 # --- Developer tools --------------------------------------------------------
 tools: $(LIB_DEV)
 	@mkdir -p $(BUILD_TOOLS_DIR)
@@ -157,7 +161,7 @@ tools: $(LIB_DEV)
 	    -o $(BUILD_TOOLS_DIR)/hive_decode
 # --- Lint -------------------------------------------------------------------
 lint:
-	clang-tidy src/*.c -- $(CFLAGS_DEV) $(EXTRA_CFLAGS) $(INCLUDES)
+	$(CLANG_TIDY) src/*.c -- $(CFLAGS_DEV) $(EXTRA_CFLAGS) $(INCLUDES)
 	cppcheck --enable=all --error-exitcode=1 \
 	         --suppress=missingIncludeSystem \
 	         --suppress=unusedFunction \

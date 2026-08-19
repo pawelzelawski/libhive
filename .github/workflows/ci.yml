@@ -30,43 +30,49 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y clang clang-tidy cppcheck valgrind libtls-dev
+          sudo apt-get install -y clang-18 clang-tidy-18 cppcheck valgrind libtls-dev
 
       - name: Install h2spec
         if: matrix.arch == 'amd64'
         run: |
-          curl -fsSL https://github.com/summerwind/h2spec/releases/latest/download/h2spec_linux_amd64.tar.gz \
-            | tar -xz
+          curl -fsSL -o h2spec_linux_amd64.tar.gz \
+            https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz
+          echo '157ee0de702e01ad40e752dbf074b366027e550c8e7504f9450da2809e279318  h2spec_linux_amd64.tar.gz' \
+            | sha256sum -c -
+          tar -xzf h2spec_linux_amd64.tar.gz
           chmod +x h2spec
           sudo mv h2spec /usr/local/bin/h2spec
 
       - name: Build (dev)
-        run: make dev
+        run: make CC=clang-18 dev
 
       - name: Lint
-        run: make lint
+        run: make CC=clang-18 CLANG_TIDY=clang-tidy-18 lint
 
       - name: Test (ASan/UBSan)
-        run: make test
+        run: make CC=clang-18 test
+
+      - name: Test (clock security paths)
+        run: make CC=clang-18 test-clock
 
       - name: Test (TSan)
-        run: make test-tsan
+        run: make CC=clang-18 test-tsan
 
       - name: Test (Valgrind)
-        run: make valgrind
+        run: make CC=clang-18 valgrind
 
       - name: Conformance (h2spec)
         if: matrix.arch == 'amd64'
         run: |
           set -eu
-          make h2spec-server
+          make CC=clang-18 h2spec-server
           ./tests/h2spec_server --port 8443 > h2spec_server.log 2>&1 &
           H2SPEC_SERVER_PID=$!
           trap 'kill "$H2SPEC_SERVER_PID" 2>/dev/null || true; wait "$H2SPEC_SERVER_PID" 2>/dev/null || true' EXIT
           sleep 1
 
           set +e
-          h2spec -h 127.0.0.1 -p 8443 --tls --insecure | tee h2spec.log
+          make H2SPEC_PORT=8443 h2spec | tee h2spec.log
           H2SPEC_RC=${PIPESTATUS[0]}
           set -e
 
@@ -75,11 +81,8 @@ jobs:
             exit "$H2SPEC_RC"
           fi
 
-          # Current expected outcome: no failures and one skipped case.
-          # Skipped case ID: HTTP/2 6.9.2/2
-          #   "Sends a SETTINGS frame for window size to be negative"
-          if ! grep -Eq '[0-9]+ tests, [0-9]+ passed, 1 skipped, 0 failed' h2spec.log; then
-            echo "Unexpected h2spec summary (expected: 0 failed, 1 skipped)."
+          if ! grep -Eq '(^|[,[:space:]])0 failed([[:space:]]|$)' h2spec.log; then
+            echo "Unexpected h2spec summary (expected: 0 failed)."
             tail -n 50 h2spec.log
             exit 1
           fi
@@ -125,6 +128,7 @@ jobs:
               fi
               exit 1
             }
+            make test-clock
 
   # ------------------------------------------------------------------ #
   # OpenBSD arm64                                                       #
@@ -168,4 +172,4 @@ jobs:
               fi
               exit 1
             }
-
+            make test-clock

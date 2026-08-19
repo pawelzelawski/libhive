@@ -387,8 +387,10 @@ main(void)
 	RUN(settings_unsolicited_ack);
 
 	/* Phase 7.3 -- RST_STREAM flood detection */
+#if defined(HIVE_TEST_CLOCK) && HIVE_TEST_CLOCK == 1
 	RUN(rst_stream_flood_callback);
 	RUN(rst_stream_flood_window_reset);
+#endif
 
 	/* Phase 7.4 -- stream ID exhaustion */
 	RUN(stream_id_exhaustion_triggers_prepare);

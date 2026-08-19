@@ -533,9 +533,11 @@ The error class column is critical. Getting CONTINUATION flood wrong
 RST_STREAM) causes h2spec failures. All security tests must verify the
 **correct error class**, not just that an error was returned.
 
-All flood tests use the clock abstraction (`HIVE_TEST_CLOCK=1`,
-`hive_test_clock_secs` global) to avoid sleep-based timing. No security
-test may use `sleep()` or `usleep()`.
+The RST_STREAM flood tests use the clock abstraction (`HIVE_TEST_CLOCK=1`,
+`hive_test_clock_secs` global) to avoid sleep-based timing. They are compiled
+and registered only by `make test-clock`, so the normal test binary cannot
+silently count their no-op fallback as coverage. No security test may use
+`sleep()` or `usleep()`.
 
 ### 5.2 Malformed Frame Tests
 
@@ -744,10 +746,10 @@ test_hive_buf_valid_cleared_after_callback(void)
 ```
 
 **ASan poisoning verification** (manual, `HIVE_DEBUG` builds only):
-In `HIVE_DEBUG` builds, accessing `name->data` after callback return
-triggers an ASan `heap-use-after-poison` abort for headers decoded from
-`reassembly_buf`, `hpack_scratch_name`, or `hpack_scratch_value`. Verify
-manually during Phase 7:
+In Linux ASan `HIVE_DEBUG` builds, ephemeral header storage is poisoned after
+callback return. Scratch storage is unpoisoned before a later internal reuse,
+so this is a diagnostic aid rather than a durable stale-pointer detector.
+Verify the immediate post-callback case manually during Phase 7:
 
 1. Build with `make dev` (`-fsanitize=address -DHIVE_DEBUG=1`)
 2. In `capture_on_header`, save `name->data` (not the pointer to the struct,
@@ -795,17 +797,17 @@ platforms.
 
 ### Unit Test Coverage
 
-| Module | Test file | Written | Valgrind clean | ASan clean | OpenBSD |
-|---|---|---|---|---|---|
-| compat_str | test_compat.c | - | - | - | - |
-| hive_frame_bare (standalone header parser) | test_frame.c | - | - | - | - |
-| HPACK (static + Huffman tables) | test_hpack.c | - | - | - | - |
-| HPACK (full encode/decode) | test_hpack.c | - | - | - | - |
-| Frame parser | test_frame.c | - | - | - | - |
-| Stream table | test_stream.c | - | - | - | - |
-| Flow control | test_flow.c | - | - | - | - |
-| Session lifecycle | test_session.c | - | - | - | - |
-| Security limits | test_security.c | - | - | - | - |
+| Module | Test file | Regression location |
+|---|---|---|
+| compat_str | test_compat.c | dedicated compatibility tests |
+| hive_frame_bare (standalone header parser) | test_frame.c | frame parser tests |
+| HPACK (static + Huffman tables) | test_hpack.c | HPACK tests |
+| HPACK (full encode/decode) | test_hpack.c | HPACK tests |
+| Frame parser | test_frame.c | frame and wire-driven security tests |
+| Stream table | test_session.c | session tests |
+| Flow control | test_flow.c | flow-control tests |
+| Session lifecycle | test_session.c | session tests |
+| Security limits | test_security.c | security tests; RST clock cases use `make test-clock` |
 
 ### Key Test Cases
 
@@ -901,27 +903,11 @@ platforms.
 
 ### Conformance Test Coverage
 
-| h2spec group | Total tests | Passing | Notes |
-|---|---|---|---|
-| generic/1 - Starting HTTP/2 | - | - | - |
-| generic/2 - HTTP Frames | - | - | - |
-| generic/3 - Frame size | - | - | - |
-| generic/4 - Header compression | - | - | - |
-| generic/5 - Stream states | - | - | - |
-| generic/6 - Error handling | - | - | - |
-| generic/7 - Frame definitions | - | - | - |
-| generic/8 - SETTINGS | - | - | - |
-| generic/9 - PING | - | - | - |
-| generic/10 - GOAWAY | - | - | - |
-| generic/11 - Flow control | - | - | - |
-| generic/12 - Error codes | - | - | - |
-| hpack/1–5 | - | - | - |
-| http2/* | - | - | - |
-| **Total** | - | - | - |
-
-Fill in counts after the first h2spec run in Phase 9. All cells in the
-Notes column should be empty when v1 is released - any entry there is an
-open issue.
+The pinned h2spec v2.6.0 gate is run against `tests/h2spec_server.c` on Linux
+amd64 when libtls is available. Its output must report zero failed tests;
+total and skipped counts are not release evidence because they are tool-output
+details rather than a stable project contract. See TECH_STACK.md §7.7 for the
+fixture and dependency requirements.
 
 ---
 
