@@ -86,6 +86,7 @@ int test_settings_recv_ack(void);
 int test_settings_invalid_window_size(void);
 int test_settings_invalid_frame_size(void);
 int test_settings_header_table_size_updates_encoder(void);
+int test_settings_header_table_size_encoder_capacity(void);
 int test_settings_header_table_size_pending_min(void);
 int test_settings_initial_window_retroactive_adjust(void);
 int test_settings_initial_window_retroactive_overflow(void);
@@ -99,6 +100,7 @@ int test_on_ping_fires_when_no_auto_ack(void);
 int test_on_ping_ack_fires(void);
 int test_on_connection_error_fires_before_goaway(void);
 int test_h2c_upgrade_settings_applied(void);
+int test_h2c_upgrade_header_table_size_encoder_capacity(void);
 int test_h2c_upgrade_stream1_open(void);
 int test_h2c_feed_upgrade_headers_fires_callbacks(void);
 int test_h2c_feed_upgrade_headers_double_call(void);
@@ -2722,6 +2724,31 @@ test_h2c_upgrade_settings_applied(void)
 }
 
 int
+test_h2c_upgrade_header_table_size_encoder_capacity(void)
+{
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	uint8_t settings_payload[6];
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+	settings_param_write(settings_payload,
+	                     HIVE_SETTINGS_HEADER_TABLE_SIZE,
+	                     65536u);
+	s = hive_session_server_upgrade(NULL,
+	                              NULL,
+	                              &cb,
+	                              NULL,
+	                              settings_payload,
+	                              sizeof(settings_payload));
+	ASSERT(s != NULL);
+	ASSERT(s->remote_settings.header_table_size == 65536u);
+	ASSERT(s->enc_table.pending_max == s->enc_table.ring_cap * 32u);
+	hive_session_free(s);
+	return 1;
+}
+
+int
 test_h2c_upgrade_stream1_open(void)
 {
 	hive_callbacks_t cb;
@@ -3908,6 +3935,53 @@ test_settings_header_table_size_updates_encoder(void)
 	ASSERT(s->enc_table.pending_max == 512u);
 	ASSERT(s->enc_table.pending_min == 512u);
 	ASSERT(s->enc_table.has_pending == 1u);
+
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_settings_header_table_size_encoder_capacity(void)
+{
+	settings_capture_t cap;
+	hive_session_t *s;
+	uint8_t payload[6];
+	uint8_t frame[15];
+	uint8_t values[129];
+	hive_nv_t nva[129];
+	uint8_t block[1024];
+	size_t n;
+	size_t block_len;
+	uint32_t i;
+
+	memset(&cap, 0, sizeof(cap));
+	s = new_server_recv_session(&cap);
+	ASSERT(s != NULL);
+	settings_param_write(payload, HIVE_SETTINGS_HEADER_TABLE_SIZE, 65536u);
+	n = build_settings_frame(frame, 0u, payload, sizeof(payload));
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(s->remote_settings.header_table_size == 65536u);
+	ASSERT(s->enc_table.pending_max == s->enc_table.ring_cap * 32u);
+
+	for (i = 0; i < 129u; i++) {
+		values[i] = (uint8_t)i;
+		nva[i].name = (const uint8_t *)"x";
+		nva[i].name_len = 1u;
+		nva[i].value = &values[i];
+		nva[i].value_len = 1u;
+		nva[i].flags = 0u;
+	}
+	ASSERT(hpack_encode_block(&s->enc_table,
+	                         &s->mem,
+	                         nva,
+	                         129u,
+	                         block,
+	                         sizeof(block),
+	                         &block_len) == HIVE_OK);
+	ASSERT(block_len > 0u);
+	ASSERT(s->enc_table.max_size == s->enc_table.ring_cap * 32u);
+	ASSERT(s->enc_table.count < s->enc_table.ring_cap);
+	ASSERT(s->enc_table.size <= s->enc_table.max_size);
 
 	hive_session_free(s);
 	return 1;

@@ -67,6 +67,8 @@ int test_hpack_bomb_size_limit(void);
 int test_hpack_bomb_count_limit(void);
 int test_hpack_header_callback_by_pointer(void);
 int test_hpack_decode_multiple_huffman_strings(void);
+int test_hpack_indexed_name_eviction_safe(void);
+int test_hpack_session_indexed_name_eviction_roles(void);
 
 /* Phase 3.5 - full encoder */
 int test_hpack_encode_decode_roundtrip_no_huff(void);
@@ -75,6 +77,20 @@ int test_hpack_encode_pending_size_update_dual(void);
 
 /* Phase 3.7 - standalone API */
 int test_hpack_standalone_encoder_decoder(void);
+int test_hpack_standalone_indexed_name_eviction_safe(void);
+
+static ssize_t
+hpack_test_send(hive_session_t *s,
+                const struct iovec *iov,
+                int iovcnt,
+                void *user_data)
+{
+	(void)s;
+	(void)iov;
+	(void)iovcnt;
+	(void)user_data;
+	return 0;
+}
 
 int
 test_static_table_size(void)
@@ -1291,6 +1307,64 @@ test_hpack_decode_multiple_huffman_strings(void)
 }
 
 int
+test_hpack_indexed_name_eviction_safe(void)
+{
+	static const uint8_t first[] = { 0x40, 0x01, 'a', 0x01, 'b' };
+	static const uint8_t second[] = { 0x7e, 0x01, 'c' };
+	hive_session_t s;
+	hpack_cap_t cap;
+	int ret;
+
+	ret = hpack_test_session_init(&s, &cap, 64);
+	ASSERT(ret == HIVE_OK);
+	ret = hpack_decode_block(&s, first, sizeof(first), 0, 1);
+	ASSERT(ret == HIVE_OK);
+	ret = hpack_decode_block(&s, second, sizeof(second), 0, 1);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(cap.header_count == 2);
+	ASSERT(strcmp(cap.names[1], "a") == 0);
+	ASSERT(strcmp(cap.values[1], "c") == 0);
+	hpack_test_session_free(&s);
+	return 1;
+}
+
+int
+test_hpack_session_indexed_name_eviction_roles(void)
+{
+	static const uint8_t first[] = { 0x40, 0x01, 'a', 0x01, 'b' };
+	static const uint8_t second[] = { 0x7e, 0x01, 'c' };
+	hive_options_t *opt;
+	hive_callbacks_t cb;
+	hive_session_t *sessions[2];
+	uint32_t i;
+
+	memset(&cb, 0, sizeof(cb));
+	cb.send = hpack_test_send;
+	opt = hive_options_new();
+	ASSERT(opt != NULL);
+	ASSERT(hive_options_set_header_table_size(opt, 64u) == HIVE_OK);
+	ASSERT(hive_options_set_no_http_messaging(opt, 1u) == HIVE_OK);
+	sessions[0] = hive_session_server_new(NULL, opt, &cb, NULL);
+	sessions[1] = hive_session_client_new(NULL, opt, &cb, NULL);
+	ASSERT(sessions[0] != NULL && sessions[1] != NULL);
+
+	for (i = 0; i < 2u; i++) {
+		sessions[i]->reassembly_stream_id = 1u;
+		ASSERT(hpack_decode_block(sessions[i], first, sizeof(first), 1, 1) ==
+		       HIVE_ERR_PROTOCOL);
+		ASSERT(hpack_decode_block(sessions[i], second, sizeof(second), 1, 1) ==
+		       HIVE_ERR_PROTOCOL);
+		ASSERT(sessions[i]->dec_table.count == 1u);
+		ASSERT(hpack_table_get(&sessions[i]->dec_table, 0)->value_len == 1u);
+		ASSERT(HPACK_ENTRY_VALUE(hpack_table_get(&sessions[i]->dec_table, 0))[0] ==
+		       'c');
+		hive_session_free(sessions[i]);
+	}
+	hive_options_free(opt);
+	return 1;
+}
+
+int
 test_hpack_decode_rfc_c4(void)
 {
 	static const uint8_t block[] = {
@@ -1684,6 +1758,26 @@ test_hpack_standalone_encoder_decoder(void)
 	ASSERT(consumed == 0);
 
 	hive_hpack_encoder_free(enc);
+	hive_hpack_decoder_free(dec);
+	return 1;
+}
+
+int
+test_hpack_standalone_indexed_name_eviction_safe(void)
+{
+	static const uint8_t first[] = { 0x40, 0x01, 'a', 0x01, 'b' };
+	static const uint8_t second[] = { 0x7e, 0x01, 'c' };
+	hive_hpack_decoder_t *dec;
+	hive_nv_t nv;
+	size_t consumed;
+
+	ASSERT(hive_hpack_decoder_new(&dec, 64) == HIVE_OK);
+	ASSERT(hive_hpack_decode(dec, first, sizeof(first), &consumed, &nv) ==
+	       HIVE_HPACK_DECODE_EMIT);
+	ASSERT(hive_hpack_decode(dec, second, sizeof(second), &consumed, &nv) ==
+	       HIVE_HPACK_DECODE_EMIT);
+	ASSERT(nv.name_len == 1u && nv.name[0] == 'a');
+	ASSERT(nv.value_len == 1u && nv.value[0] == 'c');
 	hive_hpack_decoder_free(dec);
 	return 1;
 }

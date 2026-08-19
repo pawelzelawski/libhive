@@ -112,6 +112,8 @@ int test_hpack_bomb_size_limit(void);
 int test_hpack_bomb_count_limit(void);
 int test_hpack_header_callback_by_pointer(void);
 int test_hpack_decode_multiple_huffman_strings(void);
+int test_hpack_indexed_name_eviction_safe(void);
+int test_hpack_session_indexed_name_eviction_roles(void);
 
 /* Phase 3.5 - full encoder */
 int test_hpack_encode_decode_roundtrip_no_huff(void);
@@ -120,6 +122,7 @@ int test_hpack_encode_pending_size_update_dual(void);
 
 /* Phase 3.7 - standalone API */
 int test_hpack_standalone_encoder_decoder(void);
+int test_hpack_standalone_indexed_name_eviction_safe(void);
 
 /* --- test_session.c ------------------------------------------------------- */
 int test_send_control_frame_queued(void);
@@ -171,6 +174,7 @@ int test_settings_recv_ack(void);
 int test_settings_invalid_window_size(void);
 int test_settings_invalid_frame_size(void);
 int test_settings_header_table_size_updates_encoder(void);
+int test_settings_header_table_size_encoder_capacity(void);
 int test_settings_header_table_size_pending_min(void);
 int test_settings_initial_window_retroactive_adjust(void);
 int test_settings_initial_window_retroactive_overflow(void);
@@ -184,6 +188,7 @@ int test_on_ping_fires_when_no_auto_ack(void);
 int test_on_ping_ack_fires(void);
 int test_on_connection_error_fires_before_goaway(void);
 int test_h2c_upgrade_settings_applied(void);
+int test_h2c_upgrade_header_table_size_encoder_capacity(void);
 int test_h2c_upgrade_stream1_open(void);
 int test_h2c_feed_upgrade_headers_fires_callbacks(void);
 int test_h2c_feed_upgrade_headers_double_call(void);
@@ -307,6 +312,7 @@ main(void)
 	RUN(settings_invalid_window_size);
 	RUN(settings_invalid_frame_size);
 	RUN(settings_header_table_size_updates_encoder);
+	RUN(settings_header_table_size_encoder_capacity);
 	RUN(settings_header_table_size_pending_min);
 	RUN(settings_initial_window_retroactive_adjust);
 	RUN(settings_initial_window_retroactive_overflow);
@@ -317,6 +323,7 @@ main(void)
 
 	/* Phase 8.1 - h2c Upgrade path */
 	RUN(h2c_upgrade_settings_applied);
+	RUN(h2c_upgrade_header_table_size_encoder_capacity);
 	RUN(h2c_upgrade_stream1_open);
 	RUN(h2c_feed_upgrade_headers_fires_callbacks);
 	RUN(h2c_feed_upgrade_headers_double_call);
@@ -497,6 +504,8 @@ main(void)
 	RUN(hpack_bomb_count_limit);
 	RUN(hpack_header_callback_by_pointer);
 	RUN(hpack_decode_multiple_huffman_strings);
+	RUN(hpack_indexed_name_eviction_safe);
+	RUN(hpack_session_indexed_name_eviction_roles);
 
 	/* Phase 3.5 - full encoder */
 	RUN(hpack_encode_decode_roundtrip_no_huff);
@@ -505,6 +514,7 @@ main(void)
 
 	/* Phase 3.7 - standalone API */
 	RUN(hpack_standalone_encoder_decoder);
+	RUN(hpack_standalone_indexed_name_eviction_safe);
 
 	printf("%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_passed == tests_run) ? 0 : 1;

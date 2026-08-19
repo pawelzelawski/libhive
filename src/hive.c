@@ -838,11 +838,7 @@ upgrade_apply_settings_param(hive_session_t *s,
 	switch (param_id) {
 	case HIVE_SETTINGS_HEADER_TABLE_SIZE:
 		s->remote_settings.header_table_size = param_val;
-		if (s->enc_table.has_pending == 0 ||
-		    param_val < s->enc_table.pending_min)
-			s->enc_table.pending_min = param_val;
-		s->enc_table.pending_max = param_val;
-		s->enc_table.has_pending = 1;
+		hpack_table_set_pending_max(&s->enc_table, param_val);
 		break;
 	case HIVE_SETTINGS_ENABLE_PUSH:
 		/* SECURITY: RFC 9113 §6.5.2 - ENABLE_PUSH MUST be 0 or 1;

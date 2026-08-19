@@ -158,6 +158,13 @@ void
 hpack_table_evict_to(hpack_table_t *t, const hive_mem_t *mem, uint32_t new_max);
 
 /*
+ * Queue an encoder table-size update, capped to the immutable pointer-ring
+ * capacity.  The peer-advertised setting is retained separately by session
+ * code; this is the effective value used for outbound HPACK.
+ */
+void hpack_table_set_pending_max(hpack_table_t *t, uint32_t requested_max);
+
+/*
  * hpack_table_insert - copy and insert a new entry into the table.
  *
  * Evicts oldest entries as needed.  If rfc_size > max_size, the entire

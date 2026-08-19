@@ -403,12 +403,7 @@ settings_apply_param(hive_session_t *s, uint16_t param_id, uint32_t param_val)
 	switch (param_id) {
 	case HIVE_SETTINGS_HEADER_TABLE_SIZE:
 		s->remote_settings.header_table_size = param_val;
-		if (s->enc_table.has_pending == 0 ||
-		    param_val < s->enc_table.pending_min) {
-			s->enc_table.pending_min = param_val;
-		}
-		s->enc_table.pending_max = param_val;
-		s->enc_table.has_pending = 1;
+		hpack_table_set_pending_max(&s->enc_table, param_val);
 		break;
 	case HIVE_SETTINGS_ENABLE_PUSH:
 		if (param_val > 1)

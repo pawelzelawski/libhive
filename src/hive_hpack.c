@@ -1135,6 +1135,26 @@ hpack_table_evict_to(hpack_table_t *t, const hive_mem_t *mem, uint32_t new_max)
 	}
 }
 
+void
+hpack_table_set_pending_max(hpack_table_t *t, uint32_t requested_max)
+{
+	uint32_t capacity_max;
+	uint32_t effective_max;
+
+	if (t->ring_cap > UINT32_MAX / 32u)
+		capacity_max = UINT32_MAX;
+	else
+		capacity_max = t->ring_cap * 32u;
+	effective_max = requested_max;
+	if (effective_max > capacity_max)
+		effective_max = capacity_max;
+
+	if (t->has_pending == 0 || effective_max < t->pending_min)
+		t->pending_min = effective_max;
+	t->pending_max = effective_max;
+	t->has_pending = 1;
+}
+
 int
 hpack_table_insert(hpack_table_t *t,
                    const hive_mem_t *mem,
@@ -1171,13 +1191,32 @@ hpack_table_insert(hpack_table_t *t,
 
 	rfc_size = (uint32_t)(alloc64 + 32u);
 
+	/* RFC 7541 §4.4: an oversized field empties the table but is not kept. */
+	if (rfc_size > t->max_size) {
+		hpack_table_evict_to(t, mem, 0);
+		return HIVE_OK;
+	}
+
 	/*
-	 * Evict oldest entries until there is room for the new entry,
-	 * or until the table is empty.  If rfc_size > max_size the loop
-	 * empties the table and the entry is then not inserted below
-	 * (RFC 7541 §4.4 oversized entry rule).
+	 * Allocate and copy before eviction.  name/value can point into a live
+	 * dynamic entry selected by indexed-name decoding; eviction must never
+	 * invalidate those source bytes before memcpy.  Allocation failure leaves
+	 * table contents untouched.
 	 */
-	while (t->count > 0 && t->size + rfc_size > t->max_size) {
+	entry = (hpack_entry_t *)mem->malloc(
+	    sizeof(hpack_entry_t) + (size_t)name_len + (size_t)value_len,
+	    mem->ctx);
+	if (entry == NULL)
+		return HIVE_ERR_NOMEM;
+	entry->name_len = name_len;
+	entry->value_len = value_len;
+	if (name_len > 0)
+		memcpy(HPACK_ENTRY_NAME(entry), name, name_len);
+	if (value_len > 0)
+		memcpy(HPACK_ENTRY_VALUE(entry), value, value_len);
+
+	/* Subtraction avoids overflow in t->size + rfc_size. */
+	while (t->count > 0 && t->size > t->max_size - rfc_size) {
 		uint32_t oldest_idx;
 		hpack_entry_t *oldest;
 
@@ -1190,33 +1229,10 @@ hpack_table_insert(hpack_table_t *t,
 		mem->free(oldest, mem->ctx);
 	}
 
-	/*
-	 * Oversized entry: rfc_size still exceeds max_size after full
-	 * eviction.  Table is now empty; do not insert.
-	 * See ARCHITECTURE.md §4.2.
-	 */
-	if (rfc_size > t->max_size)
-		return HIVE_OK;
-
-	entry = (hpack_entry_t *)mem->malloc(
-	    sizeof(hpack_entry_t) + (size_t)name_len + (size_t)value_len,
-	    mem->ctx);
-	if (entry == NULL)
-		return HIVE_ERR_NOMEM;
-
-	/*
-	 * SECURITY: always copy name and value bytes into the allocated entry.
-	 * Never store a pointer into caller memory - the source may be
-	 * reassembly_buf, a stack scratch buffer, or a static table region
-	 * that is invalidated or reused after this call returns.
-	 * See ARCHITECTURE.md §8.1 and CODING_STANDARDS.md §3.2.
-	 */
-	entry->name_len = name_len;
-	entry->value_len = value_len;
-	if (name_len > 0)
-		memcpy(HPACK_ENTRY_NAME(entry), name, name_len);
-	if (value_len > 0)
-		memcpy(HPACK_ENTRY_VALUE(entry), value, value_len);
+	if (t->count >= t->ring_cap) {
+		mem->free(entry, mem->ctx);
+		return HIVE_ERR_COMPRESSION;
+	}
 
 	ins_idx = t->ring_head;
 	t->ring[ins_idx] = entry;
@@ -1928,6 +1944,7 @@ hpack_decode_block(hive_session_t *s,
 	}
 
 	while (pos < len) {
+		const hpack_entry_t *inserted;
 		hive_buf_t *name_buf;
 		hive_buf_t *value_buf;
 		size_t consumed;
@@ -2000,6 +2017,13 @@ hpack_decode_block(hive_session_t *s,
 			                         (uint32_t)value_buf->len);
 			if (ret != HIVE_OK)
 				return ret;
+			/* Insertion may evict an indexed-name source.  Deliver the
+			 * newly copied table bytes, not that potentially freed source. */
+			inserted = hpack_table_get(&s->dec_table, 0);
+			name_buf->data = HPACK_ENTRY_NAME(inserted);
+			name_buf->len = inserted->name_len;
+			value_buf->data = HPACK_ENTRY_VALUE(inserted);
+			value_buf->len = inserted->value_len;
 		} else if (data[pos] & 0x20u) {
 			/* Dynamic table size update (RFC 7541 §6.3). */
 			if (!size_update_phase)
