@@ -468,7 +468,8 @@ settings_payload_complete(hive_session_t *s)
 	    s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u, NULL, 0u);
 	if (ret != HIVE_OK)
 		return session_error(s, HIVE_ERR_NOMEM, HIVE_H2_INTERNAL_ERROR);
-	s->inbound_settings_count--;
+	if (s->send_iov_settings_ack != NULL)
+		s->send_iov_settings_ack[s->send_iov_count - 1] = 1u;
 
 	if (s->callbacks.on_settings != NULL)
 		(void)s->callbacks.on_settings(s, s->user_data);

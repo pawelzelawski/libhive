@@ -231,8 +231,9 @@ memory after the ring wraps.
 
 `inbound_settings_count` tracks **inbound** SETTINGS frames received but not
 yet ACK'd. This is the flood protection counter (§8.4). It is a separate
-single counter, not a ring. It is decremented when the SETTINGS ACK is queued
-into the send buffer (not when transmitted, not at receipt). With
+single counter, not a ring. It is decremented only when its individual
+SETTINGS ACK has fully left the send queue (not when queued or merely
+partially transmitted). With
 `opt_max_settings_pending = 3` (default), flood protection allows at most 3
 unACK'd inbound SETTINGS at any time.
 
@@ -1231,8 +1232,7 @@ hive_session_recv(session, data, len):
               return session_error(HIVE_ERR_PROTOCOL,
                   HIVE_H2_PROTOCOL_ERROR, 0)  /* GOAWAY */
             queue SETTINGS ACK in send queue (9-byte frame, empty payload)
-            /* inbound_settings_count is decremented here, when ACK is queued */
-            inbound_settings_count--
+            mark this ACK for completion accounting
             fire on_settings(session, user_data)
           transition RECV_FRAME_HEADER
 
@@ -2812,9 +2812,9 @@ if (session->inbound_settings_count > session->opt_max_settings_pending)
         HIVE_H2_PROTOCOL_ERROR, 0);   /* GOAWAY */
 ```
 
-`inbound_settings_count` is decremented when the SETTINGS ACK is queued into
-the send buffer (not when received, not when transmitted - when queued). The
-fixed-size design prevents unbounded accumulation. With the default of
+`inbound_settings_count` is decremented only after its matching SETTINGS ACK
+has fully left the send queue (not when received, queued, or partially
+transmitted). The fixed-size design prevents unbounded accumulation. With the default of
 `opt_max_settings_pending = 3`, at most 3 inbound SETTINGS may be awaiting
 ACK at any time.
 

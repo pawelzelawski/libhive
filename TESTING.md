@@ -855,7 +855,7 @@ platforms.
 | on_connection_error fires before GOAWAY queued | test_session.c | ARCHITECTURE.md §9.6 |
 | CONTINUATION flood: GOAWAY (connection error) | test_security.c | ARCHITECTURE.md §8.3 |
 | PUSH_PROMISE flood: GOAWAY (connection error) | test_security.c | ARCHITECTURE.md §8.3 |
-| SETTINGS flood: inbound_settings_count counter | test_security.c | ARCHITECTURE.md §8.4 |
+| SETTINGS flood: queued ACK limit and full-send release | test_security.c, test_session.c | ARCHITECTURE.md §8.4 |
 | RST_STREAM flood: callback at threshold (clock mock) | test_security.c | ARCHITECTURE.md §8.5 |
 | RST_STREAM flood: window reset via clock mock | test_security.c | ARCHITECTURE.md §8.5 |
 | Stream ID exhaustion: goaway_prepare triggered | test_security.c | ARCHITECTURE.md §8.6 |

@@ -82,6 +82,7 @@ int test_recv_get_request_headers(void);
 int test_recv_headers_multiple_huffman_strings(void);
 int test_stream_id_monotonicity(void);
 int test_settings_recv_and_ack(void);
+int test_settings_ack_count_released_after_partial_send(void);
 int test_settings_recv_ack(void);
 int test_settings_invalid_window_size(void);
 int test_settings_invalid_frame_size(void);
@@ -3418,7 +3419,7 @@ test_session_new_custom_alloc(void)
 
 	s = hive_session_server_new(&mem, NULL, &cb, NULL);
 	ASSERT(s != NULL);
-	ASSERT(st.alloc_calls == 12u);
+	ASSERT(st.alloc_calls == 13u);
 
 	before = st.alloc_calls;
 	ret = hive_session_send(s);
@@ -3829,7 +3830,7 @@ test_settings_recv_and_ack(void)
 	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
 
 	ASSERT(s->remote_settings.initial_window_size == 131072u);
-	ASSERT(s->inbound_settings_count == 0u);
+	ASSERT(s->inbound_settings_count == 1u);
 	ASSERT(s->send_iov_count == 1);
 	ASSERT(cap.settings_count == 1);
 
@@ -3841,7 +3842,46 @@ test_settings_recv_and_ack(void)
 	ASSERT(ack[6] == 0u);
 	ASSERT(ack[7] == 0u);
 	ASSERT(ack[8] == 0u);
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(s->inbound_settings_count == 0u);
 
+	hive_session_free(s);
+	return 1;
+}
+
+int
+test_settings_ack_count_released_after_partial_send(void)
+{
+	partial_send_state_t send_state;
+	hive_callbacks_t cb;
+	hive_session_t *s;
+	uint8_t frame[9];
+	size_t n;
+
+	memset(&send_state, 0, sizeof(send_state));
+	/* Complete one ACK and partially transmit the next in the same batch. */
+	send_state.partial_bytes = 10;
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_partial;
+	s = hive_session_server_new(NULL, NULL, &cb, &send_state);
+	ASSERT(s != NULL);
+	s->send_iov_count = 0;
+	s->send_buf_used = 0;
+	s->send_partial = 0;
+	s->send_partial_offset = 0;
+	s->recv_state = RECV_FRAME_HEADER;
+	s->preface_count = 0;
+	n = build_settings_frame(frame, 0u, NULL, 0u);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(s->send_iov_count == 2);
+	ASSERT(s->inbound_settings_count == 2u);
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(s->inbound_settings_count == 1u);
+	ASSERT(hive_session_send(s) == HIVE_OK);
+	ASSERT(s->inbound_settings_count == 0u);
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(s->inbound_settings_count == 1u);
 	hive_session_free(s);
 	return 1;
 }

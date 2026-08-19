@@ -279,19 +279,13 @@ test_settings_flood_uses_inbound_counter(void)
 
 	s = new_server_security_session(1u, 100u, 10u, NULL, NULL);
 
-	/*
-	 * SECURITY: Flood tracking must use inbound_settings_count, not the
-	 * outbound pending_settings ring. Seed inbound counter at the limit, then
-	 * deliver one more non-ACK SETTINGS frame.
-	 */
-	s->inbound_settings_count = 1u;
-	s->pending_count = 0u;
-
 	n = build_settings_frame(frame, 0u);
+	/* Leave the first ACK queued, then exceed the configured limit on wire. */
+	ASSERT(hive_session_recv(s, frame, n) == (ssize_t)n);
+	ASSERT(s->inbound_settings_count == 1u);
 	ASSERT(hive_session_recv(s, frame, n) == -1);
 	ASSERT(s->last_err == HIVE_ERR_PROTOCOL);
 	ASSERT(s->last_h2_err == HIVE_H2_PROTOCOL_ERROR);
-	ASSERT(s->pending_count == 0u);
 
 	hive_session_free(s);
 	return 1;
@@ -706,4 +700,3 @@ test_hive_buf_asan_poisoning(void)
 	 */
 	return 1;
 }
-

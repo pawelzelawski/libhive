@@ -316,6 +316,7 @@ struct hive_session {
 	/* ARCHITECTURE.md §2.10                                        */
 	/* ------------------------------------------------------------ */
 	struct iovec *send_iov; /* iovec array, opt_max_send_iov entries    */
+	uint8_t *send_iov_settings_ack; /* SETTINGS ACK completion markers       */
 	int send_iov_count;     /* entries currently queued                 */
 	uint8_t *send_buf;      /* frame serialisation buffer               */
 	size_t send_buf_used;   /* bytes written; reset to 0 after full send */

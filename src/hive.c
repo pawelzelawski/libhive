@@ -663,6 +663,10 @@ session_prealloc_free(hive_session_t *s)
 		s->mem.free(s->send_iov, s->mem.ctx);
 		s->send_iov = NULL;
 	}
+	if (s->send_iov_settings_ack != NULL) {
+		s->mem.free(s->send_iov_settings_ack, s->mem.ctx);
+		s->send_iov_settings_ack = NULL;
+	}
 	if (s->stream_free_stack != NULL) {
 		s->mem.free(s->stream_free_stack, s->mem.ctx);
 		s->stream_free_stack = NULL;
@@ -716,6 +720,10 @@ session_prealloc(hive_session_t *s)
 	s->send_iov = s->mem.calloc(
 	    s->opt_max_send_iov, sizeof(*s->send_iov), s->mem.ctx);
 	if (s->send_iov == NULL)
+		goto cleanup;
+	s->send_iov_settings_ack = s->mem.calloc(
+	    s->opt_max_send_iov, sizeof(*s->send_iov_settings_ack), s->mem.ctx);
+	if (s->send_iov_settings_ack == NULL)
 		goto cleanup;
 
 	s->send_buf = s->mem.malloc(s->send_buf_cap, s->mem.ctx);
@@ -1228,6 +1236,20 @@ hive_session_send(hive_session_t *session)
 	}
 
 	session->send_partial_offset += (size_t)written;
+	if (session->send_iov_settings_ack != NULL) {
+		size_t frame_end;
+
+		frame_end = 0;
+		for (i = 0; i < (size_t)session->send_iov_count; i++) {
+			frame_end += session->send_iov[i].iov_len;
+			if (session->send_iov_settings_ack[i] != 0u &&
+			    session->send_partial_offset >= frame_end) {
+				if (session->inbound_settings_count > 0u)
+					session->inbound_settings_count--;
+				session->send_iov_settings_ack[i] = 0u;
+			}
+		}
+	}
 
 	if (session->send_partial_offset >= total) {
 		/* All bytes sent - reset queue for next batch. */
@@ -1235,6 +1257,10 @@ hive_session_send(hive_session_t *session)
 		session->send_buf_used = 0;
 		session->send_partial_offset = 0;
 		session->send_partial = 0;
+		if (session->send_iov_settings_ack != NULL)
+			memset(session->send_iov_settings_ack,
+			       0,
+			       session->opt_max_send_iov);
 	} else {
 		/* Partial write - retain unsent tail. */
 		session->send_partial = 1;

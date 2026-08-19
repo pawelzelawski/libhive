@@ -170,6 +170,7 @@ int test_recv_get_request_headers(void);
 int test_recv_headers_multiple_huffman_strings(void);
 int test_stream_id_monotonicity(void);
 int test_settings_recv_and_ack(void);
+int test_settings_ack_count_released_after_partial_send(void);
 int test_settings_recv_ack(void);
 int test_settings_invalid_window_size(void);
 int test_settings_invalid_frame_size(void);
@@ -310,6 +311,7 @@ main(void)
 	RUN(recv_headers_multiple_huffman_strings);
 	RUN(stream_id_monotonicity);
 	RUN(settings_recv_and_ack);
+	RUN(settings_ack_count_released_after_partial_send);
 	RUN(settings_recv_ack);
 	RUN(settings_invalid_window_size);
 	RUN(settings_invalid_frame_size);
