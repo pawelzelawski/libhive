@@ -1517,6 +1517,13 @@ hpack_decode_string(const uint8_t *src,
 		size_t out_len;
 		int ret;
 
+		/*
+		 * Header callbacks poison ephemeral scratch bytes on return so
+		 * retained pointers fail fast under ASan.  This buffer is reused for
+		 * subsequent Huffman strings, so restore precisely its writable
+		 * capacity before the decoder writes to it.
+		 */
+		HIVE_ASAN_UNPOISON(scratch, scratch_cap);
 		ret = huff_decode(src + hdr_consumed,
 		                  (size_t)slen,
 		                  scratch,

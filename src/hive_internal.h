@@ -22,7 +22,14 @@
 /* See TECH_STACK.md §7.2 and CODING_STANDARDS.md §3.5.               */
 /* ------------------------------------------------------------------ */
 
-#if defined(HIVE_DEBUG) && defined(__SANITIZE_ADDRESS__)
+#if defined(HIVE_DEBUG) && defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define HIVE_HAS_ADDRESS_SANITIZER 1
+#endif
+#endif
+
+#if defined(HIVE_DEBUG) &&                                                  \
+    (defined(__SANITIZE_ADDRESS__) || defined(HIVE_HAS_ADDRESS_SANITIZER))
 #include <sanitizer/asan_interface.h>
 #define HIVE_ASAN_POISON(ptr, size) __asan_poison_memory_region((ptr), (size))
 #define HIVE_ASAN_UNPOISON(ptr, size)                                          \

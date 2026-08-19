@@ -79,6 +79,7 @@ int test_stream_free_stack(void);
 int test_stream_compaction(void);
 int test_recv_headers_opens_new_stream(void);
 int test_recv_get_request_headers(void);
+int test_recv_headers_multiple_huffman_strings(void);
 int test_stream_id_monotonicity(void);
 int test_settings_recv_and_ack(void);
 int test_settings_recv_ack(void);
@@ -1506,6 +1507,7 @@ test_send_headers_single_frame_layout(void)
 	hive_session_free(s);
 	return 1;
 }
+
 
 /* ------------------------------------------------------------------ */
 /* test_send_headers_split_layout                                     */
@@ -3702,6 +3704,55 @@ test_recv_get_request_headers(void)
 	return 1;
 }
 
+/*
+ * This exercises the public session receive path, where each header callback
+ * poisons its ephemeral Huffman value before the next field reuses it.
+ */
+int
+test_recv_headers_multiple_huffman_strings(void)
+{
+	static const uint8_t hpack_block[] = {
+		0x82, 0x86, 0x84,
+		0x40, 0x01, 'x', 0x8c,
+		0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a,
+		0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff,
+		0x7e, 0x8c,
+		0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a,
+		0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff,
+	};
+	hive_callbacks_t cb;
+	headers_capture_t cap;
+	hive_session_t *s;
+	uint8_t frame[9 + sizeof(hpack_block)];
+
+	memset(&cb, 0, sizeof(cb));
+	memset(&cap, 0, sizeof(cap));
+	cb.send = send_cb_full;
+	cb.on_begin_headers = on_begin_headers_capture;
+	cb.on_header = on_header_capture;
+	cb.on_headers_complete = on_headers_complete_capture;
+
+	s = hive_session_server_new(NULL, NULL, &cb, &cap);
+	ASSERT(s != NULL);
+	s->recv_state = RECV_FRAME_HEADER;
+	s->preface_count = 0;
+
+	frame_hdr_write_at(frame,
+	                  sizeof(hpack_block),
+	                  HIVE_FRAME_HEADERS,
+	                  HIVE_FLAG_END_HEADERS | HIVE_FLAG_END_STREAM,
+	                  1u);
+	memcpy(frame + 9, hpack_block, sizeof(hpack_block));
+
+	ASSERT(hive_session_recv(s, frame, sizeof(frame)) ==
+	       (ssize_t)sizeof(frame));
+	ASSERT(cap.header_count == 5);
+	ASSERT(cap.complete_count == 1);
+
+	hive_session_free(s);
+	return 1;
+}
+
 int
 test_stream_id_monotonicity(void)
 {
@@ -4179,4 +4230,3 @@ test_on_connection_error_fires_before_goaway(void)
 	hive_session_free(s);
 	return 1;
 }
-

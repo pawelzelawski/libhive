@@ -66,6 +66,7 @@ int test_hpack_size_update_exceeds_pending_max(void);
 int test_hpack_bomb_size_limit(void);
 int test_hpack_bomb_count_limit(void);
 int test_hpack_header_callback_by_pointer(void);
+int test_hpack_decode_multiple_huffman_strings(void);
 
 /* Phase 3.5 - full encoder */
 int test_hpack_encode_decode_roundtrip_no_huff(void);
@@ -1254,6 +1255,41 @@ test_hpack_decode_rfc_c3(void)
 	return 1;
 }
 
+/*
+ * Decoding the first field poisons its Huffman value after on_header().
+ * The second field reuses that scratch buffer.  ASan reports a
+ * use-after-poison here without the central reuse unpoisoning.
+ */
+int
+test_hpack_decode_multiple_huffman_strings(void)
+{
+	static const uint8_t block[] = {
+		0x40, 0x01, 'x', 0x8c,
+		0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a,
+		0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff,
+		0x7e, 0x8c,
+		0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a,
+		0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff,
+	};
+	hive_session_t s;
+	hpack_cap_t cap;
+	int ret;
+
+	ret = hpack_test_session_init(&s, &cap, 4096);
+	ASSERT(ret == HIVE_OK);
+
+	ret = hpack_decode_block(&s, block, sizeof(block), 0, 1);
+	ASSERT(ret == HIVE_OK);
+	ASSERT(cap.header_count == 2);
+	ASSERT(strcmp(cap.names[0], "x") == 0);
+	ASSERT(strcmp(cap.values[0], "www.example.com") == 0);
+	ASSERT(strcmp(cap.names[1], "x") == 0);
+	ASSERT(strcmp(cap.values[1], "www.example.com") == 0);
+
+	hpack_test_session_free(&s);
+	return 1;
+}
+
 int
 test_hpack_decode_rfc_c4(void)
 {
@@ -1651,4 +1687,3 @@ test_hpack_standalone_encoder_decoder(void)
 	hive_hpack_decoder_free(dec);
 	return 1;
 }
-

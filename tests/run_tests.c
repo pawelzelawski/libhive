@@ -111,6 +111,7 @@ int test_hpack_size_update_exceeds_pending_max(void);
 int test_hpack_bomb_size_limit(void);
 int test_hpack_bomb_count_limit(void);
 int test_hpack_header_callback_by_pointer(void);
+int test_hpack_decode_multiple_huffman_strings(void);
 
 /* Phase 3.5 - full encoder */
 int test_hpack_encode_decode_roundtrip_no_huff(void);
@@ -163,6 +164,7 @@ int test_stream_free_stack(void);
 int test_stream_compaction(void);
 int test_recv_headers_opens_new_stream(void);
 int test_recv_get_request_headers(void);
+int test_recv_headers_multiple_huffman_strings(void);
 int test_stream_id_monotonicity(void);
 int test_settings_recv_and_ack(void);
 int test_settings_recv_ack(void);
@@ -298,6 +300,7 @@ main(void)
 	RUN(stream_compaction);
 	RUN(recv_headers_opens_new_stream);
 	RUN(recv_get_request_headers);
+	RUN(recv_headers_multiple_huffman_strings);
 	RUN(stream_id_monotonicity);
 	RUN(settings_recv_and_ack);
 	RUN(settings_recv_ack);
@@ -493,6 +496,7 @@ main(void)
 	RUN(hpack_bomb_size_limit);
 	RUN(hpack_bomb_count_limit);
 	RUN(hpack_header_callback_by_pointer);
+	RUN(hpack_decode_multiple_huffman_strings);
 
 	/* Phase 3.5 - full encoder */
 	RUN(hpack_encode_decode_roundtrip_no_huff);
