@@ -184,6 +184,7 @@ int test_client_preface_first_frame_not_settings(void);
 int test_client_preface_settings_with_ack(void);
 int test_on_settings_ack_fires(void);
 int test_on_goaway_fires(void);
+int test_goaway_debug_uses_frame_capacity(void);
 int test_on_ping_fires_when_no_auto_ack(void);
 int test_on_ping_ack_fires(void);
 int test_on_connection_error_fires_before_goaway(void);
@@ -281,6 +282,7 @@ main(void)
 	RUN(submit_request_with_body);
 	RUN(on_settings_ack_fires);
 	RUN(on_goaway_fires);
+	RUN(goaway_debug_uses_frame_capacity);
 	RUN(on_ping_fires_when_no_auto_ack);
 	RUN(on_ping_ack_fires);
 	RUN(on_connection_error_fires_before_goaway);

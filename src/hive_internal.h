@@ -281,6 +281,7 @@ struct hive_session {
 	    reassembly_end_stream; /* END_STREAM from opening HEADERS frame  */
 	uint8_t reassembly_active; /* 1 = HEADERS/PP block in progress       */
 	uint32_t reassembly_len;   /* bytes written into reassembly_buf      */
+	uint32_t reassembly_cap;   /* allocated bytes; includes GOAWAY debug */
 	uint8_t *reassembly_buf;   /* pre-allocated reassembly buffer        */
 	uint8_t priority_payload_len; /* PRIORITY prefix bytes remaining */
 

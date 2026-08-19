@@ -681,12 +681,17 @@ static int
 session_prealloc(hive_session_t *s)
 {
 	uint32_t hash_table_size;
+	uint32_t goaway_debug_cap;
 	uint32_t i;
 	int ret;
 
 	hash_table_size = next_pow2_u32(s->opt_max_concurrent_streams * 2u);
 	s->stream_hash_mask = hash_table_size - 1u;
 	s->send_buf_cap = session_send_buf_cap(s->opt_max_continuation_size);
+	goaway_debug_cap = s->opt_max_frame_size - 8u;
+	s->reassembly_cap = s->opt_max_continuation_size;
+	if (goaway_debug_cap > s->reassembly_cap)
+		s->reassembly_cap = goaway_debug_cap;
 
 	ret = HIVE_ERR_NOMEM;
 
@@ -718,7 +723,7 @@ session_prealloc(hive_session_t *s)
 		goto cleanup;
 
 	s->reassembly_buf =
-	    s->mem.malloc(s->opt_max_continuation_size, s->mem.ctx);
+	    s->mem.malloc(s->reassembly_cap, s->mem.ctx);
 	if (s->reassembly_buf == NULL)
 		goto cleanup;
 

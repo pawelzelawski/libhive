@@ -96,6 +96,7 @@ int test_client_preface_first_frame_not_settings(void);
 int test_client_preface_settings_with_ack(void);
 int test_on_settings_ack_fires(void);
 int test_on_goaway_fires(void);
+int test_goaway_debug_uses_frame_capacity(void);
 int test_on_ping_fires_when_no_auto_ack(void);
 int test_on_ping_ack_fires(void);
 int test_on_connection_error_fires_before_goaway(void);
@@ -4224,6 +4225,54 @@ test_on_goaway_fires(void)
 	ASSERT(memcmp(cap.goaway_debug_data, dbg, sizeof(dbg)) == 0);
 
 	hive_session_free(s);
+	return 1;
+}
+
+int
+test_goaway_debug_uses_frame_capacity(void)
+{
+	callback_capture_t cap;
+	hive_callbacks_t cb;
+	hive_options_t *opt;
+	hive_session_t *s;
+	uint8_t *debug;
+	uint8_t *frame;
+	size_t debug_len;
+	size_t frame_len;
+	size_t split;
+
+	memset(&cap, 0, sizeof(cap));
+	memset(&cb, 0, sizeof(cb));
+	cb.send = send_cb_full;
+	cb.on_goaway = on_goaway_cb;
+	opt = hive_options_new();
+	ASSERT(opt != NULL);
+	ASSERT(hive_options_set_max_continuation_size(opt, 16384u) == HIVE_OK);
+	ASSERT(hive_options_set_max_frame_size(opt, 32768u) == HIVE_OK);
+	s = hive_session_server_new(NULL, opt, &cb, &cap);
+	ASSERT(s != NULL);
+	s->recv_state = RECV_FRAME_HEADER;
+	s->preface_count = 0;
+	debug_len = 32760u;
+	debug = malloc(debug_len);
+	frame = malloc(9u + 8u + debug_len);
+	ASSERT(debug != NULL && frame != NULL);
+	memset(debug, 0xa5, debug_len);
+	frame_len = build_goaway_frame(
+	    frame, 3u, HIVE_H2_PROTOCOL_ERROR, debug, debug_len);
+	split = 9u + 8u + 37u;
+	ASSERT(hive_session_recv(s, frame, split) == (ssize_t)split);
+	ASSERT(hive_session_recv(s, frame + split, frame_len - split) ==
+	       (ssize_t)(frame_len - split));
+	ASSERT(cap.goaway_count == 1);
+	ASSERT(cap.goaway_debug_len == debug_len);
+	ASSERT(memcmp(cap.goaway_debug_data, debug, debug_len) == 0);
+	ASSERT(s->reassembly_cap == debug_len);
+
+	free(frame);
+	free(debug);
+	hive_session_free(s);
+	hive_options_free(opt);
 	return 1;
 }
 

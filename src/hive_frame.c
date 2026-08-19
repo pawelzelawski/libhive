@@ -1810,6 +1810,11 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				n = avail;
 			}
 			if (n > 0) {
+				if (s->reassembly_cap != 0u &&
+				    n > s->reassembly_cap - s->reassembly_len)
+					return session_error(s,
+					                     HIVE_ERR_PROTOCOL,
+					                     HIVE_H2_FRAME_SIZE_ERROR);
 				if (s->reassembly_buf != NULL) {
 					copy_bytes(s->reassembly_buf +
 					               s->reassembly_len,
