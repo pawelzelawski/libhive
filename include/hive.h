@@ -21,6 +21,12 @@
 #include <stdint.h>
 #include <sys/uio.h>
 
+/* libhive release version. */
+#define HIVE_VERSION_MAJOR 1
+#define HIVE_VERSION_MINOR 1
+#define HIVE_VERSION_PATCH 0
+#define HIVE_VERSION_STRING "1.1.0"
+
 /*
  * Opaque session handle. Created by hive_session_server_new() or
  * hive_session_client_new(). All library state is contained within.

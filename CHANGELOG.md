@@ -4,8 +4,14 @@ All notable changes to libhive are documented here.
 
 ## Unreleased
 
-- Security fixes and release-preparation work are under review on `dev`.
-  Nothing in this section has been published as a release.
+## v1.1.0 — 2026-08-20
+
+- Hardened HPACK memory safety, GOAWAY reassembly, SETTINGS flood accounting,
+  receive-side backpressure, HTTP messaging validation, and HPACK encoder
+  transactions.
+- Published stream-state values, declared 64-bit POSIX Linux/OpenBSD support,
+  removed the unused `strlcpy`/`strlcat` compatibility layer, and expanded
+  reproducible Linux/OpenBSD validation coverage.
 
 ## v1.0.1 — 2026-04-30
 

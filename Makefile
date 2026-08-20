@@ -272,7 +272,7 @@ $(TEST_BIN): $(LIB_DEV) $(TEST_SRC)
 	@mkdir -p $(BUILD_TEST_DIR)
 	$(CC) $(CFLAGS_DEV) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    $(TEST_SRC) $(LIB_DEV) -o $(TEST_BIN)
-$(PUBLIC_HEADER_BIN): tests/public_header_consumer.c
+$(PUBLIC_HEADER_BIN): tests/public_header_consumer.c include/hive.h
 	@mkdir -p $(BUILD_TEST_DIR)
 	$(CC) $(CFLAGS_DEV) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    tests/public_header_consumer.c -o $(PUBLIC_HEADER_BIN)
