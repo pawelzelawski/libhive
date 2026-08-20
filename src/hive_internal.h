@@ -87,20 +87,6 @@ typedef struct {
 	uint32_t slot_index; /* index into stream_slots[] */
 } stream_hash_entry_t;       /* 8 bytes */
 
-/*
- * Stream state machine values.
- * See ARCHITECTURE.md §5.3 and RFC 9113 §5.1.
- */
-typedef enum {
-	HIVE_STREAM_IDLE = 0,
-	HIVE_STREAM_OPEN = 1,
-	HIVE_STREAM_HALF_CLOSED_LOCAL = 2,  /* we sent END_STREAM        */
-	HIVE_STREAM_HALF_CLOSED_REMOTE = 3, /* peer sent END_STREAM       */
-	HIVE_STREAM_CLOSED = 4,
-	HIVE_STREAM_RESERVED_LOCAL = 5,  /* server push promised       */
-	HIVE_STREAM_RESERVED_REMOTE = 6, /* client received PUSH_PROMISE */
-} hive_stream_state_t;
-
 /* Internal hive_stream_t::flags bits. */
 #define HIVE_STREAM_FLAG_HEADERS_SEEN 0x01u
 #define HIVE_STREAM_FLAG_FINAL_HEADERS_SENT 0x02u

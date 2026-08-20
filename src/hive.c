@@ -2009,7 +2009,7 @@ hive_session_get_remote_settings(hive_session_t *session)
 	return session->remote_settings;
 }
 
-int
+hive_stream_state_t
 hive_stream_get_state(hive_session_t *session, uint32_t stream_id)
 {
 	const hive_stream_t *stream;

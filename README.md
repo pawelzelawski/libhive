@@ -1,7 +1,7 @@
 # libhive
 
-libhive is a standalone HTTP/2 protocol engine in C11 using POSIX interfaces,
-supported on Linux and OpenBSD.
+libhive is a standalone HTTP/2 protocol engine in C11 for 64-bit POSIX
+targets, supported on Linux and OpenBSD.
 It implements framing, stream state management, HPACK, flow control, push,
 GOAWAY, and h2c, while doing zero I/O: you feed received bytes into
 `hive_session_recv()`, submit work with `hive_submit_*()`, and flush queued
@@ -9,7 +9,8 @@ frames with `hive_session_send()` through your own transport layer.
 
 ## Requirements
 
-- C11 compiler and POSIX interfaces (the default `Makefile` uses `clang`)
+- 64-bit C11 compiler and POSIX interfaces (the default `Makefile` uses
+  `clang`)
 - No runtime dependency beyond the platform C/POSIX environment for the core
   static library
 

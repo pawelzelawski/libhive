@@ -168,7 +168,6 @@ Every module in `src/`:
 - Send queue (`hive_send.c`)
 - Security checks (`hive_security.c`)
 - Session lifecycle (`hive.c`)
-- Platform compat (`compat_str.c` - Linux only)
 
 What does **not** need unit tests:
 - The NULL-allocator shim (tested implicitly - every session test with NULL
@@ -804,7 +803,6 @@ platforms.
 
 | Module | Test file | Regression location |
 |---|---|---|
-| compat_str | test_compat.c | dedicated compatibility tests |
 | hive_frame_bare (standalone header parser) | test_frame.c | frame parser tests |
 | HPACK (static + Huffman tables) | test_hpack.c | HPACK tests |
 | HPACK (full encode/decode) | test_hpack.c | HPACK tests |

@@ -33,9 +33,6 @@ H2SPEC_PORT ?= 8443
 CFLAGS_OS != if [ "$(OS)" = "Linux" ]; then echo "-DLINUX"; \
              elif [ "$(OS)" = "OpenBSD" ]; then echo "-DOPENBSD"; \
              else echo ""; fi
-# strlcpy/strlcat compat — Linux only; OpenBSD libc provides them.
-COMPAT_SRC != if [ "$(OS)" = "Linux" ]; then echo "src/compat_str.c"; \
-              else echo ""; fi
 # ASan/UBSan — Linux only; OpenBSD clang does not support -fsanitize=address.
 SANITIZERS != if [ "$(OS)" = "Linux" ]; then \
                   echo "-fsanitize=address,undefined"; \
@@ -96,13 +93,13 @@ LIB_CLOCK = $(BUILD_CLOCK_DIR)/libhive.a
 TEST_BIN       = $(BUILD_TEST_DIR)/run_tests
 TEST_BIN_VG    = $(BUILD_TEST_DIR)/run_tests_vg
 TEST_BIN_CLOCK = $(BUILD_TEST_DIR)/run_tests_tsclock
+PUBLIC_HEADER_BIN = $(BUILD_TEST_DIR)/public_header_consumer
 # Top-level copy — embedders and TECH_STACK.md reference libhive.a here.
 LIBHIVE_A = libhive.a
 # --- Test source ------------------------------------------------------------
 TEST_SRC = tests/run_tests.c \
 	   tests/test_frame.c \
 	   tests/test_hpack.c \
-           tests/test_compat.c \
 	   tests/test_session.c \
 	   tests/test_flow.c \
 	   tests/test_security.c
@@ -121,8 +118,9 @@ dev: $(LIB_DEV)
 release: $(LIB_REL)
 	cp $(LIB_REL) $(LIBHIVE_A)
 # --- Test (ASan/UBSan) ------------------------------------------------------
-test: $(TEST_BIN)
+test: $(TEST_BIN) $(PUBLIC_HEADER_BIN)
 	sh tests/run_tests.sh
+	$(PUBLIC_HEADER_BIN)
 test-asan: test
 # --- Test with clock abstraction (RST_STREAM flood tests) ------------------
 # Recompiles the library with -DHIVE_TEST_CLOCK=1 so that hive_monotonic_secs()
@@ -190,7 +188,7 @@ clean:
 # BSD make does not support GNU-style pattern rules portably.
 # ---------------------------------------------------------------------------
 # --- Development library ----------------------------------------------------
-$(LIB_DEV): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c src/hive_send.c $(COMPAT_SRC)
+$(LIB_DEV): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c src/hive_send.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CFLAGS_DEV) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive.c -o $(BUILD_DIR)/hive.o
@@ -202,15 +200,11 @@ $(LIB_DEV): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c s
 	    -c src/hive_frame.c -o $(BUILD_DIR)/hive_frame.o
 	$(CC) $(CFLAGS_DEV) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive_send.c -o $(BUILD_DIR)/hive_send.o
-	test -z "$(COMPAT_SRC)" || \
-	    $(CC) $(CFLAGS_DEV) $(EXTRA_CFLAGS) $(INCLUDES) \
-	    -c src/compat_str.c -o $(BUILD_DIR)/compat_str.o
 	ar rcs $(LIB_DEV) $(BUILD_DIR)/hive.o $(BUILD_DIR)/hive_hpack.o \
 	    $(BUILD_DIR)/hive_frame_bare.o $(BUILD_DIR)/hive_frame.o \
 	    $(BUILD_DIR)/hive_send.o
-	test -z "$(COMPAT_SRC)" || ar qs $(LIB_DEV) $(BUILD_DIR)/compat_str.o
 # --- Release library --------------------------------------------------------
-$(LIB_REL): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c src/hive_send.c $(COMPAT_SRC)
+$(LIB_REL): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c src/hive_send.c
 	@mkdir -p $(BUILD_REL_DIR)
 	$(CC) $(CFLAGS_REL) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive.c -o $(BUILD_REL_DIR)/hive.o
@@ -222,15 +216,11 @@ $(LIB_REL): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c s
 	    -c src/hive_frame.c -o $(BUILD_REL_DIR)/hive_frame.o
 	$(CC) $(CFLAGS_REL) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive_send.c -o $(BUILD_REL_DIR)/hive_send.o
-	test -z "$(COMPAT_SRC)" || \
-	    $(CC) $(CFLAGS_REL) $(EXTRA_CFLAGS) $(INCLUDES) \
-	    -c src/compat_str.c -o $(BUILD_REL_DIR)/compat_str.o
 	ar rcs $(LIB_REL) $(BUILD_REL_DIR)/hive.o $(BUILD_REL_DIR)/hive_hpack.o \
 	    $(BUILD_REL_DIR)/hive_frame_bare.o $(BUILD_REL_DIR)/hive_frame.o \
 	    $(BUILD_REL_DIR)/hive_send.o
-	test -z "$(COMPAT_SRC)" || ar qs $(LIB_REL) $(BUILD_REL_DIR)/compat_str.o
 # --- Valgrind library (no sanitizers) ---------------------------------------
-$(LIB_VG): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c src/hive_send.c $(COMPAT_SRC)
+$(LIB_VG): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c src/hive_send.c
 	@mkdir -p $(BUILD_VG_DIR)
 	$(CC) $(CFLAGS_VG) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive.c -o $(BUILD_VG_DIR)/hive.o
@@ -242,15 +232,11 @@ $(LIB_VG): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c sr
 	    -c src/hive_frame.c -o $(BUILD_VG_DIR)/hive_frame.o
 	$(CC) $(CFLAGS_VG) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive_send.c -o $(BUILD_VG_DIR)/hive_send.o
-	test -z "$(COMPAT_SRC)" || \
-	    $(CC) $(CFLAGS_VG) $(EXTRA_CFLAGS) $(INCLUDES) \
-	    -c src/compat_str.c -o $(BUILD_VG_DIR)/compat_str.o
 	ar rcs $(LIB_VG) $(BUILD_VG_DIR)/hive.o $(BUILD_VG_DIR)/hive_hpack.o \
 	    $(BUILD_VG_DIR)/hive_frame_bare.o $(BUILD_VG_DIR)/hive_frame.o \
 	    $(BUILD_VG_DIR)/hive_send.o
-	test -z "$(COMPAT_SRC)" || ar qs $(LIB_VG) $(BUILD_VG_DIR)/compat_str.o
 # --- TSan library -----------------------------------------------------------
-$(LIB_TSAN): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c src/hive_send.c $(COMPAT_SRC)
+$(LIB_TSAN): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c src/hive_send.c
 	@mkdir -p $(BUILD_TSAN_DIR)
 	$(CC) $(CFLAGS_TSAN) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive.c -o $(BUILD_TSAN_DIR)/hive.o
@@ -262,15 +248,11 @@ $(LIB_TSAN): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c 
 	    -c src/hive_frame.c -o $(BUILD_TSAN_DIR)/hive_frame.o
 	$(CC) $(CFLAGS_TSAN) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive_send.c -o $(BUILD_TSAN_DIR)/hive_send.o
-	test -z "$(COMPAT_SRC)" || \
-	    $(CC) $(CFLAGS_TSAN) $(EXTRA_CFLAGS) $(INCLUDES) \
-	    -c src/compat_str.c -o $(BUILD_TSAN_DIR)/compat_str.o
 	ar rcs $(LIB_TSAN) $(BUILD_TSAN_DIR)/hive.o $(BUILD_TSAN_DIR)/hive_hpack.o \
 	    $(BUILD_TSAN_DIR)/hive_frame_bare.o $(BUILD_TSAN_DIR)/hive_frame.o \
 	    $(BUILD_TSAN_DIR)/hive_send.o
-	test -z "$(COMPAT_SRC)" || ar qs $(LIB_TSAN) $(BUILD_TSAN_DIR)/compat_str.o
 # --- Clock-test library (ASan/UBSan + HIVE_TEST_CLOCK=1) -------------------
-$(LIB_CLOCK): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c src/hive_send.c $(COMPAT_SRC)
+$(LIB_CLOCK): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c src/hive_send.c
 	@mkdir -p $(BUILD_CLOCK_DIR)
 	$(CC) $(CFLAGS_DEV) -DHIVE_TEST_CLOCK=1 $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive.c -o $(BUILD_CLOCK_DIR)/hive.o
@@ -282,18 +264,18 @@ $(LIB_CLOCK): src/hive.c src/hive_hpack.c src/hive_frame_bare.c src/hive_frame.c
 	    -c src/hive_frame.c -o $(BUILD_CLOCK_DIR)/hive_frame.o
 	$(CC) $(CFLAGS_DEV) -DHIVE_TEST_CLOCK=1 $(EXTRA_CFLAGS) $(INCLUDES) \
 	    -c src/hive_send.c -o $(BUILD_CLOCK_DIR)/hive_send.o
-	test -z "$(COMPAT_SRC)" || \
-	    $(CC) $(CFLAGS_DEV) -DHIVE_TEST_CLOCK=1 $(EXTRA_CFLAGS) $(INCLUDES) \
-	    -c src/compat_str.c -o $(BUILD_CLOCK_DIR)/compat_str.o
 	ar rcs $(LIB_CLOCK) $(BUILD_CLOCK_DIR)/hive.o $(BUILD_CLOCK_DIR)/hive_hpack.o \
 	    $(BUILD_CLOCK_DIR)/hive_frame_bare.o $(BUILD_CLOCK_DIR)/hive_frame.o \
 	    $(BUILD_CLOCK_DIR)/hive_send.o
-	test -z "$(COMPAT_SRC)" || ar qs $(LIB_CLOCK) $(BUILD_CLOCK_DIR)/compat_str.o
 # --- Test binary (ASan/UBSan) -----------------------------------------------
 $(TEST_BIN): $(LIB_DEV) $(TEST_SRC)
 	@mkdir -p $(BUILD_TEST_DIR)
 	$(CC) $(CFLAGS_DEV) $(EXTRA_CFLAGS) $(INCLUDES) \
 	    $(TEST_SRC) $(LIB_DEV) -o $(TEST_BIN)
+$(PUBLIC_HEADER_BIN): tests/public_header_consumer.c
+	@mkdir -p $(BUILD_TEST_DIR)
+	$(CC) $(CFLAGS_DEV) $(EXTRA_CFLAGS) $(INCLUDES) \
+	    tests/public_header_consumer.c -o $(PUBLIC_HEADER_BIN)
 # --- Valgrind test binary (no sanitizers) -----------------------------------
 $(TEST_BIN_VG): $(LIB_VG) $(TEST_SRC)
 	@mkdir -p $(BUILD_TEST_DIR)

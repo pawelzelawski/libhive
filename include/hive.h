@@ -12,6 +12,11 @@
 #ifndef HIVE_H
 #define HIVE_H
 
+/* v1.x supports 64-bit POSIX targets only. */
+#if defined(__SIZEOF_POINTER__) && __SIZEOF_POINTER__ < 8
+#error "libhive v1.x requires a 64-bit target"
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/uio.h>
@@ -28,6 +33,17 @@ typedef struct hive_session hive_session_t;
  * session constructors, and freed by hive_options_free().
  */
 typedef struct hive_options hive_options_t;
+
+/* Fixed public stream-state values returned by hive_stream_get_state(). */
+typedef enum hive_stream_state {
+	HIVE_STREAM_IDLE = 0,
+	HIVE_STREAM_OPEN = 1,
+	HIVE_STREAM_HALF_CLOSED_LOCAL = 2,
+	HIVE_STREAM_HALF_CLOSED_REMOTE = 3,
+	HIVE_STREAM_CLOSED = 4,
+	HIVE_STREAM_RESERVED_LOCAL = 5,
+	HIVE_STREAM_RESERVED_REMOTE = 6,
+} hive_stream_state_t;
 
 /*
  * Buffer handle for header name/value delivery.
@@ -94,7 +110,9 @@ typedef struct hive_mem {
  *
  * read_callback is invoked by hive_session_send() to produce DATA payload
  * bytes. The callback may either write into *buf (copy path) or set
- * HIVE_DATA_FLAG_NO_COPY and redirect *buf to caller-owned memory.
+ * HIVE_DATA_FLAG_NO_COPY and redirect *buf to caller-owned memory. That
+ * memory must remain valid until hive_session_want_write() returns 0 after
+ * all queued bytes have been drained, including across partial writes.
  * See ARCHITECTURE.md §6.5 and §9.4.
  */
 typedef struct hive_data_source hive_data_source_t;
@@ -575,6 +593,8 @@ int hive_session_want_write(hive_session_t *session);
  * stream_id:   target stream.
  * nva/nvlen:   response headers.
  * data_source: optional body source; NULL means headers-only response.
+ *              To send trailers, have its read callback return 0 without
+ *              HIVE_DATA_FLAG_EOF, then call hive_submit_trailers().
  *
  * Returns HIVE_OK or a negative HIVE_ERR_* code.
  */
@@ -587,7 +607,8 @@ int hive_submit_response(hive_session_t *session,
 /*
  * Queue trailing headers with END_STREAM for stream_id.
  *
- * nva must not include pseudo-headers.
+ * nva must not include pseudo-headers. A response data callback may finish
+ * without HIVE_DATA_FLAG_EOF, leaving the local side open for this call.
  * Returns HIVE_OK or a negative HIVE_ERR_* code.
  */
 int hive_submit_trailers(hive_session_t *session,
@@ -726,7 +747,8 @@ hive_settings_t hive_session_get_remote_settings(hive_session_t *session);
  *
  * Returns HIVE_STREAM_IDLE when session/stream is absent.
  */
-int hive_stream_get_state(hive_session_t *session, uint32_t stream_id);
+hive_stream_state_t
+hive_stream_get_state(hive_session_t *session, uint32_t stream_id);
 /*
  * Attach opaque user pointer to an open stream.
  *
@@ -794,6 +816,11 @@ void hive_hpack_decoder_free(hive_hpack_decoder_t *dec);
  *     and opt_max_header_count. This API has no options struct and does not
  *     enforce those limits. Callers embedding this in a security-sensitive
  *     context must impose their own size limits before or after calling.
+ *
+ * Output fields point into decoder-owned storage. They are replaced by the
+ * next successful decode call and invalid after hive_hpack_decoder_free().
+ * The standalone API always uses the system allocator; it does not accept
+ * hive_mem_t.
  */
 /*
  * Decode one header field incrementally from `in`.

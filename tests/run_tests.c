@@ -9,13 +9,6 @@
 
 #include "test_harness.h"
 
-/* --- test_compat.c -------------------------------------------------------- */
-int test_strlcpy_basic(void);
-int test_strlcpy_truncation(void);
-int test_strlcpy_empty_src(void);
-int test_strlcat_basic(void);
-int test_strlcat_full_dst(void);
-
 /* --- test_frame.c --------------------------------------------------------- */
 int test_frame_hdr_write_data(void);
 int test_frame_hdr_write_settings(void);
@@ -461,12 +454,6 @@ main(void)
 	RUN(recv_unknown_frame_mid_stream);
 
 	/* Phase 1.3 - platform compat layer */
-	RUN(strlcpy_basic);
-	RUN(strlcpy_truncation);
-	RUN(strlcpy_empty_src);
-	RUN(strlcat_basic);
-	RUN(strlcat_full_dst);
-
 	/* Phase 1.4 - HPACK static and Huffman tables */
 	RUN(static_table_size);
 	RUN(static_table_index1);
