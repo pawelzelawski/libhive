@@ -3627,7 +3627,7 @@ hive_settings_t hive_session_get_remote_settings(hive_session_t *session);
  * close frame is queued. The stream slot is freed immediately; subsequent
  * calls to hive_stream_get_state() for that stream_id return HIVE_STREAM_IDLE.
  */
-int hive_stream_get_state(hive_session_t *session,
+hive_stream_state_t hive_stream_get_state(hive_session_t *session,
     uint32_t stream_id);
 
 /*

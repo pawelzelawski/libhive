@@ -2,7 +2,8 @@
 
 ## Overview
 
-Hive is a standalone HTTP/2 library written in C11 for Linux and OpenBSD.
+Hive is a standalone HTTP/2 library written in C11 for 64-bit POSIX Linux and
+OpenBSD targets.
 It implements the full HTTP/2 protocol - binary framing, stream multiplexing,
 HPACK header compression, flow control, and stream state management - as a
 pure protocol engine. It performs zero I/O. The caller feeds bytes in, the

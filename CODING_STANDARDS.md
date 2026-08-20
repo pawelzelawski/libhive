@@ -541,16 +541,18 @@ conversion - never dereference an unaligned pointer from the wire buffer.
 **No unsafe string functions**:
 ```c
 /* BANNED - never use these */
-strcpy(dst, src);         /* use strlcpy */
-strcat(dst, src);         /* use strlcat */
+strcpy(dst, src);
+strcat(dst, src);
 sprintf(buf, fmt, ...);   /* use snprintf */
 gets(buf);                /* never */
-strncpy(dst, src, n);     /* does not null-terminate; use strlcpy */
+strncpy(dst, src, n);     /* does not guarantee termination */
 ```
 
 ```c
 /* Required alternatives */
-strlcpy(dst, src, sizeof(dst));
+if (src_len >= sizeof(dst))
+	return HIVE_ERR_INVALID_ARG;
+memcpy(dst, src, src_len + 1u);
 n = snprintf(buf, sizeof(buf), "%u", value);
 if (n < 0 || (size_t)n >= sizeof(buf))
 	return HIVE_ERR_INVALID_ARG;   /* truncation is an error */

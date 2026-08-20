@@ -476,16 +476,6 @@ src/
 │                       # See ARCHITECTURE.md §8.5.
 │                       # See DEVELOPMENT.md Phase 7 §7.3.
 │
-│   - Platform compat (Linux only) -
-│
-├── compat_str.h        # strlcpy and strlcat declarations for Linux.
-│                       # On OpenBSD: not compiled (libc provides them).
-│                       # On Linux: compiled in, no link flags needed.
-│                       # See TECH_STACK.md §4.3.
-│
-└── compat_str.c        # Portable strlcpy() and strlcat() implementations.
-                        # Compiled on Linux only via $(COMPAT_SRC) in Makefile.
-                        # Not compiled on OpenBSD - libc versions used instead.
 ```
 
 ---
@@ -512,12 +502,11 @@ tests/
 ├── run_tests.sh        # Shell runner. Executes run_tests binary, fails
 │                       #   on non-zero exit. Invoked by `make test`.
 │
-│   - Unit tests by module -
+│   - Public API consumer regression -
 │
-├── test_compat.c       # Platform compat layer tests.
-│                       # strlcpy: basic copy, truncation, empty source.
-│                       # strlcat: basic append, full dst, overflow guard.
-│                       # See DEVELOPMENT.md Phase 1 §1.3.
+├── public_header_consumer.c
+│                       # Compiles using only include/hive.h and verifies
+│                       # public stream-state declarations are self-contained.
 │
 ├── test_hpack.c        # HPACK encoder and decoder tests.
 │                       # Static table: size, index 1, index 2, index 61.
@@ -691,9 +680,9 @@ make clean        # remove build artifacts
 make install      # install libhive.a and include/hive.h to PREFIX
 ```
 
-Platform detected via `$(shell uname)`. Compiles `src/compat_str.c` only
-on Linux. The `make install` target installs exactly two files and nothing
-else - no man pages, no pkg-config, no service scripts.
+Platform detection sets Linux or OpenBSD preprocessor flags. The `make install`
+target installs exactly two files and nothing else - no man pages, no
+pkg-config, no service scripts.
 
 The `make dev` target defines `-DHIVE_DEBUG=1` which enables ASan poisoning
 of `hive_buf_t` data after callbacks. The `HIVE_TEST_CLOCK=1` flag may be
@@ -747,7 +736,6 @@ navigation unambiguous across the codebase.
 | Send queue | src/hive_send.c | `send_queue_` | `send_queue_append_ctrl()` |
 | Security | src/hive_security.c | `security_` | `security_check_rst_flood()` |
 | Clock | src/hive_clock.h | `hive_monotonic_` | `hive_monotonic_secs()` |
-| Compat | src/compat_str.c | *(none)* | `strlcpy()`, `strlcat()` |
 
 Public API functions (declared in `include/hive.h`) are grouped by namespace:
 

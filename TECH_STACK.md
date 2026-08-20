@@ -212,13 +212,10 @@ timeouts - those are the caller's responsibility.
 
 ### 4.3 String Safety
 
-**OpenBSD**: `strlcpy` and `strlcat` are in libc.
-
-**Linux**: `strlcpy` and `strlcat` are not in glibc. Hive provides
-`src/compat_str.c` and `src/compat_str.h` with portable implementations
-compiled on Linux only. On OpenBSD, these files are not compiled.
-
-Do not use `strcpy`, `strcat`, `sprintf`, or `gets` anywhere in the library.
+Hive has no string-compatibility layer and does not export `strlcpy` or
+`strlcat`. Do not use `strcpy`, `strcat`, `sprintf`, `gets`, or `strncpy`
+anywhere in the library. Use explicit length checks with `memcpy` for string
+copies and `snprintf` for formatted output.
 
 ---
 
@@ -295,20 +292,11 @@ CFLAGS_REL = $(CSTD) $(CWARN)               \
 CFLAGS_FT  = -D_POSIX_C_SOURCE=200809L      \
              -D_XOPEN_SOURCE=700
 
-# Platform detection
-UNAME := $(shell uname)
-
-ifeq ($(UNAME), OpenBSD)
-    CFLAGS_OS  = -DOPENBSD
-    LDFLAGS_OS =
-    COMPAT_SRC =
-else ifeq ($(UNAME), Linux)
-    CFLAGS_OS  = -DLINUX
-    LDFLAGS_OS =
-    COMPAT_SRC = src/compat_str.c
-else
-    $(error Unsupported platform: $(UNAME))
-endif
+# Platform detection (GNU make and BSD make)
+OS != uname -s
+CFLAGS_OS != if [ "$(OS)" = "Linux" ]; then echo "-DLINUX"; \
+             elif [ "$(OS)" = "OpenBSD" ]; then echo "-DOPENBSD"; \
+             else echo ""; fi
 ```
 
 `-fPIC` in release builds produces position-independent object code,
