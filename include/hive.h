@@ -207,8 +207,11 @@ typedef struct hive_settings {
  * Callback set. All fields are optional (NULL = not registered).
  *
  * Return convention for callbacks returning int:
- *   - return 0 to continue processing
- *   - return non-zero to abort the current operation and propagate an error
+ *   - delivery callbacks (header-block, DATA, and PUSH_PROMISE callbacks)
+ *     may veto their stream. HIVE_ERR_COMPRESSION and HIVE_ERR_REFUSED_STREAM
+ *     retain their documented special treatment; other non-zero values queue
+ *     RST_STREAM with PROTOCOL_ERROR.
+ *   - notification callbacks are advisory; their return values are ignored.
  *
  * on_goaway debug_data and on_data_chunk data pointers are transient and valid
  * only for the duration of their callback. See ARCHITECTURE.md §9.6.
@@ -218,7 +221,7 @@ typedef struct hive_callbacks {
 	 * Called before decoding a header block for `stream_id`.
 	 *
 	 * Params: session, stream_id, user_data.
-	 * Returns: 0 to continue, non-zero to fail the receive path.
+	 * Returns: 0 to continue; other values veto this stream.
 	 */
 	int (*on_begin_headers)(hive_session_t *session,
 	                        uint32_t stream_id,
@@ -240,7 +243,7 @@ typedef struct hive_callbacks {
 	 *   - `HIVE_BUF_VALID` is cleared after callback return.
 	 *   - Call `hive_buf_retain()` within this callback to persist data.
 	 *
-	 * Returns: 0 to continue, non-zero to fail the receive path.
+	 * Returns: 0 to continue; other values veto this stream.
 	 */
 	int (*on_header)(hive_session_t *session,
 	                 uint32_t stream_id,
@@ -253,7 +256,7 @@ typedef struct hive_callbacks {
 	 * Called after a header block is fully decoded for `stream_id`.
 	 *
 	 * Params: session, stream_id, flags, user_data.
-	 * Returns: 0 to continue, non-zero to fail the receive path.
+	 * Returns: 0 to continue; other values veto this stream.
 	 */
 	int (*on_headers_complete)(hive_session_t *session,
 	                           uint32_t stream_id,
@@ -265,8 +268,8 @@ typedef struct hive_callbacks {
 	 *
 	 * Params: session, stream_id, data pointer, len, flags, user_data.
 	 * Lifetime: `data` points into caller-provided recv bytes and is valid
-	 * only during the callback. Returns: 0 to continue, non-zero to fail
-	 * the receive path.
+	 * only during the callback. Returns: 0 to continue; other values veto this
+	 * stream and queue RST_STREAM with PROTOCOL_ERROR.
 	 */
 	int (*on_data_chunk)(hive_session_t *session,
 	                     uint32_t stream_id,
@@ -281,7 +284,7 @@ typedef struct hive_callbacks {
 	                       uint32_t error_code,
 	                       void *user_data);
 
-	/* Called when a PUSH_PROMISE is received. */
+	/* Called when a PUSH_PROMISE is received. A non-zero result vetoes it. */
 	int (*on_push_promise)(hive_session_t *session,
 	                       uint32_t stream_id,
 	                       uint32_t promised_stream_id,
@@ -523,6 +526,12 @@ void hive_session_free(hive_session_t *session);
  * session: target session.
  * data:    input bytes from transport read path.
  * len:     number of bytes in data.
+ *
+ * This function never calls hive_session_send(), the transport send callback,
+ * or a DATA-source read callback. If queued output reaches its bounded
+ * capacity, it returns the input bytes consumed so far; call
+ * hive_session_send() until hive_session_want_write() is zero, then re-feed
+ * the unconsumed input. It is not re-entrant.
  *
  * Returns:
  *   - >= 0: number of bytes consumed from data

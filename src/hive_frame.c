@@ -53,6 +53,7 @@ session_error(hive_session_t *s, int hive_err, uint32_t h2_err)
 	s->last_err = hive_err;
 	s->last_h2_err = h2_err;
 	s->closed = 1;
+	s->session_state = HIVE_SESSION_CLOSED;
 	if (s->callbacks.on_connection_error != NULL) {
 		(void)s->callbacks.on_connection_error(
 		    s, hive_err, h2_err, s->user_data);
@@ -729,6 +730,18 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 			break;
 
 		case RECV_FRAME_HEADER:
+			/*
+			 * A receive operation can queue at most two WINDOW_UPDATEs,
+			 * followed by an RST_STREAM or GOAWAY.  Leave room for those
+			 * control frames before accepting a new frame.  This makes queue
+			 * pressure an exact consume/drain/refeed boundary and keeps recv()
+			 * free of transport I/O.
+			 */
+			if (s->opt_max_send_iov < 4u ||
+			    s->send_iov_count > (int)s->opt_max_send_iov - 4 ||
+			    s->send_buf_cap < 68u ||
+			    s->send_buf_used > s->send_buf_cap - 68u)
+				return (ssize_t)consumed;
 			n = 9u - s->frame_hdr_count;
 			if (n > avail) {
 				n = avail;
@@ -1107,18 +1120,29 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				st->content_length_received += (uint64_t)n;
 			}
 			if (n > 0 && s->callbacks.on_data_chunk != NULL) {
+				int cb_ret;
 				/* SECURITY: on_data_chunk receives a zero-copy
 				 * pointer into caller-owned input memory. Its
 				 * lifetime is only for the callback duration;
 				 * the library cannot poison caller-owned input
 				 * after return. */
-				(void)s->callbacks.on_data_chunk(
+				cb_ret = s->callbacks.on_data_chunk(
 				    s,
 				    s->cur_frame.stream_id,
 				    data + consumed,
 				    n,
 				    s->cur_frame.flags,
 				    s->user_data);
+				if (cb_ret != HIVE_OK) {
+					if (st != NULL)
+						stream_recv_close(
+						    s, st, HIVE_H2_PROTOCOL_ERROR);
+					(void)stream_error(s,
+					                   s->cur_frame.stream_id,
+					                   HIVE_ERR_PROTOCOL,
+					                   HIVE_H2_PROTOCOL_ERROR);
+					s->recv_state = RECV_SKIP_PAYLOAD;
+				}
 			}
 			consumed += n;
 			s->payload_remaining -= (uint32_t)n;

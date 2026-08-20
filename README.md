@@ -101,6 +101,9 @@ clang -std=c11 -Wall -Wextra -Wpedantic -Iinclude \
 
 - Zero I/O by design: sockets/TLS/event-loop ownership is entirely caller-side
 - Not thread-safe per session (`hive_session_recv/send/submit/free` must not race)
+- `hive_session_recv()` is non-reentrant and never performs transport I/O or
+  invokes a DATA-source read callback. When its bounded output queue is full,
+  drain with `hive_session_send()` and re-feed the unconsumed input.
 - Single-session configuration is fixed at creation (no live option mutation)
 - Out of scope in v1: HTTP/3, RFC 8441 extended CONNECT/WebSocket, RFC 9218
 

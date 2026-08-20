@@ -115,6 +115,8 @@ int test_goaway_two_phase(void);
 int test_goaway_recv_want_read_advisory(void);
 int test_goaway_recv_streams_closed(void);
 int test_client_full_request_response(void);
+int test_recv_backpressure_never_sends(void);
+int test_fatal_recv_stops_read_and_drains_goaway(void);
 
 /* ------------------------------------------------------------------ */
 /* Shared test infrastructure                                          */
@@ -1368,25 +1370,22 @@ test_iovec_overflow(void)
 
 	ret = send_queue_append_ctrl(
 	    &s, HIVE_FRAME_PING, 0u, 0u, ping_payload, sizeof(ping_payload));
-	ASSERT(ret == HIVE_OK);
-	ASSERT(cap.calls == 1);
-	ASSERT(cap.iovcnt == 4);
+	ASSERT(ret == HIVE_ERR_WOULDBLOCK);
+	ASSERT(cap.calls == 0);
 	ASSERT(s.send_partial == 0);
-	ASSERT(s.send_iov_count == 1);
-	ASSERT(s.send_iov[0].iov_len == 17u);
-	p = (const uint8_t *)s.send_iov[0].iov_base;
-	ASSERT(p[0] == 0x00);
-	ASSERT(p[1] == 0x00);
-	ASSERT(p[2] == 0x08);
-	ASSERT(p[3] == HIVE_FRAME_PING);
-	ASSERT(p[4] == 0x00);
-	ASSERT(p[8] == 0x00);
+	ASSERT(s.send_iov_count == 4);
 
 	ret = hive_session_send(&s);
 	ASSERT(ret == HIVE_OK);
-	ASSERT(cap.calls == 2);
-	ASSERT(cap.iovcnt == 1);
+	ASSERT(cap.calls == 1);
+	ASSERT(cap.iovcnt == 4);
 	ASSERT(s.send_iov_count == 0);
+
+	ret = send_queue_append_ctrl(
+	    &s, HIVE_FRAME_PING, 0u, 0u, ping_payload, sizeof(ping_payload));
+	ASSERT(ret == HIVE_OK);
+	p = (const uint8_t *)s.send_iov[0].iov_base;
+	ASSERT(p[3] == HIVE_FRAME_PING);
 
 	return 1;
 }
@@ -1419,12 +1418,16 @@ test_iovec_overflow_wouldblock(void)
 	ret = send_queue_append_ctrl(
 	    &s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u, NULL, 0u);
 	ASSERT(ret == HIVE_ERR_WOULDBLOCK);
-	ASSERT(st.call_count == 1);
-	ASSERT(s.send_partial == 1);
+	ASSERT(st.call_count == 0);
+	ASSERT(s.send_partial == 0);
 	ASSERT(s.send_iov_count == 1);
 
 	ret = hive_session_send(&s);
 	ASSERT(ret == HIVE_OK);
+	ASSERT(st.call_count == 1);
+	ASSERT(s.send_partial == 1);
+	ASSERT(s.send_iov_count == 1);
+	ASSERT(hive_session_send(&s) == HIVE_OK);
 	ASSERT(st.call_count == 2);
 	ASSERT(s.send_partial == 0);
 	ASSERT(s.send_iov_count == 0);
@@ -1434,6 +1437,73 @@ test_iovec_overflow_wouldblock(void)
 	ASSERT(ret == HIVE_OK);
 	ASSERT(s.send_iov_count == 1);
 
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Receive backpressure and fatal-state regressions (Area 06).        */
+/* ------------------------------------------------------------------ */
+
+int
+test_recv_backpressure_never_sends(void)
+{
+	static uint8_t buf[TEST_SEND_BUF_CAP];
+	static struct iovec iov[TEST_SEND_IOV_CAP];
+	send_count_state_t cap;
+	hive_session_t s;
+	uint8_t ping[17];
+	int i;
+
+	frame_recv_init(&s, HIVE_ROLE_SERVER);
+	s.send_buf = buf;
+	s.send_buf_cap = sizeof(buf);
+	s.send_iov = iov;
+	s.session_state = HIVE_SESSION_OPEN;
+	s.opt_max_send_iov = 16u;
+	memset(&cap, 0, sizeof(cap));
+	s.callbacks.send = send_cb_counting;
+	s.user_data = &cap;
+	for (i = 0; i < 13; i++)
+		ASSERT(send_queue_append_ctrl(
+		    &s, HIVE_FRAME_SETTINGS, HIVE_FLAG_ACK, 0u, NULL, 0u) ==
+		    HIVE_OK);
+
+	frame_hdr_write_at(ping, 8u, HIVE_FRAME_PING, 0u, 0u);
+	memset(ping + 9, 0, 8u);
+	ASSERT(hive_session_recv(&s, ping, sizeof(ping)) == 0);
+	ASSERT(cap.call_count == 0);
+	ASSERT(hive_session_want_write(&s) == 1);
+	ASSERT(hive_session_send(&s) == HIVE_OK);
+	ASSERT(cap.call_count == 1);
+	ASSERT(hive_session_recv(&s, ping, sizeof(ping)) ==
+	       (ssize_t)sizeof(ping));
+	ASSERT(cap.call_count == 1);
+	ASSERT(hive_session_send(&s) == HIVE_OK);
+	ASSERT(cap.call_count == 2);
+	return 1;
+}
+
+int
+test_fatal_recv_stops_read_and_drains_goaway(void)
+{
+	static uint8_t buf[TEST_SEND_BUF_CAP];
+	static struct iovec iov[TEST_SEND_IOV_CAP];
+	send_capture_t cap;
+	hive_session_t s;
+	uint8_t bad_ping[10];
+
+	test_send_session_init(&s, buf, sizeof(buf), iov);
+	memset(&cap, 0, sizeof(cap));
+	s.callbacks.send = send_cb_capture;
+	s.user_data = &cap;
+	frame_hdr_write_at(bad_ping, 1u, HIVE_FRAME_PING, 0u, 0u);
+	bad_ping[9] = 0;
+	ASSERT(hive_session_recv(&s, bad_ping, sizeof(bad_ping)) == -1);
+	ASSERT(hive_session_want_read(&s) == 0);
+	ASSERT(hive_session_want_write(&s) == 1);
+	ASSERT(hive_session_send(&s) == HIVE_OK);
+	ASSERT(cap.calls == 1);
+	ASSERT(hive_session_want_write(&s) == 0);
 	return 1;
 }
 

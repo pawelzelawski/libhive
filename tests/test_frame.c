@@ -932,11 +932,9 @@ test_recv_settings_ack_queue_failure_closes(void)
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	s.send_buf_cap = 0;
 	frame_hdr_write_at(frame, 0, HIVE_FRAME_SETTINGS, 0, 0);
-	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == -1);
-	ASSERT(s.closed == 1);
-	ASSERT(s.last_err == HIVE_ERR_NOMEM);
-	ASSERT(s.last_h2_err == HIVE_H2_INTERNAL_ERROR);
-	ASSERT(s.inbound_settings_count == 1u);
+	ASSERT(hive_session_recv(&s, frame, sizeof(frame)) == 0);
+	ASSERT(s.closed == 0);
+	ASSERT(s.inbound_settings_count == 0u);
 	ASSERT(s.send_iov_count == 0);
 	return 1;
 }
@@ -954,12 +952,10 @@ test_recv_data_window_update_queue_failure_no_restore(void)
 	s.recv_window = 20;
 	s.send_buf_cap = 0;
 	n = build_frame(frame, 12, HIVE_FRAME_DATA, 0, 1, payload);
-	ASSERT(hive_session_recv(&s, frame, n) == -1);
-	ASSERT(s.closed == 1);
-	ASSERT(s.last_err == HIVE_ERR_NOMEM);
-	ASSERT(s.last_h2_err == HIVE_H2_INTERNAL_ERROR);
-	ASSERT(s.recv_window == 8);
-	ASSERT(s.recv_consumed == 12u);
+	ASSERT(hive_session_recv(&s, frame, n) == 0);
+	ASSERT(s.closed == 0);
+	ASSERT(s.recv_window == 20);
+	ASSERT(s.recv_consumed == 0u);
 	return 1;
 }
 
@@ -975,11 +971,8 @@ test_recv_stream_error_queue_failure_closes(void)
 	test_session_init(&s, reassembly, sizeof(reassembly));
 	s.send_buf_cap = 0;
 	n = build_frame(frame, 4, HIVE_FRAME_WINDOW_UPDATE, 0, 1, payload);
-	ASSERT(hive_session_recv(&s, frame, n) == (ssize_t)n);
-	ASSERT(s.closed == 1);
-	ASSERT(s.last_err == HIVE_ERR_NOMEM);
-	ASSERT(s.last_h2_err == HIVE_H2_INTERNAL_ERROR);
+	ASSERT(hive_session_recv(&s, frame, n) == 0);
+	ASSERT(s.closed == 0);
 	ASSERT(s.send_iov_count == 0);
 	return 1;
 }
-

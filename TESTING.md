@@ -153,6 +153,11 @@ Partial send tests set `bytes_to_write` to a fraction of the total, verify
 `hive_session_want_write()` returns 1, then set `bytes_to_write = -1` and
 call `hive_session_send()` again to complete the send.
 
+Receive-side backpressure is separately tested: a full output queue causes
+`hive_session_recv()` to return the exact unconsumed boundary without invoking
+the transport callback. After the caller drains output, re-feeding that input
+resumes parsing.
+
 ### 2.5 What Gets Unit Tests
 
 Every module in `src/`:

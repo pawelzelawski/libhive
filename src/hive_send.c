@@ -29,8 +29,6 @@
 static int
 send_queue_reserve_iov(hive_session_t *s, int needed)
 {
-	int ret;
-
 	if (needed <= 0)
 		return HIVE_ERR_INVALID_ARG;
 	if ((uint32_t)needed > s->opt_max_send_iov)
@@ -38,14 +36,13 @@ send_queue_reserve_iov(hive_session_t *s, int needed)
 	if (s->send_iov_count + needed <= (int)s->opt_max_send_iov)
 		return HIVE_OK;
 
-	ret = hive_session_send(s);
-	if (ret != HIVE_OK)
-		return ret;
-	if (s->send_partial)
-		return HIVE_ERR_WOULDBLOCK;
-	if (s->send_iov_count + needed > (int)s->opt_max_send_iov)
-		return HIVE_ERR_NOMEM;
-	return HIVE_OK;
+	/*
+	 * Queue pressure is transport backpressure, not an invitation to perform
+	 * I/O here.  In particular, this helper is used while parsing received
+	 * frames; calling hive_session_send() from that path made recv() invoke
+	 * the transport callback (and potentially a DATA source callback).
+	 */
+	return HIVE_ERR_WOULDBLOCK;
 }
 
 void

@@ -1179,6 +1179,8 @@ hive_session_recv(hive_session_t *session, const uint8_t *data, size_t len)
 	if (session == NULL) {
 		return -1;
 	}
+	if (session->session_state == HIVE_SESSION_CLOSED)
+		return -1;
 	return frame_recv_process(session, data, len);
 }
 
