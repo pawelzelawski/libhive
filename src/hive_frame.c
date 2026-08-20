@@ -499,10 +499,14 @@ headers_open_new_stream(hive_session_t *s, uint32_t stream_id)
 	if (stream_id <= s->last_stream_id_remote)
 		return protocol_error(s);
 
-	if (s->peer_stream_open_count >= s->opt_max_concurrent_streams)
-		return protocol_error(s);
-	if (s->stream_open_count >= s->opt_max_concurrent_streams)
-		return protocol_error(s);
+	/* RFC 9113 §5.1.2: exceeding MAX_CONCURRENT_STREAMS is a
+	 * stream-scoped REFUSED_STREAM condition, not a connection error.  Keep
+	 * decoding the block to preserve HPACK synchronization. */
+	if (s->peer_stream_open_count >= s->opt_max_concurrent_streams ||
+	    s->stream_open_count >= s->opt_max_concurrent_streams) {
+		s->reassembly_stream_error_code = HIVE_H2_REFUSED_STREAM;
+		return 0;
+	}
 
 	ret = stream_open(s, stream_id, HIVE_STREAM_OPEN);
 	if (ret != HIVE_OK)
@@ -810,9 +814,10 @@ frame_recv_process(hive_session_t *s, const uint8_t *data, size_t len)
 				if (headers_open_new_stream(
 				        s, s->cur_frame.stream_id) != 0)
 					return -1;
-				s->reassembly_stream_error_code =
-				    headers_illegal_state_error(
-				        s, s->cur_frame.stream_id);
+				if (s->reassembly_stream_error_code == 0u)
+					s->reassembly_stream_error_code =
+					    headers_illegal_state_error(
+					        s, s->cur_frame.stream_id);
 			}
 
 			if (s->cur_frame.type == HIVE_FRAME_HEADERS &&

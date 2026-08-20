@@ -203,6 +203,8 @@ int test_goaway_two_phase(void);
 int test_goaway_recv_want_read_advisory(void);
 int test_goaway_recv_streams_closed(void);
 int test_client_full_request_response(void);
+int test_client_interim_then_final_response(void);
+int test_submit_outbound_validation_and_duplicate_final(void);
 int test_recv_backpressure_never_sends(void);
 int test_fatal_recv_stops_read_and_drains_goaway(void);
 
@@ -350,6 +352,8 @@ main(void)
 
 	/* Phase 8.5 - client role: full request-response */
 	RUN(client_full_request_response);
+	RUN(client_interim_then_final_response);
+	RUN(submit_outbound_validation_and_duplicate_final);
 	RUN(recv_backpressure_never_sends);
 	RUN(fatal_recv_stops_read_and_drains_goaway);
 

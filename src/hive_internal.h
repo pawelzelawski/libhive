@@ -103,6 +103,7 @@ typedef enum {
 
 /* Internal hive_stream_t::flags bits. */
 #define HIVE_STREAM_FLAG_HEADERS_SEEN 0x01u
+#define HIVE_STREAM_FLAG_FINAL_HEADERS_SENT 0x02u
 
 /*
  * Per-stream state object - pool-allocated from stream_slots[].

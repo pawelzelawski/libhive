@@ -115,6 +115,8 @@ int test_goaway_two_phase(void);
 int test_goaway_recv_want_read_advisory(void);
 int test_goaway_recv_streams_closed(void);
 int test_client_full_request_response(void);
+int test_client_interim_then_final_response(void);
+int test_submit_outbound_validation_and_duplicate_final(void);
 int test_recv_backpressure_never_sends(void);
 int test_fatal_recv_stops_read_and_drains_goaway(void);
 
@@ -3469,6 +3471,85 @@ test_client_full_request_response(void)
 
 	hive_session_free(client);
 	hive_session_free(server);
+	return 1;
+}
+
+int
+test_client_interim_then_final_response(void)
+{
+	static const uint8_t n_status[] = ":status";
+	static const uint8_t v_103[] = "103";
+	static const uint8_t v_200[] = "200";
+	hive_callbacks_t server_cb;
+	hive_callbacks_t client_cb;
+	roundtrip_server_ctx_t wire;
+	roundtrip_client_capture_t cap;
+	hive_session_t *server;
+	hive_session_t *client;
+	hive_nv_t interim;
+	hive_nv_t final;
+
+	memset(&server_cb, 0, sizeof(server_cb));
+	memset(&client_cb, 0, sizeof(client_cb));
+	memset(&wire, 0, sizeof(wire));
+	memset(&cap, 0, sizeof(cap));
+	server_cb.send = send_cb_roundtrip_collect;
+	server = hive_session_server_new(NULL, NULL, &server_cb, &wire);
+	ASSERT(server != NULL);
+	server->send_iov_count = 0;
+	server->send_buf_used = 0;
+	ASSERT(stream_open(server, 1u, HIVE_STREAM_HALF_CLOSED_REMOTE) == HIVE_OK);
+	interim = (hive_nv_t){n_status, v_103, sizeof(n_status) - 1u,
+	                       sizeof(v_103) - 1u, 0u};
+	final = (hive_nv_t){n_status, v_200, sizeof(n_status) - 1u,
+	                     sizeof(v_200) - 1u, 0u};
+	ASSERT(hive_submit_interim_response(server, 1u, &interim, 1u) == HIVE_OK);
+	ASSERT(hive_submit_response(server, 1u, &final, 1u, NULL) == HIVE_OK);
+	ASSERT(hive_session_send(server) == HIVE_OK);
+
+	client_cb.send = send_cb_full;
+	client_cb.on_begin_headers = on_roundtrip_begin_headers;
+	client_cb.on_header = on_roundtrip_header;
+	client_cb.on_headers_complete = on_roundtrip_headers_complete;
+	client = hive_session_client_new(NULL, NULL, &client_cb, &cap);
+	ASSERT(client != NULL);
+	client->send_iov_count = 0;
+	client->send_buf_used = 0;
+	client->recv_state = RECV_FRAME_HEADER;
+	client->preface_count = 0;
+	ASSERT(stream_open(client, 1u, HIVE_STREAM_HALF_CLOSED_LOCAL) == HIVE_OK);
+	ASSERT(hive_session_recv(client, wire.wire.bytes, wire.wire.len) ==
+	       (ssize_t)wire.wire.len);
+	ASSERT(cap.complete_count == 2);
+	ASSERT(client->closed == 0);
+	hive_session_free(client);
+	hive_session_free(server);
+	return 1;
+}
+
+int
+test_submit_outbound_validation_and_duplicate_final(void)
+{
+	static const uint8_t n_status[] = ":status";
+	static const uint8_t v_200[] = "200";
+	static const uint8_t n_bad[] = "Connection";
+	static const uint8_t v_bad[] = "close";
+	hive_session_t *s;
+	hive_nv_t good;
+	hive_nv_t bad;
+
+	s = new_server_send_session();
+	ASSERT(stream_open(s, 1u, HIVE_STREAM_HALF_CLOSED_REMOTE) == HIVE_OK);
+	bad = (hive_nv_t){n_bad, v_bad, sizeof(n_bad) - 1u,
+	                   sizeof(v_bad) - 1u, 0u};
+	ASSERT(hive_submit_response(s, 1u, &bad, 1u, NULL) == HIVE_ERR_INVALID_ARG);
+	good = (hive_nv_t){n_status, v_200, sizeof(n_status) - 1u,
+	                    sizeof(v_200) - 1u, 0u};
+	ASSERT(hive_submit_response(s, 1u, &good, 1u,
+	                            &(hive_data_source_t){NULL, NULL}) == HIVE_OK);
+	ASSERT(hive_submit_response(s, 1u, &good, 1u, NULL) ==
+	       HIVE_ERR_STREAM_CLOSED);
+	hive_session_free(s);
 	return 1;
 }
 

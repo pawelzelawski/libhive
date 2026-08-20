@@ -1338,17 +1338,93 @@ stream_close_local_on_end_stream(hive_session_t *session,
 }
 
 static int
-nv_contains_pseudo_header(const hive_nv_t *nva, size_t nvlen)
+nv_name_equal(const hive_nv_t *nv, const char *name)
 {
 	size_t i;
 
-	for (i = 0; i < nvlen; i++) {
-		if (nva[i].name_len > 0u && nva[i].name != NULL &&
-		    nva[i].name[0] == ':')
-			return 1;
+	for (i = 0; i < nv->name_len; i++) {
+		if (name[i] == '\0' || nv->name[i] != (uint8_t)name[i])
+			return 0;
 	}
+	return name[i] == '\0';
+}
 
-	return 0;
+static int
+nv_value_is_trailers(const hive_nv_t *nv)
+{
+	return nv->value_len == 8u &&
+	       memcmp(nv->value, "trailers", 8u) == 0;
+}
+
+static int
+nv_validate_http(const hive_nv_t *nva, size_t nvlen, int response, int trailers,
+                 int interim)
+{
+	uint8_t seen;
+	int pseudo_done;
+	int connect;
+	size_t i;
+
+	seen = 0u;
+	pseudo_done = 0;
+	connect = 0;
+	for (i = 0; i < nvlen; i++) {
+		const hive_nv_t *nv;
+		size_t j;
+		uint8_t bit;
+
+		nv = &nva[i];
+		if ((nv->name_len > 0u && nv->name == NULL) ||
+		    (nv->value_len > 0u && nv->value == NULL) || nv->name_len == 0u)
+			return HIVE_ERR_INVALID_ARG;
+		for (j = 0; j < nv->name_len; j++) {
+			if (nv->name[j] >= 'A' && nv->name[j] <= 'Z')
+				return HIVE_ERR_INVALID_ARG;
+		}
+		if (nv->name[0] == ':') {
+			if (trailers || pseudo_done)
+				return HIVE_ERR_INVALID_ARG;
+			if (nv_name_equal(nv, ":method")) bit = 0x01u;
+			else if (nv_name_equal(nv, ":scheme")) bit = 0x02u;
+			else if (nv_name_equal(nv, ":path")) bit = 0x04u;
+			else if (nv_name_equal(nv, ":status")) bit = 0x08u;
+			else if (nv_name_equal(nv, ":authority")) bit = 0x10u;
+			else return HIVE_ERR_INVALID_ARG;
+			if ((seen & bit) != 0u || (response && bit != 0x08u) ||
+			    (!response && bit == 0x08u))
+				return HIVE_ERR_INVALID_ARG;
+			if (bit == 0x01u && nv->value_len == 7u &&
+			    memcmp(nv->value, "CONNECT", 7u) == 0)
+				connect = 1;
+			if (bit == 0x04u && nv->value_len == 0u)
+				return HIVE_ERR_INVALID_ARG;
+			if (bit == 0x08u &&
+			    (nv->value_len != 3u || nv->value[0] < '0' ||
+			     nv->value[0] > '9' || nv->value[1] < '0' ||
+			     nv->value[1] > '9' || nv->value[2] < '0' ||
+			     nv->value[2] > '9' ||
+			     (interim && nv->value[0] != '1')))
+				return HIVE_ERR_INVALID_ARG;
+			seen |= bit;
+			continue;
+		}
+		pseudo_done = 1;
+		if (nv_name_equal(nv, "connection") || nv_name_equal(nv, "keep-alive") ||
+		    nv_name_equal(nv, "proxy-connection") || nv_name_equal(nv, "upgrade") ||
+		    nv_name_equal(nv, "transfer-encoding") ||
+		    (nv_name_equal(nv, "te") && !nv_value_is_trailers(nv)))
+			return HIVE_ERR_INVALID_ARG;
+	}
+	if (trailers)
+		return HIVE_OK;
+	if (response)
+		return seen == 0x08u ? HIVE_OK : HIVE_ERR_INVALID_ARG;
+	if ((seen & 0x01u) == 0u)
+		return HIVE_ERR_INVALID_ARG;
+	if (connect)
+		return ((seen & 0x10u) != 0u && (seen & 0x06u) == 0u) ? HIVE_OK :
+		       HIVE_ERR_INVALID_ARG;
+	return (seen & 0x06u) == 0x06u ? HIVE_OK : HIVE_ERR_INVALID_ARG;
 }
 
 static int
@@ -1378,45 +1454,22 @@ nv_has_interim_status(const hive_nv_t *nva, size_t nvlen)
 	return 0;
 }
 
-static int
-nv_has_push_required_pseudo(const hive_nv_t *nva, size_t nvlen)
+static uint32_t
+local_stream_open_count(const hive_session_t *session)
 {
-	static const uint8_t n_method[] = ":method";
-	static const uint8_t n_path[] = ":path";
-	static const uint8_t n_scheme[] = ":scheme";
-	static const uint8_t n_authority[] = ":authority";
-	int has_method;
-	int has_path;
-	int has_scheme;
-	int has_authority;
-	size_t i;
+	uint32_t count;
+	uint32_t i;
 
-	has_method = 0;
-	has_path = 0;
-	has_scheme = 0;
-	has_authority = 0;
+	count = 0u;
+	for (i = 0u; i < session->opt_max_concurrent_streams; i++) {
+		const hive_stream_t *stream;
 
-	for (i = 0; i < nvlen; i++) {
-		if (nva[i].name == NULL)
-			continue;
-		if (nva[i].name_len == sizeof(n_method) - 1u &&
-		    memcmp(nva[i].name, n_method, sizeof(n_method) - 1u) == 0)
-			has_method = 1;
-		else if (nva[i].name_len == sizeof(n_path) - 1u &&
-		         memcmp(nva[i].name, n_path, sizeof(n_path) - 1u) == 0)
-			has_path = 1;
-		else if (nva[i].name_len == sizeof(n_scheme) - 1u &&
-		         memcmp(nva[i].name, n_scheme, sizeof(n_scheme) - 1u) ==
-		             0)
-			has_scheme = 1;
-		else if (nva[i].name_len == sizeof(n_authority) - 1u &&
-		         memcmp(nva[i].name,
-		                n_authority,
-		                sizeof(n_authority) - 1u) == 0)
-			has_authority = 1;
+		stream = &session->stream_slots[i];
+		if (stream->stream_id != 0u &&
+		    !stream_is_peer_initiated(session, stream->stream_id))
+			count++;
 	}
-
-	return has_method && has_path && has_scheme && has_authority;
+	return count;
 }
 
 int
@@ -1432,7 +1485,12 @@ hive_submit_response(hive_session_t *session,
 
 	if (session == NULL)
 		return HIVE_ERR_INVALID_ARG;
+	if (session->session_state == HIVE_SESSION_CLOSED)
+		return HIVE_ERR_SESSION_CLOSED;
 	if (nva == NULL || nvlen == 0u)
+		return HIVE_ERR_INVALID_ARG;
+	if (session->opt_no_http_messaging == 0 &&
+	    nv_validate_http(nva, nvlen, 1, 0, 0) != HIVE_OK)
 		return HIVE_ERR_INVALID_ARG;
 
 	stream = stream_lookup(session, stream_id);
@@ -1441,6 +1499,8 @@ hive_submit_response(hive_session_t *session,
 	if (stream->state != HIVE_STREAM_OPEN &&
 	    stream->state != HIVE_STREAM_HALF_CLOSED_REMOTE &&
 	    stream->state != HIVE_STREAM_RESERVED_LOCAL)
+		return HIVE_ERR_STREAM_CLOSED;
+	if ((stream->flags & HIVE_STREAM_FLAG_FINAL_HEADERS_SENT) != 0u)
 		return HIVE_ERR_STREAM_CLOSED;
 
 	end_stream = (data_source == NULL) ? 1u : 0u;
@@ -1453,6 +1513,7 @@ hive_submit_response(hive_session_t *session,
 		stream->data_source = *data_source;
 	else
 		memset(&stream->data_source, 0, sizeof(stream->data_source));
+	stream->flags |= HIVE_STREAM_FLAG_FINAL_HEADERS_SENT;
 
 	if (stream->state == HIVE_STREAM_RESERVED_LOCAL) {
 		if (end_stream) {
@@ -1492,6 +1553,9 @@ hive_submit_trailers(hive_session_t *session,
 		return HIVE_ERR_SESSION_CLOSED;
 	if (nva == NULL || nvlen == 0u)
 		return HIVE_ERR_INVALID_ARG;
+	if (session->opt_no_http_messaging == 0 &&
+	    nv_validate_http(nva, nvlen, 0, 1, 0) != HIVE_OK)
+		return HIVE_ERR_INVALID_ARG;
 
 	stream = stream_lookup(session, stream_id);
 	if (stream == NULL)
@@ -1500,8 +1564,6 @@ hive_submit_trailers(hive_session_t *session,
 	    stream->state != HIVE_STREAM_HALF_CLOSED_REMOTE)
 		return HIVE_ERR_STREAM_CLOSED;
 	if (stream->data_source.read_callback != NULL)
-		return HIVE_ERR_INVALID_ARG;
-	if (nv_contains_pseudo_header(nva, nvlen))
 		return HIVE_ERR_INVALID_ARG;
 
 	ret = send_queue_append_headers(session, stream_id, nva, nvlen, 1u);
@@ -1524,6 +1586,9 @@ hive_submit_interim_response(hive_session_t *session,
 	if (session->session_state == HIVE_SESSION_CLOSED)
 		return HIVE_ERR_SESSION_CLOSED;
 	if (nva == NULL || nvlen == 0u)
+		return HIVE_ERR_INVALID_ARG;
+	if (session->opt_no_http_messaging == 0 &&
+	    nv_validate_http(nva, nvlen, 1, 0, 1) != HIVE_OK)
 		return HIVE_ERR_INVALID_ARG;
 
 	stream = stream_lookup(session, stream_id);
@@ -1558,7 +1623,8 @@ hive_submit_push_promise(hive_session_t *session,
 		return HIVE_ERR_INVALID_ARG;
 	if (nva == NULL || nvlen == 0u || promised_stream_id_out == NULL)
 		return HIVE_ERR_INVALID_ARG;
-	if (!nv_has_push_required_pseudo(nva, nvlen))
+	if (session->opt_no_http_messaging == 0 &&
+	    nv_validate_http(nva, nvlen, 0, 0, 0) != HIVE_OK)
 		return HIVE_ERR_INVALID_ARG;
 
 	carry = stream_lookup(session, stream_id);
@@ -1575,7 +1641,9 @@ hive_submit_push_promise(hive_session_t *session,
 	 */
 	if (session->remote_settings.enable_push == 0u)
 		return HIVE_ERR_PROTOCOL;
-	if (session->stream_open_count >= session->opt_max_concurrent_streams)
+	if (session->stream_open_count >= session->opt_max_concurrent_streams ||
+	    local_stream_open_count(session) >=
+	        session->remote_settings.max_concurrent_streams)
 		return HIVE_ERR_REFUSED_STREAM;
 
 	promised_stream_id = session->next_stream_id;
@@ -1626,8 +1694,11 @@ hive_submit_request(hive_session_t *session,
 		return HIVE_ERR_INVALID_ARG;
 	if (nva == NULL || nvlen == 0u || stream_id_out == NULL)
 		return HIVE_ERR_INVALID_ARG;
+	if (session->opt_no_http_messaging == 0 &&
+	    nv_validate_http(nva, nvlen, 0, 0, 0) != HIVE_OK)
+		return HIVE_ERR_INVALID_ARG;
 
-	if (session->stream_open_count >=
+	if (local_stream_open_count(session) >=
 	    session->remote_settings.max_concurrent_streams)
 		return HIVE_ERR_REFUSED_STREAM;
 

@@ -27,6 +27,49 @@
 #include "hive_send.h"
 
 static int
+hpack_table_clone(const hpack_table_t *src, const hive_mem_t *mem,
+                  hpack_table_t *dst)
+{
+	uint32_t i;
+	int ret;
+
+	ret = hpack_table_init(dst, mem, src->max_size);
+	if (ret != HIVE_OK)
+		return ret;
+	for (i = src->count; i > 0u; i--) {
+		const hpack_entry_t *entry;
+
+		entry = hpack_table_get(src, i - 1u);
+		ret = hpack_table_insert(dst,
+		                         mem,
+		                         HPACK_ENTRY_NAME(entry),
+		                         entry->name_len,
+		                         HPACK_ENTRY_VALUE(entry),
+		                         entry->value_len);
+		if (ret != HIVE_OK) {
+			hpack_table_free(dst, mem);
+			return ret;
+		}
+	}
+	dst->pending_max = src->pending_max;
+	dst->pending_min = src->pending_min;
+	dst->has_pending = src->has_pending;
+	return HIVE_OK;
+}
+
+static void
+hpack_table_commit(hpack_table_t *live, hpack_table_t *trial,
+                   const hive_mem_t *mem)
+{
+	hpack_table_t old;
+
+	old = *live;
+	*live = *trial;
+	memset(trial, 0, sizeof(*trial));
+	hpack_table_free(&old, mem);
+}
+
+static int
 send_queue_reserve_iov(hive_session_t *s, int needed)
 {
 	if (needed <= 0)
@@ -149,6 +192,7 @@ send_queue_append_headers(hive_session_t *s,
 	size_t encode_start;
 	size_t out_cap;
 	size_t encoded_len;
+	hpack_table_t trial;
 	int rc;
 	int ret;
 
@@ -177,15 +221,21 @@ send_queue_append_headers(hive_session_t *s,
 	if (out_cap > (size_t)s->opt_max_continuation_size)
 		out_cap = (size_t)s->opt_max_continuation_size;
 
-	ret = hpack_encode_block(&s->enc_table,
+	memset(&trial, 0, sizeof(trial));
+	ret = hpack_table_clone(&s->enc_table, &s->mem, &trial);
+	if (ret != HIVE_OK)
+		return ret;
+	ret = hpack_encode_block(&trial,
 	                         &s->mem,
 	                         nva,
 	                         nvlen,
 	                         s->send_buf + encode_start,
 	                         out_cap,
 	                         &encoded_len);
-	if (ret != HIVE_OK)
+	if (ret != HIVE_OK) {
+		hpack_table_free(&trial, &s->mem);
 		return ret;
+	}
 
 	if (encoded_len <= (size_t)max_frame) {
 		uint8_t flags;
@@ -204,6 +254,7 @@ send_queue_append_headers(hive_session_t *s,
 		s->send_iov[s->send_iov_count].iov_len = 9u + encoded_len;
 		s->send_iov_count++;
 		s->send_buf_used = encode_start + encoded_len;
+		hpack_table_commit(&s->enc_table, &trial, &s->mem);
 		return HIVE_OK;
 	} else {
 		size_t n_frames;
@@ -217,13 +268,17 @@ send_queue_append_headers(hive_session_t *s,
 		    (encoded_len + (size_t)max_frame - 1u) / (size_t)max_frame;
 		cont_hdr_area = encode_start + encoded_len;
 		cont_hdr_bytes = (n_frames - 1u) * 9u;
-		if (cont_hdr_area + cont_hdr_bytes > s->send_buf_cap)
+		if (cont_hdr_area + cont_hdr_bytes > s->send_buf_cap) {
+			hpack_table_free(&trial, &s->mem);
 			return HIVE_ERR_NOMEM;
+		}
 
 		needed_iov = n_frames * 2u;
 		if ((size_t)s->send_iov_count + needed_iov >
-		    (size_t)s->opt_max_send_iov)
+		    (size_t)s->opt_max_send_iov) {
+			hpack_table_free(&trial, &s->mem);
 			return HIVE_ERR_NOMEM;
+		}
 
 		pos = 0u;
 		frame_idx = 0u;
@@ -279,6 +334,7 @@ send_queue_append_headers(hive_session_t *s,
 
 		s->send_buf_used = cont_hdr_area + cont_hdr_bytes;
 	}
+	hpack_table_commit(&s->enc_table, &trial, &s->mem);
 
 	return HIVE_OK;
 }
@@ -296,6 +352,7 @@ send_queue_append_push_promise(hive_session_t *s,
 	size_t out_cap;
 	size_t block_len;
 	size_t payload_len;
+	hpack_table_t trial;
 	int rc;
 
 	if (s == NULL)
@@ -322,19 +379,27 @@ send_queue_append_push_promise(hive_session_t *s,
 	if (out_cap > (size_t)s->opt_max_continuation_size)
 		out_cap = (size_t)s->opt_max_continuation_size;
 
-	rc = hpack_encode_block(&s->enc_table,
+	memset(&trial, 0, sizeof(trial));
+	rc = hpack_table_clone(&s->enc_table, &s->mem, &trial);
+	if (rc != HIVE_OK)
+		return rc;
+	rc = hpack_encode_block(&trial,
 	                        &s->mem,
 	                        nva,
 	                        nvlen,
 	                        s->send_buf + block_start,
 	                        out_cap,
 	                        &block_len);
-	if (rc != HIVE_OK)
+	if (rc != HIVE_OK) {
+		hpack_table_free(&trial, &s->mem);
 		return rc;
+	}
 
 	payload_len = 4u + block_len;
-	if (payload_len > (size_t)max_frame)
+	if (payload_len > (size_t)max_frame) {
+		hpack_table_free(&trial, &s->mem);
 		return HIVE_ERR_NOMEM;
+	}
 
 	u32_write_be(s->send_buf + frame_offset + 9u,
 	             promised_stream_id & 0x7fffffffu);
@@ -348,6 +413,7 @@ send_queue_append_push_promise(hive_session_t *s,
 	s->send_iov[s->send_iov_count].iov_len = 9u + payload_len;
 	s->send_iov_count++;
 	s->send_buf_used = block_start + block_len;
+	hpack_table_commit(&s->enc_table, &trial, &s->mem);
 
 	return HIVE_OK;
 }

@@ -1675,6 +1675,7 @@ typedef struct {
 	uint8_t pseudo_seen;
 	int is_trailer_block;
 	int method_is_connect;
+	int response_is_informational;
 } hpack_http_state_t;
 
 #define HPACK_PSEUDO_METHOD 0x01u
@@ -1772,6 +1773,14 @@ hpack_te_value_is_trailers(const hive_buf_t *value)
 }
 
 static int
+hpack_status_is_informational(const hive_buf_t *value)
+{
+	return value->len == 3u && value->data[0] == '1' &&
+	       value->data[1] >= '0' && value->data[1] <= '9' &&
+	       value->data[2] >= '0' && value->data[2] <= '9';
+}
+
+static int
 hpack_validate_http_messaging(const hive_session_t *s,
                               hive_stream_t *stream,
                               hpack_http_state_t *http_state,
@@ -1820,6 +1829,9 @@ hpack_validate_http_messaging(const hive_session_t *s,
 			http_state->method_is_connect = 1;
 		if (pseudo_bit == HPACK_PSEUDO_PATH && value->len == 0)
 			return HIVE_ERR_PROTOCOL;
+		if (pseudo_bit == HPACK_PSEUDO_STATUS)
+			http_state->response_is_informational =
+			    hpack_status_is_informational(value);
 		http_state->pseudo_seen |= pseudo_bit;
 		return HIVE_OK;
 	}
@@ -1930,6 +1942,7 @@ hpack_decode_block(hive_session_t *s,
 	http_state.pseudo_done = 0;
 	http_state.pseudo_seen = 0;
 	http_state.method_is_connect = 0;
+	http_state.response_is_informational = 0;
 	http_state.is_trailer_block =
 	    stream != NULL &&
 	    (stream->flags & HIVE_STREAM_FLAG_HEADERS_SEEN) != 0;
@@ -2164,7 +2177,7 @@ hpack_decode_block(hive_session_t *s,
 		 */
 		return HIVE_ERR_PROTOCOL;
 
-	if (stream != NULL)
+	if (stream != NULL && !http_state.response_is_informational)
 		stream->flags |= HIVE_STREAM_FLAG_HEADERS_SEEN;
 
 	if (!suppress_callbacks && s->callbacks.on_headers_complete != NULL) {
